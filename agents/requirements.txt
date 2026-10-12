@@ -1,0 +1,4 @@
+# Agent-side only; the Lyquid is pure Rust (ldk git deps, no crates.io adds).
+# Keep this list tiny: requests is the only hard dep, openai-compat calls go
+# through plain /chat/completions POSTs already.
+requests>=2.31

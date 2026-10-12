@@ -1,0 +1,24 @@
+[package]
+name = "trustbridge"
+version = "0.1.0"
+edition = "2021"
+description = "Committee-attested fulfillment trust layer for A2A deals on Lyquor (CS5298 final project)"
+
+# Platform pin: the public ldk repo moves weekly (0.4 -> 0.7 in five weeks) and the
+# crates.io `lyquid-llm` / `lyquid-flow` entries are name placeholders (v0.0.0), so ALL
+# platform deps are git-pinned to the same tag. Do not upgrade without a team decision.
+[dependencies]
+lyquid = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+
+[dev-dependencies]
+lyquid-test = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+
+# rlib keeps `cargo test` working on the pure core (types/core modules) without a
+# wasm build; cdylib is what shaker deploys. SPIKE(W1): confirm the crate-type the
+# lyquid-template uses and mirror it exactly.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[profile.release]
+opt-level = "s"

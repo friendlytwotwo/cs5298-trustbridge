@@ -1,0 +1,12 @@
+# Rust
+target/
+*.wasm
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# secrets / local
+.env
+.env.*

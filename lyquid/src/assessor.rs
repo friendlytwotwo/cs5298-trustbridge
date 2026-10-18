@@ -22,6 +22,7 @@
 // logic is testable before the spike lands.
 
 use crate::types::AssessmentReport;
+use serde::Deserialize;
 
 pub struct DealBrief {
     pub buyer_profile_digest: String,
@@ -71,21 +72,33 @@ impl AssessmentModel for HeuristicModel {
     }
 }
 
+/// Wire contract mirror of the prompt schema (QUALIFICATION_SYSTEM above):
+/// exactly four fields. Missing field = error（与旧解析器 ok_or_else 同严），
+/// unknown fields ignored（与旧 split-scan 同宽，收严属阶段四评估）。
+/// risks 原样透传，不再伪造——与 agents/common/llm.py:73-82 的
+/// DEFAULT_ASSESSMENT_SCRIPT 保持 lockstep（四字段逐一对应）。
+#[derive(Deserialize)]
+struct RawAssessment {
+    qualification_score: u8,
+    risks: Vec<String>,
+    est_duration_ms: u64,
+    est_confidence: u8,
+}
+
 pub fn parse_report(raw: &str) -> Result<AssessmentReport, String> {
-    // Minimal hand parse to avoid a serde_json dependency in the WASM build
-    // until SPIKE(W1) decides the json crate story inside Lyquids.
-    // TODO(W2): replace with real JsonSchema-validated parse.
-    let get = |k: &str| raw
-        .split(&format!("\"{}\"", k))
-        .nth(1)
-        .and_then(|r| r.split(':').nth(1))
-        .and_then(|r| r.split(|c: char| !c.is_ascii_digit() && c != '-' || c == '"').next().map(|s| s.to_string()))
-        .ok_or_else(|| format!("missing field {}", k))?;
+    // serde_json contract parse replaces the hand split-scan (its E0277×4 and
+    // delimiter fragility) — until SPIKE(W1) decides the json crate story
+    // inside Lyquids, serde_json is now the explicit contract choice (same dep
+    // as the lib.rs getters).
+    // TODO(W2): real JsonSchema-validated parse — serde 字段集校验 ≠ schema
+    // 校验（区间/语义约束仍缺）。
+    let r: RawAssessment = serde_json::from_str(raw)
+        .map_err(|e| format!("assessment contract parse failed: {e}"))?;
     Ok(AssessmentReport {
-        qualification_score: get("qualification_score")?.parse().map_err(|e| format!("{}", e))?,
-        est_duration_ms: get("est_duration_ms")?.parse().map_err(|e| format!("{}", e))?,
-        est_confidence: get("est_confidence")?.parse().map_err(|e| format!("{}", e))?,
-        risks: vec!["parsed-in-heuristic-mode".to_string()],
+        qualification_score: r.qualification_score,
+        risks: r.risks,
+        est_duration_ms: r.est_duration_ms,
+        est_confidence: r.est_confidence,
     })
 }
 
@@ -126,5 +139,32 @@ mod tests {
         });
         assert!(p.contains("enforceable on-chain timeout"));
         assert!(p.contains("terms_sha256="));
+    }
+
+    #[test]
+    fn parse_report_rejects_malformed_json() {
+        assert!(parse_report("not json").is_err());
+        assert!(parse_report("").is_err());
+        assert!(parse_report("{\"qualification_score\":75,}").is_err());
+    }
+
+    #[test]
+    fn parse_report_rejects_missing_field() {
+        // est_confidence dropped from the four-field contract -> Err,
+        // same strictness as the old parser's ok_or_else.
+        let raw = r#"{"qualification_score":75,"risks":["x"],"est_duration_ms":60000}"#;
+        assert!(parse_report(raw).is_err());
+    }
+
+    #[test]
+    fn parse_report_passes_risks_through() {
+        // risks 透传（不再伪造 "parsed-in-heuristic-mode"）——钉死与
+        // agents/common/llm.py DEFAULT_ASSESSMENT_SCRIPT 的 lockstep。
+        let raw = r#"{"qualification_score":80,"risks":["heuristic-mode","regulatory"],"est_duration_ms":1000,"est_confidence":50}"#;
+        let r = parse_report(raw).unwrap();
+        assert_eq!(r.risks, vec!["heuristic-mode".to_string(), "regulatory".to_string()]);
+        assert_eq!(r.qualification_score, 80);
+        assert_eq!(r.est_duration_ms, 1000);
+        assert_eq!(r.est_confidence, 50);
     }
 }

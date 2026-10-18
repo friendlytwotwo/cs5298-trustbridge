@@ -81,3 +81,72 @@ pub fn members() -> Vec<AgentId> {
     // 不再调用它。
     vec!["node-1".into(), "node-2".into(), "node-3".into(), "node-4".into()]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Minimal well-formed Deal for shape tests. Pure types, no platform dep.
+    fn shape_deal(deliverable: Option<Digest>) -> Deal {
+        Deal {
+            id: "deal-1".into(),
+            buyer: "buyer".into(),
+            seller: "seller".into(),
+            broker: "broker".into(),
+            amount: 1_000,
+            fee_bps: 100,
+            terms_digest: "terms".into(),
+            acceptance_digest: "acceptance".into(),
+            est_duration_ms: 60_000,
+            est_confidence: 40,
+            timeout_slots: 300,
+            created_slot: 0,
+            funded_slot: Some(1),
+            state: DealState::Submitted,
+            deliverable_digest: deliverable,
+            committee_cert: None,
+            dispute_reason: None,
+        }
+    }
+
+    fn entry(seq: u64, from: &str, to: &str, payload: &str) -> EvidenceEntry {
+        EvidenceEntry {
+            seq,
+            from: from.into(),
+            to: to.into(),
+            payload_digest: payload.into(),
+            slot: seq,
+        }
+    }
+
+    #[test]
+    fn shape_accepts_acceptance_pair_plus_deliverable() {
+        // 卖家→买家条目 + 条目 payload == 已提交 deliverable_digest -> true。
+        let deal = shape_deal(Some("digest-1".into()));
+        let entries = vec![
+            entry(0, "buyer", "seller", "offer"),
+            entry(1, "seller", "buyer", "digest-1"),
+        ];
+        assert!(check_evidence_shape(&entries, &deal));
+    }
+
+    #[test]
+    fn shape_rejects_when_no_deliverable_submitted() {
+        // deal.deliverable_digest == None -> None 臂直接 false
+        //（committee.rs 的 `None => false`，即使证据链本身成形）。
+        let deal = shape_deal(None);
+        let entries = vec![entry(0, "seller", "buyer", "digest-1")];
+        assert!(!check_evidence_shape(&entries, &deal));
+    }
+
+    #[test]
+    fn shape_rejects_when_no_seller_to_buyer_entry() {
+        // 缺卖家→买家方向的条目（只有买家→卖家）-> has_acceptance 为 false。
+        let deal = shape_deal(Some("digest-1".into()));
+        let entries = vec![
+            entry(0, "buyer", "seller", "digest-1"), // 方向反了
+            entry(1, "buyer", "seller", "other"),
+        ];
+        assert!(!check_evidence_shape(&entries, &deal));
+    }
+}

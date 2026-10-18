@@ -801,6 +801,7 @@ dependencies = [
  "lyquid",
  "lyquid-llm",
  "lyquid-test",
+ "serde",
  "serde_json",
 ]
 

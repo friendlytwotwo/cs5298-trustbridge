@@ -79,7 +79,7 @@ pub struct CommitteeCert {
 /// One notarized message in a deal's communication trace. Append-only,
 /// sequence-enforced; `payload_digest` is computed client-side (agents hash
 /// canonical JSON) so the chain only stores and orders digests.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvidenceEntry {
     pub seq: u64,
     pub from: AgentId,

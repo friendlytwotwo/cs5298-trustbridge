@@ -363,7 +363,11 @@ pub fn apply_committee_verdict(ctx: Context, deal_id: DealId, cert: committee::C
     if !cert.signers.iter().any(|s| *s == caller) {
         return Err(lyquid_error("caller must be among the certificate signers"));
     }
-    let cert = cert.into_domain();
+    // 证据条目从 network 状态读出后传入（与 evidence_entries_json getter
+    // 同一读取路径）；本段只接线，evidence_root 仍为 committee.rs:47 的
+    // 空串占位——root 折叠契约替换属阶段3b，勿在此动。
+    let entries: Vec<EvidenceEntry> = evidence_log.get(&deal_id).cloned().unwrap_or_default();
+    let cert = cert.into_domain(&entries);
 
     // misconduct 计数单点在 core::apply_verdict（经 &mut misconduct 完成），
     // 平台层不得重复累加；终态同样由 core 从裁决映射，平台层不推断。
@@ -492,7 +496,7 @@ const TREASURY: &str = "treasury";
 /// `complete`, `claim_timeout`, `cancel`. Any NEW use of time must go
 /// through here; `due_deals(now)` is advisory-only (see its doc), and the
 /// future watcher must call this same single point (timeout.rs).
-fn current_slot() -> u64 {
+pub(crate) fn current_slot() -> u64 {
     // SPIKE(W1): replace with ctx-derived slot.
     0
 }

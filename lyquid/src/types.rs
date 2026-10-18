@@ -128,9 +128,12 @@ impl Deal {
     /// bit-for-bit identical to the plain form — the `.min` is a no-op there —
     /// and `to_seller + fee == amount` holds exactly because `to_seller` is an
     /// exact integer subtraction. For pathological `fee_bps > 10_000` the
-    /// `saturating_mul` prevents a u128 multiplication overflow and the
-    /// `.min(self.amount)` clamp pins `fee == amount`, so the subtraction can
-    /// never underflow and conservation still holds (defense layer; pinned by
+    /// `saturating_mul` prevents a u128 multiplication overflow; whenever the
+    /// product is NOT saturated, the `.min(self.amount)` clamp pins
+    /// `fee == amount`. In the saturated corner (amount near `u128::MAX`) the
+    /// clamp does not trigger and `fee == u128::MAX / 10_000 < amount`, but
+    /// `fee <= amount` holds unconditionally, so the subtraction can never
+    /// underflow and conservation still holds (defense layer; pinned by
     /// `split_never_underflows` in `core` tests).
     pub fn split(&self) -> (u128, u128) {
         let fee = (self.amount.saturating_mul(self.fee_bps as u128) / 10_000).min(self.amount);
@@ -153,8 +156,10 @@ impl Payout {
     }
     /// Settlement payout. Same clamped fee expression as `Deal::split` (see its
     /// doc): bit-for-bit identical for `fee_bps <= 10_000`; for `fee_bps >
-    /// 10_000` the clamp pins `fee == amount` so `to_seller` never underflows
-    /// and `total() == amount` always holds.
+    /// 10_000` with a non-saturated product the clamp pins `fee == amount`,
+    /// while in the saturated corner `fee == u128::MAX / 10_000 < amount` — in
+    /// both cases `fee <= amount` holds unconditionally, so `to_seller` never
+    /// underflows and `total() == amount` always holds.
     pub fn settle(amount: u128, fee_bps: u16) -> Self {
         let fee = (amount.saturating_mul(fee_bps as u128) / 10_000).min(amount);
         Payout {

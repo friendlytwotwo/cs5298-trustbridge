@@ -475,11 +475,14 @@ mod tests {
         let p = Payout::settle(5_000, u16::MAX);
         assert_eq!(p.total(), 5_000);
         assert_eq!((p.to_seller, p.fee_to_broker), (0, 5_000));
-        // Same for the saturating_mul path: amount * fee_bps overflows u128
-        // and must saturate before the clamp.
+        // Saturated path: amount * fee_bps overflows u128 and saturates to
+        // u128::MAX; then fee = u128::MAX / 10_000 < amount, so `.min` does
+        // NOT trigger here. No underflow and conservation still hold because
+        // fee <= amount holds unconditionally.
         let d = deal_with(u128::MAX, u16::MAX);
         let (to_seller, fee) = d.split();
-        assert_eq!((to_seller, fee), (0, u128::MAX));
+        let sat_fee = u128::MAX / 10_000;
+        assert_eq!((to_seller, fee), (u128::MAX - sat_fee, sat_fee));
         assert_eq!(to_seller + fee, u128::MAX);
     }
 

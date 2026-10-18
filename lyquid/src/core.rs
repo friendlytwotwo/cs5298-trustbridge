@@ -18,6 +18,12 @@ pub enum TransitionError {
     InsufficientCommittee { signers: usize, required: usize },
     NonMemberSigner(AgentId),
     InvalidSignerSet,
+    /// Deal creation was handed a broker fee above the 10_000 bps (100%) cap.
+    /// Safety note: within this crate nothing exhaustively matches
+    /// `TransitionError` and no `From<TransitionError>` exists — `lib.rs`
+    /// propagates every error with `?` — so adding a variant cannot break a
+    /// caller; the platform-layer bridge is stage-two (W2) work.
+    InvalidFeeBps { got: u16, max: u16 },
 }
 
 fn require_states(deal: &Deal, expected: &'static [DealState], names: &'static [&'static str]) -> Result<(), TransitionError> {
@@ -32,11 +38,22 @@ fn require_states(deal: &Deal, expected: &'static [DealState], names: &'static [
 
 /// Broker creates a deal from an accepted assessment. Timeout derives from the
 /// LLM estimate (`timeout_slots_from_estimate`), never hand-picked.
+///
+/// `fee_bps` is runtime-checked against the 100% cap: above it every
+/// settlement would underflow `amount - fee` (a checked release build would
+/// silently wrap the seller's share into an astronomic number). The other
+/// degenerate inputs stay `debug_assert`s on purpose: `timeout_slots == 0` is
+/// already clamped to `.max(1)` by the platform layer, and `amount == 0`
+/// cannot break conservation — platform-side input validation is stage-two
+/// (W2) work.
 pub fn create(
     spec: Deal,
 ) -> Result<Deal, TransitionError> {
     debug_assert_eq!(spec.state, DealState::Qualified);
     debug_assert!(spec.timeout_slots > 0, "timeout must come from an estimate");
+    if spec.fee_bps > 10_000 {
+        return Err(TransitionError::InvalidFeeBps { got: spec.fee_bps, max: 10_000 });
+    }
     Ok(spec)
 }
 
@@ -219,6 +236,14 @@ mod tests {
         }
     }
 
+    /// Parameterized factory for the fee/amount edge cases (F3/F4).
+    fn deal_with(amount: u128, fee_bps: u16) -> Deal {
+        let mut d = deal();
+        d.amount = amount;
+        d.fee_bps = fee_bps;
+        d
+    }
+
     #[test]
     fn happy_path_settles_with_fee_split_and_conservation() {
         let mut d = deal();
@@ -332,5 +357,60 @@ mod tests {
             60,
         );
         assert_eq!(due, vec!["d1".to_string()]);
+    }
+
+    // -- F3: fee cap validation + conservation under every rounding edge ----
+
+    #[test]
+    fn fee_bps_over_cap_rejected_at_create() {
+        assert!(matches!(
+            create(deal_with(1_000, 10_001)),
+            Err(TransitionError::InvalidFeeBps { got: 10_001, max: 10_000 })
+        ));
+        // Boundary: exactly at the 100% cap stays legal.
+        assert!(create(deal_with(1_000, 10_000)).is_ok());
+    }
+
+    #[test]
+    fn fee_rounding_edges_conservation() {
+        // Floor rounding itself never breaks conservation: to_seller is an
+        // exact subtraction, so to_seller + fee == amount for every legal cap.
+        for (amount, fee_bps) in [(1u128, 3333u16), (3, 3333), (7, 3333), (10_000, 1), (1, 200)] {
+            let d = deal_with(amount, fee_bps);
+            let (to_seller, fee) = d.split();
+            assert_eq!(to_seller + fee, amount, "split conservation for ({amount}, {fee_bps})");
+            let p = Payout::settle(amount, fee_bps);
+            assert_eq!(p.total(), amount, "settle conservation for ({amount}, {fee_bps})");
+            assert_eq!((p.to_seller, p.fee_to_broker), (to_seller, fee));
+        }
+        // Floor semantics pinned on concrete values, e.g. (3, 3333): fee=0.
+        assert_eq!(deal_with(3, 3333).split(), (3, 0));
+        assert_eq!(deal_with(1, 3333).split(), (1, 0));
+        assert_eq!(deal_with(7, 3333).split(), (5, 2));
+        assert_eq!(deal_with(10_000, 1).split(), (9_999, 1));
+        assert_eq!(
+            Payout::settle(3, 3333),
+            Payout { to_seller: 3, fee_to_broker: 0, refund_to_buyer: 0, slash_to_treasury: 0 }
+        );
+    }
+
+    #[test]
+    fn split_never_underflows() {
+        // Defense layer: even a hand-crafted Deal that bypasses create's
+        // runtime cap check (fee_bps = u16::MAX = 65_535) must not panic in
+        // debug nor wrap in release — the clamp pins fee == amount.
+        let d = deal_with(5_000, u16::MAX);
+        let (to_seller, fee) = d.split();
+        assert_eq!((to_seller, fee), (0, 5_000));
+        assert_eq!(to_seller + fee, d.amount);
+        let p = Payout::settle(5_000, u16::MAX);
+        assert_eq!(p.total(), 5_000);
+        assert_eq!((p.to_seller, p.fee_to_broker), (0, 5_000));
+        // Same for the saturating_mul path: amount * fee_bps overflows u128
+        // and must saturate before the clamp.
+        let d = deal_with(u128::MAX, u16::MAX);
+        let (to_seller, fee) = d.split();
+        assert_eq!((to_seller, fee), (0, u128::MAX));
+        assert_eq!(to_seller + fee, u128::MAX);
     }
 }

@@ -122,8 +122,18 @@ impl Deal {
     }
 
     /// Fee split charged on settlement. Conservation invariant checked in tests.
+    ///
+    /// `fee = floor(amount * fee_bps / 10_000)`. For every legal input
+    /// (`fee_bps <= 10_000`, enforced at `core::create`) this expression is
+    /// bit-for-bit identical to the plain form — the `.min` is a no-op there —
+    /// and `to_seller + fee == amount` holds exactly because `to_seller` is an
+    /// exact integer subtraction. For pathological `fee_bps > 10_000` the
+    /// `saturating_mul` prevents a u128 multiplication overflow and the
+    /// `.min(self.amount)` clamp pins `fee == amount`, so the subtraction can
+    /// never underflow and conservation still holds (defense layer; pinned by
+    /// `split_never_underflows` in `core` tests).
     pub fn split(&self) -> (u128, u128) {
-        let fee = self.amount * self.fee_bps as u128 / 10_000;
+        let fee = (self.amount.saturating_mul(self.fee_bps as u128) / 10_000).min(self.amount);
         (self.amount - fee, fee) // (to_seller, fee_to_broker)
     }
 }
@@ -141,8 +151,12 @@ impl Payout {
     pub fn full_refund(amount: u128) -> Self {
         Payout { to_seller: 0, fee_to_broker: 0, refund_to_buyer: amount, slash_to_treasury: 0 }
     }
+    /// Settlement payout. Same clamped fee expression as `Deal::split` (see its
+    /// doc): bit-for-bit identical for `fee_bps <= 10_000`; for `fee_bps >
+    /// 10_000` the clamp pins `fee == amount` so `to_seller` never underflows
+    /// and `total() == amount` always holds.
     pub fn settle(amount: u128, fee_bps: u16) -> Self {
-        let fee = amount * fee_bps as u128 / 10_000;
+        let fee = (amount.saturating_mul(fee_bps as u128) / 10_000).min(amount);
         Payout {
             to_seller: amount - fee,
             fee_to_broker: fee,

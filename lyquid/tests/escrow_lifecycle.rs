@@ -81,6 +81,71 @@ fn adversarial_forged_evidence_ends_in_refund_plus_flag() {
     assert_eq!(log.get("bob"), Some(&1)); // reputation hook fired
 }
 
+#[test]
+fn committee_fulfill_flow_book_conservation() {
+    // Committee-routed settlement (F12 blind spot: the three flows above only
+    // exercised BuyerConsent / timeout / verdict). Ledger effects mirror
+    // lib.rs apply_payout exactly.
+    let mut book: HashMap<String, u128> = HashMap::new();
+    let mut d = deal(1_000, 200);
+
+    // faucet + fund
+    *book.entry(d.buyer.clone()).or_insert(0) += 10_000;
+    core::fund(&mut d, 10).unwrap();
+    *book.get_mut(&d.buyer).unwrap() -= d.amount; // escrow debit
+
+    // seller delivers in time; a committee cert (not the buyer) settles it
+    core::submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+    let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+    let cert = CommitteeCert {
+        verdict: Verdict::Fulfilled,
+        signers: vec!["n1".into(), "n2".into(), "n3".into()],
+        evidence_root: core::evidence_root(&d),
+    };
+    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+    *book.entry(d.seller.clone()).or_insert(0) += p.to_seller;
+    *book.entry(d.broker.clone()).or_insert(0) += p.fee_to_broker;
+
+    assert_eq!(d.state, DealState::Settled);
+    assert!(d.committee_cert.is_some());
+    assert_eq!(p.refund_to_buyer, 0);
+    assert_eq!(book["bob"], 980);
+    assert_eq!(book["broker"], 20);
+    assert_eq!(book["alice"], 9_000);
+    assert_eq!(book.values().sum::<u128>(), 10_000); // whole book == faucet
+}
+
+#[test]
+fn committee_refund_flow_book_conservation() {
+    // Committee-routed refund through `complete`; doubles as the end-to-end
+    // F1 proof: a NotFulfilled verdict must land the deal in Refunded (the
+    // old code mislabelled it Settled), with the buyer made whole.
+    let mut book: HashMap<String, u128> = HashMap::new();
+    let mut d = deal(1_000, 200);
+
+    // faucet + fund
+    *book.entry(d.buyer.clone()).or_insert(0) += 1_000;
+    core::fund(&mut d, 10).unwrap();
+    *book.get_mut(&d.buyer).unwrap() -= 1_000;
+
+    // seller delivers; the committee rules the deliverable NotFulfilled
+    core::submit_deliverable(&mut d, "weak".into(), 20).unwrap();
+    let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+    let cert = CommitteeCert {
+        verdict: Verdict::NotFulfilled,
+        signers: vec!["n1".into(), "n2".into(), "n3".into()],
+        evidence_root: core::evidence_root(&d),
+    };
+    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+    *book.get_mut(&d.buyer).unwrap() += p.refund_to_buyer;
+
+    assert_eq!(p, Payout::full_refund(1_000));
+    assert_eq!(d.state, DealState::Refunded);
+    assert!(d.committee_cert.is_some());
+    assert_eq!(book["alice"], 1_000); // made whole
+    assert_eq!(book.values().sum::<u128>() - 1_000, 0); // nothing leaked to others
+}
+
 fn deal(amount: u128, fee_bps: u16) -> Deal {
     Deal {
         id: "d".into(),

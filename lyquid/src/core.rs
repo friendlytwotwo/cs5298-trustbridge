@@ -114,6 +114,13 @@ pub enum CompleteAuth {
 /// Settle a submitted deal. With `Committee`, also validates the certificate
 /// against the given committee set/threshold (caller supplies the on-chain
 /// config; this function stays pure and testable).
+///
+/// The terminal state mirrors the outcome (F1 fix; same mapping as
+/// `apply_verdict` and as the FakeNode mirror, `agents/common/rpc.py`
+/// `complete`/`apply_committee_verdict`): paying the seller settles
+/// (`Settled`), refunding the buyer refunds (`Refunded`). The old code marked
+/// every `complete` as `Settled`, mislabelling a Committee NotFulfilled/
+/// Malicious refund as a settlement.
 pub fn complete(deal: &mut Deal, now: u64, auth: &CompleteAuth, committee: Option<(&[AgentId], usize)>) -> Result<Payout, TransitionError> {
     require_states(deal, &[DealState::Submitted], &["Submitted"])?;
     let payout = match auth {
@@ -129,7 +136,13 @@ pub fn complete(deal: &mut Deal, now: u64, auth: &CompleteAuth, committee: Optio
         }
     };
     let _ = now;
-    deal.state = DealState::Settled;
+    deal.state = match auth {
+        CompleteAuth::BuyerConsent => DealState::Settled,
+        CompleteAuth::Committee(cert) => match cert.verdict {
+            Verdict::Fulfilled => DealState::Settled,
+            Verdict::NotFulfilled | Verdict::Malicious => DealState::Refunded,
+        },
+    };
     Ok(payout)
 }
 
@@ -175,7 +188,13 @@ pub fn apply_verdict(
             Payout::full_refund(deal.amount)
         }
     };
-    deal.state = if payout.to_seller > 0 { DealState::Settled } else { DealState::Refunded };
+    // F4 fix: map the terminal state from the verdict itself, like `complete`
+    // does. The old `to_seller > 0` heuristic mislabelled a Fulfilled verdict
+    // under `fee_bps == 10_000` (to_seller == 0, legal!) as `Refunded`.
+    deal.state = match cert.verdict {
+        Verdict::Fulfilled => DealState::Settled,
+        Verdict::NotFulfilled | Verdict::Malicious => DealState::Refunded,
+    };
     Ok(payout)
 }
 
@@ -452,5 +471,70 @@ mod tests {
         let p2 = cancel(&mut funded, 11).unwrap();
         assert_eq!(p2, Payout::full_refund(1_000));
         assert_eq!(funded.state, DealState::Refunded);
+    }
+
+    // -- F1/F4: the terminal state mirrors the verdict -----------------------
+
+    #[test]
+    fn complete_committee_fulfilled_settles() {
+        // Long-uncovered blind spot: the Committee branch of `complete`.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let cert = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: evidence_root(&d),
+        };
+        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+        assert_eq!(d.state, DealState::Settled);
+        assert_eq!((p.to_seller, p.fee_to_broker), (980, 20));
+        assert_eq!(p.total(), d.amount);
+        assert!(d.committee_cert.is_some()); // the ruling cert is stored
+    }
+
+    #[test]
+    fn complete_committee_notfulfilled_refunds_state_refunded() {
+        // F1 fix proof (fails on the old code, which set Settled
+        // unconditionally): a refunding Committee verdict through `complete`
+        // must land the deal in Refunded, not Settled.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let cert = CommitteeCert {
+            verdict: Verdict::NotFulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: evidence_root(&d),
+        };
+        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+        assert_eq!(p, Payout::full_refund(1_000));
+        assert_eq!(d.state, DealState::Refunded);
+        assert_eq!(p.total(), d.amount); // conservation
+        assert!(d.committee_cert.is_some());
+    }
+
+    #[test]
+    fn verdict_fulfilled_full_fee_still_settled() {
+        // F4 fix proof (fails on the old `to_seller > 0` heuristic):
+        // fee_bps == 10_000 is legal (create accepts <= 10_000), so a
+        // Fulfilled verdict pays to_seller == 0 — and must still settle.
+        let mut d = deal_with(1_000, 10_000);
+        fund(&mut d, 10).unwrap();
+        submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+        open_dispute(&mut d, "r".into()).unwrap();
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let cert = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: evidence_root(&d),
+        };
+        let mut log = MisconductLog::new();
+        let p = apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+        assert_eq!(d.state, DealState::Settled);
+        assert_eq!(p.to_seller, 0);
+        assert_eq!(p.fee_to_broker, 1_000);
+        assert_eq!(p.total(), d.amount); // conservation
     }
 }

@@ -94,6 +94,20 @@ pub fn cancel(deal: &mut Deal, now: u64) -> Result<Payout, TransitionError> {
 /// Seller submits the deliverable digest. Legal until the deadline. NOTE:
 /// after this point automatic refund is impossible by construction — money
 /// moves only via `complete` or a committee verdict.
+///
+/// Boundary semantics (intentional, pinned by
+/// `deadline_boundary_double_closed_and_race_resolved` and mirrored by the
+/// FakeNode, `agents/common/rpc.py`: `slot <= dl` here, `slot >= dl` in
+/// `claim_timeout`): submission is legal iff `now <= deadline` and the
+/// timeout claim iff `now >= deadline`, so at `now == deadline` BOTH are
+/// legal — the boundary is double-closed by design. This is race-safe: the
+/// two transitions start from the same state (`Funded`) but are mutually
+/// exclusive once one lands, so for two same-slot transactions either
+/// ordering resolves without a double payout — submit first: the deal is
+/// `Submitted`, the claim gets `WrongState`; claim first: the deal is
+/// terminal (`Refunded`), the submit gets `Terminal`. Terminal closure plus
+/// state disjointness means no double-payout ordering exists (the model
+/// check in `tests/modelcheck_refund.rs` enumerates these orderings).
 pub fn submit_deliverable(deal: &mut Deal, digest: Digest, now: u64) -> Result<(), TransitionError> {
     require_states(deal, &[DealState::Funded], &["Funded"])?;
     let deadline = deal.deadline_slot().ok_or(TransitionError::NotFundedYet)?;
@@ -149,6 +163,10 @@ pub fn complete(deal: &mut Deal, now: u64, auth: &CompleteAuth, committee: Optio
 /// Permissionless timeout refund ("off-chain trigger; on-chain guard": a
 /// watcher submits, this guard re-derives everything from consensus state).
 /// Only from `Funded` — see the state-machine doc on the race-class kill.
+///
+/// Boundary semantics: legal iff `now >= deadline` — the double-closed twin
+/// of `submit_deliverable`'s `now <= deadline` (at `now == deadline` both are
+/// legal on purpose); see the race-safety argument there.
 pub fn claim_timeout(deal: &mut Deal, now: u64) -> Result<Payout, TransitionError> {
     require_states(deal, &[DealState::Funded], &["Funded"])?;
     let deadline = deal.deadline_slot().ok_or(TransitionError::NotFundedYet)?;
@@ -536,5 +554,36 @@ mod tests {
         assert_eq!(p.to_seller, 0);
         assert_eq!(p.fee_to_broker, 1_000);
         assert_eq!(p.total(), d.amount); // conservation
+    }
+
+    // -- F5: the deadline boundary is double-closed by design, and any same-
+    //    slot race between submit and claim resolves without double payout --
+
+    #[test]
+    fn deadline_boundary_double_closed_and_race_resolved() {
+        // deadline = funded(10) + timeout(40) = 50.
+        // (1) submit AT the boundary succeeds — never covered before.
+        let mut submitted = deal();
+        fund(&mut submitted, 10).unwrap();
+        submit_deliverable(&mut submitted, "deliv".into(), 50).unwrap();
+        assert_eq!(submitted.state, DealState::Submitted);
+        // (3) ordering A resolves safely: submit first -> the claim bounces.
+        assert!(matches!(
+            claim_timeout(&mut submitted, 50),
+            Err(TransitionError::WrongState { .. })
+        ));
+
+        // (2) claim AT the boundary succeeds (echoes the existing
+        // timeout_refunds_only_after_deadline_and_only_from_funded).
+        let mut claimed = deal();
+        fund(&mut claimed, 10).unwrap();
+        let p = claim_timeout(&mut claimed, 50).unwrap();
+        assert_eq!(p, Payout::full_refund(1_000));
+        assert_eq!(claimed.state, DealState::Refunded);
+        // (4) ordering B resolves safely: claim first -> the submit bounces.
+        assert!(matches!(
+            submit_deliverable(&mut claimed, "late".into(), 50),
+            Err(TransitionError::Terminal)
+        ));
     }
 }

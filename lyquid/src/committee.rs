@@ -52,6 +52,10 @@ impl CommitteeCertWire {
 /// Instance-side member check: does the evidence log satisfy the acceptance
 /// criteria? Pure digest-shape checks here; the LLM-assisted semantic check
 /// lives in assessor.rs (keep model inference OUT of consensus path).
+///
+/// 归属可信性（仲裁#3 联动）：`notarize` 的 from==caller 自署名强制在 lib.rs
+/// 执行（`require`/`caller_agent` 体系），本函数的 `e.from == deal.seller`
+/// 判定因此是可信的真归属，伪造 acceptance 条目无法通过共识入口。
 pub fn check_evidence_shape(entries: &[EvidenceEntry], deal: &Deal) -> bool {
     // Minimum admissible trace: an offer/acceptance pair and a deliverable
     // digest matching what was submitted on-chain.
@@ -70,5 +74,10 @@ pub fn set_members(_members: Vec<AgentId>) {
 
 pub fn members() -> Vec<AgentId> {
     // TODO(W2): read from network state; placeholder = 4-node localnet ids.
+    //
+    // 接线说明（阶段二）：network 状态（lib.rs `committee_members`，由
+    // `committee_config` 写入）是校验权威源；本 shim 仅服务 instance 侧
+    // 占位，lib.rs 的 `apply_committee_verdict` 已改读 network 状态，
+    // 不再调用它。
     vec!["node-1".into(), "node-2".into(), "node-3".into(), "node-4".into()]
 }

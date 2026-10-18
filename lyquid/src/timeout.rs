@@ -26,6 +26,8 @@ use crate::types::DealId;
 // TODO(W2): wire to the real instance-call + cross-call surface:
 //   let due = call!(self, due_deals(now))?;
 //   for id in due { call!(self, claim_timeout(id))?; }
+// 接线说明（阶段二）：落地时 `current_slot` 必须取自 lib.rs 的同名单点
+// 函数，不得另开时间源（G5 时间单点收敛；`due_deals(now)` 仅 advisory）。
 pub fn watcher_step(current_slot: u64) -> Vec<DealId> {
     // Placeholder: real body calls the `due_deals` network fn then submits.
     // Pure scan logic itself is already tested in core::due_for_timeout.

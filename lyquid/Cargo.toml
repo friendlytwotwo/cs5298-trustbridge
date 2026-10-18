@@ -10,6 +10,11 @@ description = "Committee-attested fulfillment trust layer for A2A deals on Lyquo
 [dependencies]
 lyquid = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
 lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+# Re-export declaration, not a new third-party dep: serde_json 1.0.154 is
+# already the locked transitive dependency of the git-pinned ldk crates
+# (Cargo.lock). Version strategy: caret "1" only — never bump past what the
+# platform pins pull in; revisit the wasm/json story at W1 (assessor.rs:75).
+serde_json = "1"
 
 [dev-dependencies]
 lyquid-test = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }

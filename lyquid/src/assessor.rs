@@ -91,6 +91,8 @@ pub fn parse_report(raw: &str) -> Result<AssessmentReport, String> {
 
 /// Instance entry point: assess a brief and return the report. The CALLER
 /// (agent-broker) then submits `create_deal` — the two-step commit.
+/// 接线说明（阶段二）：调用方（agent-broker）提交 `create_deal` 时受 lib.rs
+/// `require(Access::Broker)` 守卫——两步提交的第二步在平台层有权限门。
 pub fn assess<M: AssessmentModel>(model: &M, brief: &DealBrief) -> Result<AssessmentReport, String> {
     let raw = model.complete_json(&build_request(brief))?;
     parse_report(&raw)

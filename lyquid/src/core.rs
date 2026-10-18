@@ -220,6 +220,16 @@ pub fn apply_verdict(
 /// Demo trust model: distinct known members, |signers| >= threshold.
 /// Production: replace with oracle certified-call verification
 /// (`ctx.cert.signers`, `propose_and_certify`) — see committee.rs.
+///
+/// Placeholder contract (stage-three tripwire): `evidence_root(deal)` is
+/// currently the empty string, so a certificate passes the evidence check
+/// **only** when it carries `evidence_root == ""`. When W3 replaces the
+/// placeholder with the real fold, update the pinned tests in the same
+/// change: `missing_cert_paths_pinned` here and the `String::new()` in
+/// `tests/modelcheck_refund.rs`. The evidence-mismatch path below reuses
+/// `MissingCert` (same variant as "complete with Committee auth but no
+/// committee supplied") on purpose; splitting a dedicated `EvidenceMismatch`
+/// out is TODO(W3) — do not "fix" one path without the other.
 pub fn validate_cert(cert: &CommitteeCert, members: &[AgentId], threshold: usize, deal: &Deal) -> Result<(), TransitionError> {
     let mut seen = std::collections::HashSet::new();
     for s in &cert.signers {
@@ -244,6 +254,13 @@ pub fn validate_cert(cert: &CommitteeCert, members: &[AgentId], threshold: usize
 /// computes the same root from network state before applying a verdict.
 /// Simple order-preserving fold (not a merkle tree) — adequate for the demo,
 /// documented as such in the report.
+///
+/// Placeholder contract: this ALWAYS returns the empty string until W3.
+/// `validate_cert` requires a certificate's `evidence_root` to equal it, so
+/// empty-string roots are the only valid ones today (pinned by
+/// `missing_cert_paths_pinned` and by the `String::new()` in
+/// `tests/modelcheck_refund.rs`). Replacing this with the real fold
+/// (TODO(W3)) must update those pinned tests in the same change.
 pub fn evidence_root(deal: &Deal) -> Digest {
     // Placeholder fold: in lib.rs this iterates the actual evidence entries.
     // Kept here so `validate_cert` has a pure definition to check against;
@@ -585,5 +602,41 @@ mod tests {
             submit_deliverable(&mut claimed, "late".into(), 50),
             Err(TransitionError::Terminal)
         ));
+    }
+
+    // -- F6: both MissingCert paths are pinned (placeholder era; W3 splits
+    //    the evidence-mismatch variant out — see validate_cert docs) --------
+
+    #[test]
+    fn missing_cert_paths_pinned() {
+        // Path (a): Committee auth but no committee supplied to `complete`.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+        let cert = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: String::new(), // placeholder contract: must be ""
+        };
+        assert!(matches!(
+            complete(&mut d, 30, &CompleteAuth::Committee(cert.clone()), None),
+            Err(TransitionError::MissingCert)
+        ));
+        // The failed call must not have touched the deal; it is still
+        // Submitted and ready for the next attempt below.
+        assert_eq!(d.state, DealState::Submitted);
+        assert!(d.committee_cert.is_none());
+
+        // Path (b): evidence-root mismatch reuses MissingCert until W3
+        // introduces EvidenceMismatch. The placeholder contract pins
+        // evidence_root(deal) == "", so a non-empty root must fail.
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let mismatch = CommitteeCert { evidence_root: "nonempty".into(), ..cert };
+        assert!(matches!(
+            complete(&mut d, 30, &CompleteAuth::Committee(mismatch), Some((&members, 3))),
+            Err(TransitionError::MissingCert)
+        ));
+        assert_eq!(d.state, DealState::Submitted);
+        assert!(d.committee_cert.is_none());
     }
 }

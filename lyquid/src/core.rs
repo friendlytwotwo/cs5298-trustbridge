@@ -639,4 +639,126 @@ mod tests {
         assert_eq!(d.state, DealState::Submitted);
         assert!(d.committee_cert.is_none());
     }
+
+    // -- F7/F8/F9/F10: blind-spot coverage (pure additions) ------------------
+
+    #[test]
+    fn cert_non_member_and_duplicate_signer_rejected() {
+        // F7: both cert-validation paths were untested (only
+        // InsufficientCommittee was). Both certs below carry a FULL-threshold
+        // signer set, proving the membership/duplication checks fire BEFORE
+        // the threshold check.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
+        open_dispute(&mut d, "r".into()).unwrap();
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let mut log = MisconductLog::new();
+
+        let non_member = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "outsider".into()], // 3 >= threshold 3
+            evidence_root: evidence_root(&d),
+        };
+        assert!(matches!(
+            apply_verdict(&mut d, non_member, &members, 3, &mut log),
+            Err(TransitionError::NonMemberSigner(s)) if s == "outsider"
+        ));
+
+        let duplicate = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n2".into()], // 3 >= threshold 3
+            evidence_root: evidence_root(&d),
+        };
+        assert!(matches!(
+            apply_verdict(&mut d, duplicate, &members, 3, &mut log),
+            Err(TransitionError::InvalidSignerSet)
+        ));
+        // Both rejections happened before any mutation.
+        assert_eq!(d.state, DealState::Disputed);
+        assert!(d.committee_cert.is_none());
+    }
+
+    #[test]
+    fn disputed_rejects_all_money_moves() {
+        // F8: from Disputed, every transition except apply_verdict (covered
+        // elsewhere) must be rejected with WrongState — including a second
+        // dispute.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        open_dispute(&mut d, "r".into()).unwrap();
+        assert_eq!(d.state, DealState::Disputed);
+
+        assert!(matches!(fund(&mut d, 11), Err(TransitionError::WrongState { .. })));
+        assert!(matches!(
+            submit_deliverable(&mut d, "x".into(), 12),
+            Err(TransitionError::WrongState { .. })
+        ));
+        assert!(matches!(cancel(&mut d, 13), Err(TransitionError::WrongState { .. })));
+        assert!(matches!(claim_timeout(&mut d, 60), Err(TransitionError::WrongState { .. })));
+        assert!(matches!(
+            complete(&mut d, 14, &CompleteAuth::BuyerConsent, None),
+            Err(TransitionError::WrongState { .. })
+        ));
+        assert!(matches!(open_dispute(&mut d, "again".into()), Err(TransitionError::WrongState { .. })));
+        assert_eq!(d.state, DealState::Disputed); // nothing moved
+    }
+
+    #[test]
+    fn terminal_states_reject_everything() {
+        // F9: exhaustive terminal closure — Settled and Refunded x all seven
+        // transition functions, every one Terminal.
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let cert = || CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: String::new(),
+        };
+        for terminal in [DealState::Settled, DealState::Refunded] {
+            let mut d = deal();
+            d.state = terminal;
+            assert!(matches!(fund(&mut d, 99), Err(TransitionError::Terminal)));
+            assert!(matches!(
+                submit_deliverable(&mut d, "x".into(), 99),
+                Err(TransitionError::Terminal)
+            ));
+            assert!(matches!(cancel(&mut d, 99), Err(TransitionError::Terminal)));
+            assert!(matches!(claim_timeout(&mut d, 99), Err(TransitionError::Terminal)));
+            assert!(matches!(
+                complete(&mut d, 99, &CompleteAuth::BuyerConsent, None),
+                Err(TransitionError::Terminal)
+            ));
+            assert!(matches!(open_dispute(&mut d, "r".into()), Err(TransitionError::Terminal)));
+            let mut log = MisconductLog::new();
+            assert!(matches!(
+                apply_verdict(&mut d, cert(), &members, 3, &mut log),
+                Err(TransitionError::Terminal)
+            ));
+        }
+    }
+
+    #[test]
+    fn dispute_from_funded_then_notfulfilled_refunds_early() {
+        // F10 pinned by design: a buyer may dispute straight from Funded —
+        // freezing the funds for arbitration without waiting out the timeout
+        // (mirrored by the FakeNode) — and a NotFulfilled verdict then refunds
+        // in full.
+        let mut d = deal();
+        fund(&mut d, 10).unwrap();
+        assert!(d.deliverable_digest.is_none()); // no evidence yet; dispute still legal
+        open_dispute(&mut d, "seller-ghosted".into()).unwrap();
+        assert_eq!(d.state, DealState::Disputed);
+
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let cert = CommitteeCert {
+            verdict: Verdict::NotFulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: evidence_root(&d),
+        };
+        let mut log = MisconductLog::new();
+        let p = apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+        assert_eq!(p, Payout::full_refund(1_000));
+        assert_eq!(d.state, DealState::Refunded);
+        assert_eq!(p.total(), d.amount); // conservation
+    }
 }

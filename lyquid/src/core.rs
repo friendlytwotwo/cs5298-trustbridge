@@ -66,12 +66,27 @@ pub fn fund(deal: &mut Deal, now: u64) -> Result<(), TransitionError> {
 }
 
 /// Buyer may cancel while no evidence exists (same guard class as timeout).
+///
+/// Conservation invariant, stated precisely: summed over a deal's whole life,
+/// total payouts are **at most** the escrowed amount, and any single payout
+/// satisfies `p.total() == deal.amount` **iff** the deal ever reached
+/// `Funded` — money can only leave escrow that was actually posted. Hence a
+/// cancel from `Qualified` (nothing escrowed yet) returns the all-zero
+/// payout; paying `full_refund` there would mint tokens. This mirrors the
+/// FakeNode reference implementation (`agents/common/rpc.py`, `cancel`:
+/// credits the buyer only `if d.state == "Funded"`). The state still moves to
+/// `Refunded` so an unfunded deal can be aborted, and the platform caller is
+/// unchanged: `apply_payout` is a no-op on a zero payout. `now` is kept only
+/// for API symmetry with the other transitions (a Qualified deal has no
+/// deadline, so time plays no role here).
 pub fn cancel(deal: &mut Deal, now: u64) -> Result<Payout, TransitionError> {
     require_states(deal, &[DealState::Qualified, DealState::Funded], &["Qualified", "Funded"])?;
-    let payout = Payout::full_refund(deal.amount);
-    if deal.funded_slot.is_some() {
-        let _ = now; // refund is immediate; time only matters for auto-timeout
-    }
+    let payout = if deal.funded_slot.is_some() {
+        Payout::full_refund(deal.amount) // escrow was posted: refund it in full
+    } else {
+        Payout { to_seller: 0, fee_to_broker: 0, refund_to_buyer: 0, slash_to_treasury: 0 }
+    };
+    let _ = now; // API symmetry only; see doc above
     deal.state = DealState::Refunded;
     Ok(payout)
 }
@@ -412,5 +427,30 @@ mod tests {
         let (to_seller, fee) = d.split();
         assert_eq!((to_seller, fee), (0, u128::MAX));
         assert_eq!(to_seller + fee, u128::MAX);
+    }
+
+    // -- F2: cancelling an unfunded deal must not mint a refund -------------
+
+    #[test]
+    fn cancel_from_qualified_pays_nothing() {
+        // Before the fix, cancelling from Qualified returned
+        // Payout::full_refund(amount) even though the buyer never escrowed
+        // anything — the platform layer would have credited tokens out of
+        // thin air (lib.rs cancel -> apply_payout).
+        let mut d = deal();
+        let p = cancel(&mut d, 5).unwrap();
+        assert_eq!(
+            p,
+            Payout { to_seller: 0, fee_to_broker: 0, refund_to_buyer: 0, slash_to_treasury: 0 }
+        );
+        assert_eq!(p.refund_to_buyer, 0);
+        assert_eq!(p.total(), 0);
+        assert_eq!(d.state, DealState::Refunded); // the abort path still closes the deal
+        // Funded cancel keeps its original behaviour: full refund (pinned).
+        let mut funded = deal();
+        fund(&mut funded, 10).unwrap();
+        let p2 = cancel(&mut funded, 11).unwrap();
+        assert_eq!(p2, Payout::full_refund(1_000));
+        assert_eq!(funded.state, DealState::Refunded);
     }
 }

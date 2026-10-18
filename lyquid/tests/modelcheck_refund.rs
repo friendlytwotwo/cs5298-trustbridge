@@ -58,6 +58,7 @@ enum Step {
     Cancel,
     Dispute,
     Verdict(Verdict),
+    Complete,             // buyer-consent settlement; legal from Submitted only
 }
 
 fn run(steps: &[Step]) -> (u128, usize, Option<DealState>) {
@@ -74,6 +75,7 @@ fn run(steps: &[Step]) -> (u128, usize, Option<DealState>) {
             Step::Cancel => core::cancel(&mut d, 60).map(|p| p.total()),
             Step::Dispute => core::open_dispute(&mut d, "r".into()).map(|_| 0),
             Step::Verdict(v) => core::apply_verdict(&mut d, cert(v.clone()), &m, 3, &mut log).map(|p| p.total()),
+            Step::Complete => core::complete(&mut d, 61, &CompleteAuth::BuyerConsent, None).map(|p| p.total()),
         };
         if let Ok(amount) = r {
             if amount > 0 {
@@ -140,6 +142,42 @@ fn all_orderings_preserve_invariants() {
         full.extend(o.iter().cloned());
         if !check(&full, "late-submit") {
             violations += 1;
+        }
+    }
+    assert_eq!(violations, 0, "refund rule violations found — see stderr");
+}
+
+/// F11: the consent (`complete`) path joins the exhaustive enumeration, so
+/// I2 "at most one money-moving transition" is checked with the consent and
+/// verdict payout routes coexisting. Six post-fund events -> 720 orderings,
+/// x {Fulfilled, NotFulfilled} verdict variants = 1440 runs. `Complete` only
+/// succeeds from `Submitted`; earlier attempts fail with no effect, so the
+/// enumeration also covers the premature-complete branch. Existing test and
+/// the run/check/permutations machinery are reused unchanged.
+#[test]
+fn all_orderings_with_complete_preserve_invariants() {
+    let mut violations = 0;
+    for verdict in [Verdict::Fulfilled, Verdict::NotFulfilled] {
+        let mut orders = Vec::new();
+        permutations(
+            vec![
+                Step::Submit(45),       // in-time evidence (deadline = 50)
+                Step::ClaimTimeout(60), // past deadline
+                Step::Cancel,
+                Step::Dispute,
+                Step::Verdict(verdict),
+                Step::Complete,
+            ],
+            6,
+            &mut orders,
+        );
+        assert_eq!(orders.len(), 720);
+        for o in &orders {
+            let mut full = vec![Step::Fund];
+            full.extend(o.iter().cloned());
+            if !check(&full, "with-complete") {
+                violations += 1;
+            }
         }
     }
     assert_eq!(violations, 0, "refund rule violations found — see stderr");

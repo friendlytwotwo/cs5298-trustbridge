@@ -73,12 +73,14 @@ pub struct CommitteeCert {
     /// Distinct committee member ids that signed this verdict.
     pub signers: Vec<AgentId>,
     /// Merkle/root digest over the evidence entries the verdict was based on.
+    /// 阶段3b：= core::evidence_root 对条目切片的 FNV-1a 链式折叠（规范与向量见该函数 doc；非密码学，demo 定位，W4 升级 sha256/merkle）。
     pub evidence_root: Digest,
 }
 
 /// One notarized message in a deal's communication trace. Append-only,
 /// sequence-enforced; `payload_digest` is computed client-side (agents hash
 /// canonical JSON) so the chain only stores and orders digests.
+/// 条目按切片序（=追加序）进入 core::evidence_root 的根折叠。
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct EvidenceEntry {
     pub seq: u64,

@@ -135,13 +135,13 @@ pub enum CompleteAuth {
 /// (`Settled`), refunding the buyer refunds (`Refunded`). The old code marked
 /// every `complete` as `Settled`, mislabelling a Committee NotFulfilled/
 /// Malicious refund as a settlement.
-pub fn complete(deal: &mut Deal, now: u64, auth: &CompleteAuth, committee: Option<(&[AgentId], usize)>) -> Result<Payout, TransitionError> {
+pub fn complete(deal: &mut Deal, now: u64, auth: &CompleteAuth, committee: Option<(&[AgentId], usize)>, entries: &[EvidenceEntry]) -> Result<Payout, TransitionError> {
     require_states(deal, &[DealState::Submitted], &["Submitted"])?;
     let payout = match auth {
         CompleteAuth::BuyerConsent => Payout::settle(deal.amount, deal.fee_bps),
         CompleteAuth::Committee(cert) => {
             let (members, threshold) = committee.ok_or(TransitionError::MissingCert)?;
-            validate_cert(cert, members, threshold, deal)?;
+            validate_cert(cert, members, threshold, entries)?;
             deal.committee_cert = Some(cert.clone());
             match cert.verdict {
                 Verdict::Fulfilled => Payout::settle(deal.amount, deal.fee_bps),
@@ -193,10 +193,11 @@ pub fn apply_verdict(
     cert: CommitteeCert,
     committee_members: &[AgentId],
     threshold: usize,
+    entries: &[EvidenceEntry],
     misconduct: &mut MisconductLog,
 ) -> Result<Payout, TransitionError> {
     require_states(deal, &[DealState::Disputed], &["Disputed"])?;
-    validate_cert(&cert, committee_members, threshold, deal)?;
+    validate_cert(&cert, committee_members, threshold, entries)?;
     deal.committee_cert = Some(cert.clone());
     let payout = match cert.verdict {
         Verdict::Fulfilled => Payout::settle(deal.amount, deal.fee_bps),
@@ -221,16 +222,17 @@ pub fn apply_verdict(
 /// Production: replace with oracle certified-call verification
 /// (`ctx.cert.signers`, `propose_and_certify`) — see committee.rs.
 ///
-/// Placeholder contract (stage-three tripwire): `evidence_root(deal)` is
-/// currently the empty string, so a certificate passes the evidence check
-/// **only** when it carries `evidence_root == ""`. When W3 replaces the
-/// placeholder with the real fold, update the pinned tests in the same
-/// change: `missing_cert_paths_pinned` here and the `String::new()` in
-/// `tests/modelcheck_refund.rs`. The evidence-mismatch path below reuses
-/// `MissingCert` (same variant as "complete with Committee auth but no
-/// committee supplied") on purpose; splitting a dedicated `EvidenceMismatch`
-/// out is TODO(W3) — do not "fix" one path without the other.
-pub fn validate_cert(cert: &CommitteeCert, members: &[AgentId], threshold: usize, deal: &Deal) -> Result<(), TransitionError> {
+/// Contract (stage-3b tripwire): the certificate's `evidence_root` must equal
+/// the fold of the entry slice **as passed at call time** — i.e. the CURRENT
+/// FULL evidence sequence. Any append, tamper or permutation after the root
+/// was derived makes the old root fail here -> `MissingCert`. Callers must
+/// feed the same slice to `core::evidence_root` (via `into_domain`) and to
+/// this function; lib.rs does exactly that in `apply_committee_verdict`.
+/// A dedicated `EvidenceMismatch` variant split is still TODO(W4) — the
+/// mismatch path reuses `MissingCert` (same variant as "complete with
+/// Committee auth but no committee supplied"); do not "fix" one path without
+/// the other.
+pub fn validate_cert(cert: &CommitteeCert, members: &[AgentId], threshold: usize, entries: &[EvidenceEntry]) -> Result<(), TransitionError> {
     let mut seen = std::collections::HashSet::new();
     for s in &cert.signers {
         if !members.contains(s) {
@@ -243,31 +245,56 @@ pub fn validate_cert(cert: &CommitteeCert, members: &[AgentId], threshold: usize
     if cert.signers.len() < threshold {
         return Err(TransitionError::InsufficientCommittee { signers: cert.signers.len(), required: threshold });
     }
-    // The verdict must be about THIS deal's evidence.
-    if cert.evidence_root != evidence_root(deal) {
-        return Err(TransitionError::MissingCert); // TODO(W3): dedicated EvidenceMismatch error
+    // The verdict must be about THIS deal's current evidence sequence.
+    if cert.evidence_root != evidence_root(entries) {
+        return Err(TransitionError::MissingCert); // TODO(W4): dedicated EvidenceMismatch error
     }
     Ok(())
 }
 
-/// Root digest over a deal's ordered evidence log. Chain-agnostic: lib.rs
-/// computes the same root from network state before applying a verdict.
-/// Simple order-preserving fold (not a merkle tree) — adequate for the demo,
-/// documented as such in the report.
+/// Root digest over a deal's ordered evidence log: the FNV-1a 64-bit chain
+/// fold of the entry slice. Chain-agnostic: lib.rs feeds the same slice from
+/// network state into both `into_domain` (root derivation) and
+/// `validate_cert` (re-check) — read, derive and verify share one source.
 ///
-/// Placeholder contract: this ALWAYS returns the empty string until W3.
-/// `validate_cert` requires a certificate's `evidence_root` to equal it, so
-/// empty-string roots are the only valid ones today (pinned by
-/// `missing_cert_paths_pinned` and by the `String::new()` in
-/// `tests/modelcheck_refund.rs`). Replacing this with the real fold
-/// (TODO(W3)) must update those pinned tests in the same change.
-pub fn evidence_root(deal: &Deal) -> Digest {
-    // Placeholder fold: in lib.rs this iterates the actual evidence entries.
-    // Kept here so `validate_cert` has a pure definition to check against;
-    // lib.rs must pass the same value via deal-adjacent state.
-    // TODO(W3): replace with real fold over entries once notary stores them.
-    let _ = deal;
-    String::new()
+/// Algorithm spec (single definition point; committee.rs calls this, it keeps
+/// no local copy):
+///   1. `state = 0xcbf29ce484222325` (FNV-1a 64-bit offset basis);
+///   2. for each entry **in slice order** (= append order = ascending `seq`,
+///      guaranteed by notarize's `seq = len`), build the canonical string
+///      `"{seq}|{from}|{to}|{payload_digest}|{slot}\n"` (field order =
+///      `EvidenceEntry`'s declaration order in types.rs; `{}` is `Display`:
+///      decimal integers and the raw strings);
+///   3. for every byte `b` of that string: `state ^= b as u64;` then
+///      `state = state.wrapping_mul(0x100000001b3)` (FNV prime);
+///   4. return `format!("{:016x}", state)`.
+///
+/// Empty-slice contract: `evidence_root(&[]) == "cbf29ce484222325"` — the
+/// offset basis itself (a fold that absorbed no bytes). This is the DEFINITION
+/// of "root of an empty log"; the old placeholder `""` is no longer a legal
+/// root. Order-sensitive by construction: a permutation of the slice yields a
+/// different root (pinned by `evidence_root_fold_contract_pinned`), so the
+/// consensus invariant "log order == seq order" is detectable, not silently
+/// papered over — this function deliberately does NOT re-sort by `seq`.
+///
+/// Honesty note: FNV-1a is NOT a cryptographic hash, and the `|`/`\n`
+/// separators are ambiguous if a field could contain them (demo invariants —
+/// sha256-hex digests, slug agent ids — exclude that; W4 upgrades to
+/// sha256/merkle and removes the caveat). Not a merkle tree — adequate for
+/// the demo, documented as such in the report. Zero platform and zero crate
+/// dependencies: `u64` XOR + `wrapping_mul` only (well-defined, deterministic
+/// on every target).
+pub fn evidence_root(entries: &[EvidenceEntry]) -> Digest {
+    let state = entries.iter().fold(0xcbf29ce484222325_u64, |state, e| {
+        let canonical =
+            format!("{}|{}|{}|{}|{}\n", e.seq, e.from, e.to, e.payload_digest, e.slot);
+        canonical.bytes().fold(state, |mut s, b| {
+            s ^= b as u64;
+            s = s.wrapping_mul(0x100000001b3);
+            s
+        })
+    });
+    format!("{:016x}", state)
 }
 
 /// Watcher helper: deals eligible for a timeout claim right now.
@@ -318,7 +345,7 @@ mod tests {
         let mut d = deal();
         fund(&mut d, 10).unwrap();
         submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
-        let p = complete(&mut d, 30, &CompleteAuth::BuyerConsent, None).unwrap();
+        let p = complete(&mut d, 30, &CompleteAuth::BuyerConsent, None, &[]).unwrap();
         assert_eq!((p.to_seller, p.fee_to_broker), (980, 20));
         assert_eq!(p.total(), d.amount);
         assert_eq!(d.state, DealState::Settled);
@@ -344,7 +371,7 @@ mod tests {
         // well past the deadline, but evidence exists -> no auto refund
         assert!(matches!(claim_timeout(&mut d, 500), Err(TransitionError::WrongState { .. })));
         // buyer consent still settles
-        let p = complete(&mut d, 501, &CompleteAuth::BuyerConsent, None).unwrap();
+        let p = complete(&mut d, 501, &CompleteAuth::BuyerConsent, None, &[]).unwrap();
         assert_eq!(p.total(), d.amount);
     }
 
@@ -368,10 +395,13 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::Malicious,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]) is the only legal root here (no
+            // notarized log exists in this pure-core scenario); a valid root
+            // must traverse validate_cert before the Malicious payout lands.
+            evidence_root: evidence_root(&[]),
         };
         let mut log = MisconductLog::new();
-        let p = apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+        let p = apply_verdict(&mut d, cert, &members, 3, &[], &mut log).unwrap();
         assert_eq!(p, Payout::full_refund(1_000));
         assert_eq!(log.get("bob"), Some(&1));
         assert_eq!(d.state, DealState::Refunded);
@@ -387,11 +417,13 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into()], // 2 < 3
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]) keeps the fixture consistent; the
+            // threshold check fires before the root is ever compared.
+            evidence_root: evidence_root(&[]),
         };
         let mut log = MisconductLog::new();
         assert!(matches!(
-            apply_verdict(&mut d, cert, &members, 3, &mut log),
+            apply_verdict(&mut d, cert, &members, 3, &[], &mut log),
             Err(TransitionError::InsufficientCommittee { .. })
         ));
     }
@@ -523,9 +555,11 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]) passes validate_cert; the Fulfilled
+            // settlement assertions below are unchanged.
+            evidence_root: evidence_root(&[]),
         };
-        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3)), &[]).unwrap();
         assert_eq!(d.state, DealState::Settled);
         assert_eq!((p.to_seller, p.fee_to_broker), (980, 20));
         assert_eq!(p.total(), d.amount);
@@ -544,9 +578,11 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::NotFulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]) passes validate_cert; the NotFulfilled
+            // -> Refunded assertions below are unchanged.
+            evidence_root: evidence_root(&[]),
         };
-        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+        let p = complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3)), &[]).unwrap();
         assert_eq!(p, Payout::full_refund(1_000));
         assert_eq!(d.state, DealState::Refunded);
         assert_eq!(p.total(), d.amount); // conservation
@@ -566,10 +602,12 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]); the fee==100% boundary assertions
+            // below are root-independent.
+            evidence_root: evidence_root(&[]),
         };
         let mut log = MisconductLog::new();
-        let p = apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+        let p = apply_verdict(&mut d, cert, &members, 3, &[], &mut log).unwrap();
         assert_eq!(d.state, DealState::Settled);
         assert_eq!(p.to_seller, 0);
         assert_eq!(p.fee_to_broker, 1_000);
@@ -619,10 +657,13 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: String::new(), // placeholder contract: must be ""
+            // stage-3b re-pin: fold(&[]) is a VALID root now; path (a) still
+            // fails with MissingCert because no committee set is supplied,
+            // which is rejected before the root is ever compared.
+            evidence_root: evidence_root(&[]),
         };
         assert!(matches!(
-            complete(&mut d, 30, &CompleteAuth::Committee(cert.clone()), None),
+            complete(&mut d, 30, &CompleteAuth::Committee(cert.clone()), None, &[]),
             Err(TransitionError::MissingCert)
         ));
         // The failed call must not have touched the deal; it is still
@@ -630,13 +671,14 @@ mod tests {
         assert_eq!(d.state, DealState::Submitted);
         assert!(d.committee_cert.is_none());
 
-        // Path (b): evidence-root mismatch reuses MissingCert until W3
-        // introduces EvidenceMismatch. The placeholder contract pins
-        // evidence_root(deal) == "", so a non-empty root must fail.
+        // Path (b): evidence-root mismatch reuses MissingCert until W4
+        // introduces EvidenceMismatch. New contract: the root must equal the
+        // fold of the CURRENT entry slice, so any value != that fold (""
+        // included — it is no longer a legal root) must fail.
         let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
         let mismatch = CommitteeCert { evidence_root: "nonempty".into(), ..cert };
         assert!(matches!(
-            complete(&mut d, 30, &CompleteAuth::Committee(mismatch), Some((&members, 3))),
+            complete(&mut d, 30, &CompleteAuth::Committee(mismatch), Some((&members, 3)), &[]),
             Err(TransitionError::MissingCert)
         ));
         assert_eq!(d.state, DealState::Submitted);
@@ -661,20 +703,23 @@ mod tests {
         let non_member = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "outsider".into()], // 3 >= threshold 3
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]); membership fires before the root check.
+            evidence_root: evidence_root(&[]),
         };
         assert!(matches!(
-            apply_verdict(&mut d, non_member, &members, 3, &mut log),
+            apply_verdict(&mut d, non_member, &members, 3, &[], &mut log),
             Err(TransitionError::NonMemberSigner(s)) if s == "outsider"
         ));
 
         let duplicate = CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "n2".into()], // 3 >= threshold 3
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]); the duplicate-signer check fires
+            // before the root check.
+            evidence_root: evidence_root(&[]),
         };
         assert!(matches!(
-            apply_verdict(&mut d, duplicate, &members, 3, &mut log),
+            apply_verdict(&mut d, duplicate, &members, 3, &[], &mut log),
             Err(TransitionError::InvalidSignerSet)
         ));
         // Both rejections happened before any mutation.
@@ -700,7 +745,7 @@ mod tests {
         assert!(matches!(cancel(&mut d, 13), Err(TransitionError::WrongState { .. })));
         assert!(matches!(claim_timeout(&mut d, 60), Err(TransitionError::WrongState { .. })));
         assert!(matches!(
-            complete(&mut d, 14, &CompleteAuth::BuyerConsent, None),
+            complete(&mut d, 14, &CompleteAuth::BuyerConsent, None, &[]),
             Err(TransitionError::WrongState { .. })
         ));
         assert!(matches!(open_dispute(&mut d, "again".into()), Err(TransitionError::WrongState { .. })));
@@ -715,7 +760,9 @@ mod tests {
         let cert = || CommitteeCert {
             verdict: Verdict::Fulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: String::new(),
+            // stage-3b re-pin: fold(&[]); terminal closure fires before any
+            // validation reads the root.
+            evidence_root: evidence_root(&[]),
         };
         for terminal in [DealState::Settled, DealState::Refunded] {
             let mut d = deal();
@@ -728,13 +775,13 @@ mod tests {
             assert!(matches!(cancel(&mut d, 99), Err(TransitionError::Terminal)));
             assert!(matches!(claim_timeout(&mut d, 99), Err(TransitionError::Terminal)));
             assert!(matches!(
-                complete(&mut d, 99, &CompleteAuth::BuyerConsent, None),
+                complete(&mut d, 99, &CompleteAuth::BuyerConsent, None, &[]),
                 Err(TransitionError::Terminal)
             ));
             assert!(matches!(open_dispute(&mut d, "r".into()), Err(TransitionError::Terminal)));
             let mut log = MisconductLog::new();
             assert!(matches!(
-                apply_verdict(&mut d, cert(), &members, 3, &mut log),
+                apply_verdict(&mut d, cert(), &members, 3, &[], &mut log),
                 Err(TransitionError::Terminal)
             ));
         }
@@ -756,12 +803,107 @@ mod tests {
         let cert = CommitteeCert {
             verdict: Verdict::NotFulfilled,
             signers: vec!["n1".into(), "n2".into(), "n3".into()],
-            evidence_root: evidence_root(&d),
+            // stage-3b re-pin: fold(&[]) is the only legal root here (no
+            // notarized log); the F10 dispute-from-Funded pin is unchanged.
+            evidence_root: evidence_root(&[]),
         };
         let mut log = MisconductLog::new();
-        let p = apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+        let p = apply_verdict(&mut d, cert, &members, 3, &[], &mut log).unwrap();
         assert_eq!(p, Payout::full_refund(1_000));
         assert_eq!(d.state, DealState::Refunded);
         assert_eq!(p.total(), d.amount); // conservation
+    }
+
+    // -- stage-3b: the evidence_root fold contract is pinned -----------------
+
+    #[test]
+    fn evidence_root_fold_contract_pinned() {
+        // G13: the five §4 vectors are pinned with concrete values. Any change
+        // to the fold algorithm MUST re-pin this test in the same change (S5
+        // methodology: the contract body is only real if its values are).
+        // Vectors independently computed with a reference FNV-1a-64
+        // implementation and cross-checked against the official vectors
+        // (fnv1a(b"a") == af63dc4c8601ec8c, fnv1a(b"foobar") == 85944171f73967e8).
+        let e1 = EvidenceEntry {
+            seq: 1,
+            from: "alice".into(),
+            to: "bob".into(),
+            payload_digest: "deadbeef".into(),
+            slot: 7,
+        };
+        let e2 = EvidenceEntry {
+            seq: 2,
+            from: "bob".into(),
+            to: "alice".into(),
+            payload_digest: "cafebabe".into(),
+            slot: 9,
+        };
+
+        // Empty-slice contract: fold(&[]) == offset basis hex. This is the
+        // DEFINITION of an empty log's root; the old placeholder "" is illegal.
+        assert_eq!(evidence_root(&[]), "cbf29ce484222325");
+        // Single entry: "1|alice|bob|deadbeef|7\n".
+        assert_eq!(evidence_root(&[e1.clone()]), "ce89e4ab1c1b684e");
+        // Two entries in slice order: "1|alice|bob|deadbeef|7\n" + "2|bob|alice|cafebabe|9\n".
+        assert_eq!(evidence_root(&[e1.clone(), e2.clone()]), "29657aade6273a2b");
+        // Permutation: order-sensitive by construction — a different slice
+        // order yields a different root (detects log/seq divergence).
+        assert_eq!(evidence_root(&[e2.clone(), e1.clone()]), "1760599a7e9537c3");
+        assert_ne!(
+            evidence_root(&[e1.clone(), e2.clone()]),
+            evidence_root(&[e2.clone(), e1.clone()])
+        );
+        // Determinism: same input, same root, twice.
+        assert_eq!(evidence_root(&[e1.clone(), e2.clone()]), evidence_root(&[e1, e2]));
+    }
+
+    #[test]
+    fn validate_cert_requires_fold_of_current_full_log() {
+        // G14: the root must equal the fold of the CURRENT FULL entry slice —
+        // a valid root passes, a stale root (pre-append) fails, and a tampered
+        // entry fails while the cert root stays unchanged. This is the
+        // new-contract strength the empty-string placeholder never had.
+        let members = vec!["n1".to_string(), "n2".to_string(), "n3".to_string(), "n4".to_string()];
+        let e1 = EvidenceEntry {
+            seq: 1,
+            from: "alice".into(),
+            to: "bob".into(),
+            payload_digest: "deadbeef".into(),
+            slot: 7,
+        };
+        let e2 = EvidenceEntry {
+            seq: 2,
+            from: "bob".into(),
+            to: "alice".into(),
+            payload_digest: "cafebabe".into(),
+            slot: 9,
+        };
+        let entries = vec![e1.clone(), e2.clone()];
+
+        // (1) root = fold(current slice) -> Ok.
+        let cert = CommitteeCert {
+            verdict: Verdict::Fulfilled,
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+            evidence_root: evidence_root(&entries),
+        };
+        assert!(validate_cert(&cert, &members, 3, &entries).is_ok());
+
+        // (2) stale root = fold(&[e1]) — derived BEFORE the append of e2 ->
+        // MissingCert.
+        let stale = CommitteeCert { evidence_root: evidence_root(&[e1.clone()]), ..cert.clone() };
+        assert!(matches!(
+            validate_cert(&stale, &members, 3, &entries),
+            Err(TransitionError::MissingCert)
+        ));
+
+        // (3) tampered entry (one payload_digest character changed) with the
+        // cert root left at fold(original slice) -> MissingCert.
+        let mut tampered = entries.clone();
+        tampered[1].payload_digest = "cafebabf".into();
+        assert_ne!(evidence_root(&tampered), evidence_root(&entries));
+        assert!(matches!(
+            validate_cert(&cert, &members, 3, &tampered),
+            Err(TransitionError::MissingCert)
+        ));
     }
 }

@@ -24,6 +24,7 @@
 //!   selection + misconduct log, not eliminated).
 
 use crate::types::*;
+use crate::core;
 
 /// Wire format for a verdict submitted to `apply_committee_verdict`.
 /// `signers` are committee member ids; `verdict` is 0=Fulfilled,1=NotFulfilled,2=Malicious.
@@ -33,7 +34,7 @@ pub struct CommitteeCertWire {
 }
 
 impl CommitteeCertWire {
-    pub fn into_domain(self, _entries: &[EvidenceEntry]) -> CommitteeCert {
+    pub fn into_domain(self, entries: &[EvidenceEntry]) -> CommitteeCert {
         let verdict = match self.verdict_code {
             0 => Verdict::Fulfilled,
             1 => Verdict::NotFulfilled,
@@ -42,9 +43,8 @@ impl CommitteeCertWire {
         CommitteeCert {
             verdict,
             signers: self.signers,
-            // SPIKE(W1)/TODO(W3): root over the ordered evidence log; must match
-            // what the committee members actually inspected.
-            evidence_root: String::new(),
+            // SPIKE(W1): 委员会成员实际检视的证据集假定与 network evidence_log 完全一致；root 折叠唯一定义在 core::evidence_root（读-算-校同源，阶段3b 契约替换）。
+            evidence_root: core::evidence_root(entries),
         }
     }
 }
@@ -148,5 +148,31 @@ mod tests {
             entry(1, "buyer", "seller", "other"),
         ];
         assert!(!check_evidence_shape(&entries, &deal));
+    }
+
+    #[test]
+    fn into_domain_root_matches_core_fold() {
+        // G15: 路径统一钉死（阶段3b D4）——committee 侧证书根必须恒等于
+        // core::evidence_root 同输入的输出（唯一定义点，committee 不带副本），
+        // 且顺序敏感性与 core 侧一致地传播。
+        let wire = || CommitteeCertWire {
+            verdict_code: 0, // Fulfilled；本测试只关心 evidence_root
+            signers: vec!["n1".into(), "n2".into(), "n3".into()],
+        };
+        let e1 = entry(1, "alice", "bob", "deadbeef");
+        let e2 = entry(2, "bob", "alice", "cafebabe");
+
+        let empty: Vec<EvidenceEntry> = Vec::new();
+        assert_eq!(wire().into_domain(&empty).evidence_root, core::evidence_root(&empty));
+        let one = vec![e1.clone()];
+        assert_eq!(wire().into_domain(&one).evidence_root, core::evidence_root(&one));
+        let two = vec![e1.clone(), e2.clone()];
+        assert_eq!(wire().into_domain(&two).evidence_root, core::evidence_root(&two));
+        // 顺序敏感性传播：置换切片后 committee 侧根同样相异。
+        let perm = vec![e2.clone(), e1.clone()];
+        assert_ne!(
+            wire().into_domain(&perm).evidence_root,
+            core::evidence_root(&[e1, e2])
+        );
     }
 }

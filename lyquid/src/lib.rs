@@ -251,6 +251,7 @@ pub fn fund(ctx: Context, deal_id: DealId) -> LyquidResult<()> {
 
 /// Append-only communication notarization. Anyone may submit; entries are
 /// sequenced per deal. This is the fulfillment evidence the committee rules on.
+/// 裁决时的证书根由本日志条目折叠派生（core::evidence_root，经 apply_committee_verdict 单点读取）。
 #[method::network]
 pub fn notarize(ctx: Context, deal_id: DealId, from: AgentId, to: AgentId, payload_digest: Digest) -> LyquidResult<u64> {
     // 自署名强制（仲裁#3）：任何人可提交，但条目的 from 必须等于提交者本人
@@ -293,7 +294,9 @@ pub fn complete(ctx: Context, deal_id: DealId) -> LyquidResult<()> {
     let now = current_slot();
     let (payout, buyer, seller, broker, escrowed) = {
         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
-        let p = core::complete(deal, now, &core::CompleteAuth::BuyerConsent, None).map_err(bridge_core_err)?;
+        let p = core::complete(deal, now, &core::CompleteAuth::BuyerConsent, None,
+            // BuyerConsent 分支不读证据日志（core::complete 签名统一穿参）。
+            &[]).map_err(bridge_core_err)?;
         (p, deal.buyer.clone(), deal.seller.clone(), deal.broker.clone(), deal.amount)
     };
     apply_payout(&payout, &buyer, &seller, &broker, escrowed)?;
@@ -363,9 +366,7 @@ pub fn apply_committee_verdict(ctx: Context, deal_id: DealId, cert: committee::C
     if !cert.signers.iter().any(|s| *s == caller) {
         return Err(lyquid_error("caller must be among the certificate signers"));
     }
-    // 证据条目从 network 状态读出后传入（与 evidence_entries_json getter
-    // 同一读取路径）；本段只接线，evidence_root 仍为 committee.rs:47 的
-    // 空串占位——root 折叠契约替换属阶段3b，勿在此动。
+    // 读-算-校同源（阶段3b）：同一条目切片先喂 into_domain 折叠出证书根，再传 core::apply_verdict 由 validate_cert 重算比对——cert.evidence_root 与裁决校验不可能指向不同数据。
     let entries: Vec<EvidenceEntry> = evidence_log.get(&deal_id).cloned().unwrap_or_default();
     let cert = cert.into_domain(&entries);
 
@@ -373,7 +374,7 @@ pub fn apply_committee_verdict(ctx: Context, deal_id: DealId, cert: committee::C
     // 平台层不得重复累加；终态同样由 core 从裁决映射，平台层不推断。
     let (payout, buyer, seller, broker, escrowed) = {
         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
-        let p = core::apply_verdict(deal, cert, &members, threshold, &mut misconduct).map_err(bridge_core_err)?;
+        let p = core::apply_verdict(deal, cert, &members, threshold, &entries, &mut misconduct).map_err(bridge_core_err)?;
         (p, deal.buyer.clone(), deal.seller.clone(), deal.broker.clone(), deal.amount)
     };
     apply_payout(&payout, &buyer, &seller, &broker, escrowed)?;

@@ -45,7 +45,7 @@ fn cert(verdict: Verdict) -> CommitteeCert {
     CommitteeCert {
         verdict,
         signers: vec!["n1".into(), "n2".into(), "n3".into()],
-        evidence_root: String::new(), // matches core::evidence_root placeholder
+        evidence_root: core::evidence_root(&[]), // matches core::evidence_root fold of the (empty) model log
     }
 }
 
@@ -74,8 +74,8 @@ fn run(steps: &[Step]) -> (u128, usize, Option<DealState>) {
             Step::ClaimTimeout(t) => core::claim_timeout(&mut d, *t).map(|p| p.total()),
             Step::Cancel => core::cancel(&mut d, 60).map(|p| p.total()),
             Step::Dispute => core::open_dispute(&mut d, "r".into()).map(|_| 0),
-            Step::Verdict(v) => core::apply_verdict(&mut d, cert(v.clone()), &m, 3, &mut log).map(|p| p.total()),
-            Step::Complete => core::complete(&mut d, 61, &CompleteAuth::BuyerConsent, None).map(|p| p.total()),
+            Step::Verdict(v) => core::apply_verdict(&mut d, cert(v.clone()), &m, 3, &[], &mut log).map(|p| p.total()),
+            Step::Complete => core::complete(&mut d, 61, &CompleteAuth::BuyerConsent, None, &[]).map(|p| p.total()),
         };
         if let Ok(amount) = r {
             if amount > 0 {

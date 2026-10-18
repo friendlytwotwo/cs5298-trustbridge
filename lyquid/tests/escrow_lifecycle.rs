@@ -23,7 +23,7 @@ fn normal_flow_book_is_conservation_closed() {
     core::submit_deliverable(&mut d, "deliv".into(), 20).unwrap();
 
     // settle with buyer consent, mirroring apply_payout
-    let p = core::complete(&mut d, 30, &CompleteAuth::BuyerConsent, None).unwrap();
+    let p = core::complete(&mut d, 30, &CompleteAuth::BuyerConsent, None, &[]).unwrap();
     *book.entry(d.seller.clone()).or_insert(0) += p.to_seller;
     *book.entry(d.broker.clone()).or_insert(0) += p.fee_to_broker;
 
@@ -70,10 +70,11 @@ fn adversarial_forged_evidence_ends_in_refund_plus_flag() {
     let cert = CommitteeCert {
         verdict: Verdict::Malicious,
         signers: vec!["n1".into(), "n2".into(), "n3".into()],
-        evidence_root: core::evidence_root(&d),
+        // 阶段3b 重钉：本场景无 notarized 日志，fold(∅) 是唯一合法根。
+        evidence_root: core::evidence_root(&[]),
     };
     let mut log = MisconductLog::new();
-    let p = core::apply_verdict(&mut d, cert, &members, 3, &mut log).unwrap();
+    let p = core::apply_verdict(&mut d, cert, &members, 3, &[], &mut log).unwrap();
     *book.get_mut(&d.buyer).unwrap() += p.refund_to_buyer;
 
     assert_eq!(d.state, DealState::Refunded);
@@ -100,9 +101,10 @@ fn committee_fulfill_flow_book_conservation() {
     let cert = CommitteeCert {
         verdict: Verdict::Fulfilled,
         signers: vec!["n1".into(), "n2".into(), "n3".into()],
-        evidence_root: core::evidence_root(&d),
+        // 阶段3b 重钉：无独立日志，fold(∅) 是唯一合法根。
+        evidence_root: core::evidence_root(&[]),
     };
-    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3)), &[]).unwrap();
     *book.entry(d.seller.clone()).or_insert(0) += p.to_seller;
     *book.entry(d.broker.clone()).or_insert(0) += p.fee_to_broker;
 
@@ -134,9 +136,10 @@ fn committee_refund_flow_book_conservation() {
     let cert = CommitteeCert {
         verdict: Verdict::NotFulfilled,
         signers: vec!["n1".into(), "n2".into(), "n3".into()],
-        evidence_root: core::evidence_root(&d),
+        // 阶段3b 重钉：无独立日志，fold(∅) 是唯一合法根。
+        evidence_root: core::evidence_root(&[]),
     };
-    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3))).unwrap();
+    let p = core::complete(&mut d, 30, &CompleteAuth::Committee(cert), Some((&members, 3)), &[]).unwrap();
     *book.get_mut(&d.buyer).unwrap() += p.refund_to_buyer;
 
     assert_eq!(p, Payout::full_refund(1_000));

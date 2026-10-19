@@ -24,16 +24,43 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from agents.common.llm import build_assessor_prompt, get_llm
 from agents.common.protocol import (KIND_ACCEPTANCE, KIND_DELIVERABLE, KIND_DISPUTE, KIND_OFFER,
-                                    KIND_RECEIPT, KIND_REQUEST, envelope, digest)
+                                    KIND_RECEIPT, KIND_REQUEST, envelope, digest, evidence_root,
+                                    fnv1a64)
 from agents.common.rpc import DEFAULT_NODE, SLOT_MS, FakeNode, NodeClient
 
 ALICE, BROKER, BOB = "agent-alice", "agent-broker", "agent-bob"
-COMMITTEE = ["node-1", "node-2", "node-3", "node-4"]
+# Committee: the nodes adjacent to the broker double as endorsement members
+# (broker.py narrative), so BROKER itself sits on the set. The verdict gate
+# requires caller ∈ members ∧ caller ∈ signers, so the demo submits the
+# verdict under BROKER's identity with signers = COMMITTEE[:THRESHOLD].
+COMMITTEE = [BROKER, "node-1", "node-2", "node-3"]
 THRESHOLD = 3
 
 
 def banner(t: str):
     print("\n" + "=" * 68 + f"\n  {t}\n" + "=" * 68)
+
+
+def selftest_evidence_root():
+    """Pin the Python evidence_root to the vectors frozen in core.rs tests
+    (evidence_root_fold_contract_pinned) + the two official FNV-1a-64 vectors
+    quoted in core.rs. Any drift between the two implementations trips here."""
+    e1 = {"seq": 1, "from": "alice", "to": "bob", "payload_digest": "deadbeef", "slot": 7}
+    e2 = {"seq": 2, "from": "bob", "to": "alice", "payload_digest": "cafebabe", "slot": 9}
+    cases = [
+        ("empty log == offset basis          ", evidence_root([]) == "cbf29ce484222325"),
+        ("single entry                       ", evidence_root([e1]) == "ce89e4ab1c1b684e"),
+        ("two entries, slice order           ", evidence_root([e1, e2]) == "29657aade6273a2b"),
+        ("permutation, order-sensitive       ", evidence_root([e2, e1]) == "1760599a7e9537c3"),
+        ("deterministic and order-divergent  ",
+         evidence_root([e1, e2]) == evidence_root([e1, e2]) != evidence_root([e2, e1])),
+        ("official FNV vector fnv1a64(b\"a\")     ", fnv1a64(b"a") == "af63dc4c8601ec8c"),
+        ("official FNV vector fnv1a64(b\"foobar\")", fnv1a64(b"foobar") == "85944171f73967e8"),
+    ]
+    for name, ok in cases:
+        print(f"  {'PASS' if ok else 'FAIL'}  {name}")
+        assert ok, f"selftest failed: {name.strip()}"
+    print("SELFTEST OK")
 
 
 def notarize(node, deal_id, kind, payload, frm, to):
@@ -114,9 +141,17 @@ def flow_adversarial(node):
     notarize(node, deal_id, KIND_DISPUTE, reason, ALICE, BOB)
     node.open_dispute(deal_id, reason_digest)
 
-    # committee: 3 of 4 members inspected the evidence log -> Malicious
-    signers = COMMITTEE[:THRESHOLD]
-    node.apply_committee_verdict(deal_id, 2, signers)
+    # committee: threshold signers inspected the evidence log -> Malicious.
+    # The broker sits on the committee (nodes next to the broker double as
+    # members) and submits under its own identity, mirroring the Rust gate
+    # (caller must be a member AND among the signers). The cert root is
+    # folded from the same evidence log the chain re-checks — same-source by
+    # design (README trust table); the DISPUTE entry above is already in the
+    # log and nothing appends between the fold and the verdict.
+    signers = COMMITTEE[:THRESHOLD]                      # includes BROKER
+    entries = node.evidence_entries(deal_id)             # mirror of members reading evidence_entries_json
+    cert = (2, evidence_root(entries), signers)          # Malicious + root + signers
+    node.apply_committee_verdict(deal_id, cert, BROKER)  # orchestration passes broker's identity
 
     print(f"final state={node.deal_info(deal_id)['state']} alice={node.balance_of(ALICE)} "
           f"misconduct={getattr(node, 'misconduct', {})}")
@@ -127,16 +162,26 @@ def main():
     p.add_argument("--node", default=DEFAULT_NODE, help="node base url, or 'sim'")
     p.add_argument("--sim", action="store_true", help="shorthand for --node sim")
     p.add_argument("--flow", choices=["normal", "timeout", "adversarial", "all"], default="all")
+    p.add_argument("--selftest", action="store_true",
+                   help="pin evidence_root/fnv1a64 to the core.rs vectors, then exit")
     args = p.parse_args()
     if args.sim:
         args.node = "sim"
+
+    if args.selftest:
+        # Pure stdlib, before any node/LLM/network construction.
+        selftest_evidence_root()
+        sys.exit(0)
 
     if args.node == "sim":
         node = FakeNode()
         print("[demo] SIM MODE (FakeNode) — orchestration smoke only; deal semantics truth = rust core tests")
     else:
         node = NodeClient(args.node)
-        node.committee_config(COMMITTEE, THRESHOLD)
+    # Both transports need the same committee config: the verdict gate checks
+    # caller ∈ members ∧ caller ∈ signers, and FakeNode's default set does
+    # not include the broker.
+    node.committee_config(COMMITTEE, THRESHOLD)
 
     flows = {"normal": flow_normal, "timeout": flow_timeout, "adversarial": flow_adversarial}
     seq = ["normal", "timeout", "adversarial"] if args.flow == "all" else [args.flow]

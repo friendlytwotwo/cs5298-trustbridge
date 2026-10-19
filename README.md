@@ -157,6 +157,7 @@ scripts/                devnet-up / deploy / demo 编排
 - Committee collusion bounded by member selection + misconduct log, not eliminated.
 - `faucet` is demo-only. No seller stake yet (slash hook is a documented W4 stretch).
 - Evidence digests are client-supplied; W4 adds the #2833-style request/response binding so receipts carry cryptographic linkage to the exchange.
+- Evidence-root check is real but same-sourced: the Rust node re-derives and compares the root (`validate_cert`), yet in the demo path the root and the verdict read the same chain log — deliberate same-source, not independent verification. FakeNode mirrors this. Independence arrives with the W4 oracle certified-call (`ctx.cert.signers`). Notarize `from` is enforced as caller-self-signed on the Rust side (real caller identity post-W1); FakeNode simulates it via deal-party membership.
 
 **中文**（报告 E3 表,保持诚实）：
 
@@ -164,3 +165,4 @@ scripts/                devnet-up / deploy / demo 编排
 - 委员会合谋由成员遴选 + 不端记录约束，但未消除。
 - `faucet` 仅限 demo。尚无卖家保证金（罚没钩子是文档化的 W4 拓展项）。
 - 证据摘要由客户端提交；W4 将加入 #2833 式请求/响应绑定，使回执与交易内容有密码学关联。
+- 证据根校验为真但同源：Rust 节点会重折叠并比对根（`validate_cert`），但 demo 路径里根的推导与裁决读的是同一条链上日志——有意同源、并非独立验证，FakeNode 如实镜像。独立性要等 W4 的 oracle 认证调用（`ctx.cert.signers`）。Rust 侧 `notarize` 强制 `from` 等于提交者本人（W1 后 caller 才有真身份）；FakeNode 以「`from` 属于交易三方」模拟同一约定（措辞与 rpc.py 同源注释互指）。

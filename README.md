@@ -15,6 +15,36 @@ CS5298 Final Project. Plan: [`docs/FinalProject_计划书_TrustBridge_2026-10-12
 
 ---
 
+## Status | 当前进度（2026-10-19）
+
+**EN:** Four GLM×DeepSeek review-and-fix collaboration phases are complete and pushed (13 commits, HEAD `912a4ae`). Done vs pending:
+
+| Area | State |
+|---|---|
+| Pure-core state machine (types/core) | ✅ hardened: 4 defect classes fixed (minting on unfunded cancel, terminal-state mislabel, fee overflow, verdict→terminal mapping); conservation model-checked over 720+ event orderings, 0 violations |
+| evidence_root | ✅ real contract: FNV-1a-64 chained fold over ordered entries, order-sensitive, pinned vectors; same-source check on the demo path (see trust assumptions) |
+| Platform wrappers (lib.rs) | ✅ guards complete: access matrix, error bridge, fund precheck, committee gate (unsigned certs rejected); ⚠️ 73 known `cargo check` errors vs real ldk — that alignment IS the W1 spike, by design |
+| Timeout | ✅ watcher + on-chain guard primary path implemented (SPIKE-gated); ⚠️ native `trigger!` registration disabled until spike #1 |
+| LLM assessor | ✅ instance-side seam + serde contract parse; real backend call SPIKE-gated |
+| Python side | ✅ FakeNode mirrors Rust semantics (committee gate / fee / deadlines / misconduct / FNV root); `--selftest` 7/7 pinned vectors |
+| Tests | ✅ verify_core shell 39/39 (core 32 + escrow 5 + modelcheck 2); sim 3 flows conservation-clean |
+| Pending | W1 spikes (timer semantics, oracle committee round, llm two-step, RPC envelope, macro audit); W4: oracle certification, seller stake/slash, #2833 receipt binding |
+
+**中文：** 四阶段 GLM×DeepSeek 审查与修复协作已完成并推送（13 个提交，HEAD `912a4ae`）。已完成 vs 待办：
+
+| 领域 | 状态 |
+|---|---|
+| 纯核心状态机（types/core） | ✅ 加固完成：修复 4 类真缺陷（未注资 cancel 铸币、终态误标、fee 溢出、裁决→终态映射）；守恒不变量经 720+ 事件排序模型检查 0 违例 |
+| evidence_root | ✅ 真契约：FNV-1a-64 链式折叠、顺序敏感、向量钉死；demo 路径为同源校验（见信任假设） |
+| 平台封装（lib.rs） | ✅ 守卫齐备：权限矩阵、错误桥接、基金预检、委员会门禁（未签名证书被拒）；⚠️ 对真实 ldk 仍有 73 个已知 `cargo check` 错——该对齐本身就是 W1 spike，属预期状态 |
+| 超时 | ✅ watcher + 链上守卫主路径已实装（SPIKE 门控）；⚠️ 原生 `trigger!` 注册在 spike #1 通过前保持禁用 |
+| LLM 评估器 | ✅ instance 侧接缝 + serde 契约解析；真实后端调用 SPIKE 门控 |
+| Python 端 | ✅ FakeNode 镜像 Rust 语义（委员会门禁/fee/期限/罚没/FNV 根）；`--selftest` 7/7 钉死向量 |
+| 测试 | ✅ verify_core 壳 39/39（core 32 + escrow 5 + modelcheck 2）；sim 三流程账目守恒 |
+| 待办 | W1 spike 五项（timer 语义、oracle 委员会回合、llm 两步提交、RPC 包格式、宏漂移审计）；W4：oracle 认证、卖家保证金/罚没、#2833 回执绑定 |
+
+---
+
 ## Quickstart | 快速开始
 
 **EN:**
@@ -26,6 +56,7 @@ cd lyquid && cargo test
 # 2) Orchestration smoke (in-process FakeNode; no devnet required):
 cd .. && python scripts/demo.py --sim            # all three flows
 python scripts/demo.py --sim --flow timeout      # single flow
+python scripts/demo.py --selftest                # FNV-1a evidence_root vector pins (7/7)
 
 # 3) Against the real devnet (after W1 spikes):
 bash scripts/devnet-up.sh        # docker compose: nodes on :10087/:11087/:12087/:13087 + Anvil
@@ -44,6 +75,7 @@ cd lyquid && cargo test
 # 2) 编排冒烟测试(进程内 FakeNode,无需 devnet):
 cd .. && python scripts/demo.py --sim            # 全部三条流程
 python scripts/demo.py --sim --flow timeout      # 单条流程
+python scripts/demo.py --selftest                # FNV-1a 证据根向量自测(7/7)
 
 # 3) 对接真实 devnet(W1 spike 之后):
 bash scripts/devnet-up.sh        # docker compose:节点在 :10087/:11087/:12087/:13087 + Anvil
@@ -63,19 +95,19 @@ Python 依赖：`pip install -r agents/requirements.txt`（仅 requests）。
 docs/                  planning documents (plan, research, direction memo, in Chinese)
 lyquid/                 Rust Lyquid = the trust layer
   src/types.rs          domain types (Deal, evidence, committee cert, payout)
-  src/core.rs           PURE state machine: guards/transitions/conservation + 8 unit tests
-  src/lib.rs            state! + network/instance method wrappers (thin, caller guards)
-  src/committee.rs      threshold validation + oracle/UPC wiring notes (price-feed path)
-  src/assessor.rs       instance-side LLM: qualification + duration estimate (JsonSchema out)
-  src/timeout.rs        "off-chain trigger; on-chain guard" watcher design
+  src/core.rs           PURE state machine: guards/transitions/conservation + FNV-1a evidence_root (pinned vectors)
+  src/lib.rs            state! + network/instance wrappers: ACCESS_MATRIX guards, error bridge, fund precheck
+  src/committee.rs      threshold/cert validation + oracle/UPC wiring notes (price-feed path)
+  src/assessor.rs       instance-side LLM: qualification + duration estimate (serde contract parse)
+  src/timeout.rs        watcher (real call! body, SPIKE-gated) + on-chain guard
   tests/escrow_lifecycle.rs    book-conservation tests for the three demo flows
   tests/modelcheck_refund.rs   exhaustive event-ordering model check (E3 evidence)
 agents/                 Python agent side (scripted behavior, pluggable LLM)
-  common/protocol.py    A2A message envelopes + canonical JSON + sha256 (what gets notarized)
-  common/rpc.py         NodeClient (devnet) + FakeNode (sim mirror; truth = rust core)
+  common/protocol.py    message envelopes + canonical JSON + sha256 + FNV-1a evidence_root mirror
+  common/rpc.py         NodeClient (devnet placeholder, SPIKE W1-4) + FakeNode (gated sim mirror; truth = rust core)
   common/llm.py         ScriptedLLM (deterministic replay) / OpenAICompatLLM (TB_LLM=openai)
   alice.py broker.py bob.py    per-agent CLIs
-scripts/                devnet-up / deploy / demo orchestration
+scripts/                devnet-up / deploy / demo orchestration (+ --selftest vector pins)
 ```
 
 **中文：**
@@ -84,19 +116,19 @@ scripts/                devnet-up / deploy / demo orchestration
 docs/                  规划文档(计划书、可行性调研、方向总结,中文)
 lyquid/                 Rust Lyquid = 信任层本体
   src/types.rs          领域类型(Deal、证据、委员会证书、 payout)
-  src/core.rs           纯状态机:守卫/转移/守恒 + 8 个单元测试(无平台依赖)
-  src/lib.rs            state! + network/instance 方法薄封装(调用者守卫)
-  src/committee.rs      阈值校验 + oracle/UPC 接线说明(price-feed 路径)
-  src/assessor.rs       instance 侧 LLM:资格审查 + 时长估计(JsonSchema 输出)
-  src/timeout.rs        "链下触发;链上守卫" watcher 设计
+  src/core.rs           纯状态机:守卫/转移/守恒 + FNV-1a 证据根(向量钉死,无平台依赖)
+  src/lib.rs            state! + network/instance 封装:ACCESS_MATRIX 守卫、错误桥接、基金预检
+  src/committee.rs      阈值/证书校验 + oracle/UPC 接线说明(price-feed 路径)
+  src/assessor.rs       instance 侧 LLM:资格审查 + 时长估计(serde 契约解析)
+  src/timeout.rs        watcher(call! 实装,SPIKE 门控) + 链上守卫
   tests/escrow_lifecycle.rs    三条 demo 流程的账本守恒测试
   tests/modelcheck_refund.rs   事件排序穷举模型检查(E3 证据)
 agents/                 Python Agent 端(脚本化行为、可插拔 LLM)
-  common/protocol.py    A2A 消息信封 + 规范化 JSON + sha256(被存证的内容)
-  common/rpc.py         NodeClient(devnet)+ FakeNode(仿真镜像;真值 = rust core)
+  common/protocol.py    消息信封 + 规范化 JSON + sha256 + FNV-1a 证据根镜像
+  common/rpc.py         NodeClient(devnet 占位,SPIKE W1-4)+ FakeNode(带门禁的仿真镜像;真值 = rust core)
   common/llm.py         ScriptedLLM(确定性回放)/ OpenAICompatLLM(TB_LLM=openai)
   alice.py broker.py bob.py    各 Agent 的 CLI
-scripts/                devnet-up / deploy / demo 编排
+scripts/                devnet-up / deploy / demo 编排(--selftest 向量自测)
 ```
 
 ---

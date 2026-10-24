@@ -1,0 +1,42 @@
+W1-A 修订轮：deal_info 真实读路径尝试（export=http，D9 属性面）——失败存档
+=====================================================================
+仲裁指令：在 D9 属性面权限内将 deal_info 的 export 由 eth 调整（或增补）为
+http（方法清单/ACCESS_MATRIX 零增删），重新构建并全新部署新实例，经
+shaker serve 代理实调 deal_info("deal-1")。
+实例基线：HEAD 740e810（代码基线 a1721b7 的 lib.rs），通道 = 容器内
+cargo check --target wasm32-unknown-unknown（ldk rev=fd575e8 / v0.8.1）。
+
+尝试 1：#[method::network(export = http)]
+  error: `export = http` requires `method = "..."`
+  （proc 宏要求 http 导出必须携带 method/path_prefix 键）
+
+尝试 2：#[method::network(export = http(method = "GET", path_prefix = "/deal-info"))]
+  error: expected identifier --> src/lib.rs:473:32
+  （http(...) 内联形态非合法属性语法）
+
+尝试 3（完整合法形态，逐字同 proc 宏错误提示 :809）：
+  #[method::network(export = http, method = "GET", path_prefix = "/deal-info")]
+  error: `export = http` is only supported on #[lyquid::method::instance]
+     --> src/lib.rs:474:8
+        |
+   474  | pub fn deal_info(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
+        |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  error: could not compile `trustbridge` (lib) due to 1 previous error
+  完整编译输出：见本目录 _dealinfo-http-attempt-full.txt
+
+平台源头（v0.8.1，lyquid/proc/src/lib.rs）：
+  :366 / :381 —— expand_network_function 对 network 方法的 http 导出一律
+  `return Err("...`export = http` is only supported on #[lyquid::method::instance]")`；
+  :114-118 —— HttpExportAttr { method, path_prefix }。
+
+结论：http 读路径在【方法类别面】被平台 proc 宏硬性关闭——http 导出仅限
+instance 方法；deal_info 是 network 方法，改为 instance = 节点本地、不进
+共识，属方法语义类别变更，被"方法清单/矩阵零增删、领域语义冻结"红线禁止。
+故"全新部署 + shaker serve 实调 deal_info"无构建物可部署，路径实测失败。
+
+按仲裁失败分支执行：
+  - §⑧.4 改标"⚠️ 部分达成（deal_info 未实际执行，由 fund 控制台同一
+    DealView 序列化替代作证）"，✅ 撤下；
+  - §⑦-2 保留并补记本次 http 尝试及失败证据（本档案）；
+  - 向用户/终裁官申请对完成定义第 4 条的显式豁免，豁免下达前 ✅ 不恢复。
+代码已还原（export=eth，HEAD 740e810 不变），还原后通道复验 0 错。

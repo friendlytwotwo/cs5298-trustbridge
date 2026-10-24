@@ -1,19 +1,24 @@
 # W1-A 实现说明（S5 宏漂移审计编译清零 + escrow 上 devnet 走到 Funded）
 
 执行基线：`workflow-out/plan.md`（独立终裁官定稿）。代码仓 `trustbridge/`（git）。
-提交序列：T0.5 基线 `5d0380f` → S5 编译清零 `4b0df10` → 部署/登记 `a1721b7`（+ 本次 T6 文档提交）。
+提交序列：T0.5 基线 `5d0380f` → S5 编译清零 `4b0df10` → 部署/登记 `a1721b7` → T6 登记 `740e810`。
+**修订轮 R1（代码基线不变 740e810，仅文档/证据修订，单独提交）**：① deal_info http 读路径尝试失败并撤 ✅（§④-3/§⑦-2/§⑧.4，存档 `w1a-deal-info-evidence.txt`）；② §① 裁定原文不可再取证、两行降级（§①）；③ shaker test 复跑成功 0 tests（§⑦-1/§⑧.1，存档 `w1a-t3-shaker-test.txt`）；④ SPIKE 行号 @740e810 重算双列（§③/§⑧.6）。
 
 ---
 
 ## ① 用户 3 条裁定（登记口径）
 
-裁定原文逐字记录存于定稿会话（任务流），仓库内无副本；为免凭空重建，此处按方案对裁定的**落地锚点**登记：
+**裁定原文不可再取证**：修订轮在本机可达的全部会话/任务流记录（`trustbridge/.zcode/workflow-runs|workflow-drafts`、`202609CS5298/.workbuddy/memory`、`trustbridge/docs/`、W1 Spike 执行计划文档）中穷尽检索裁定原文（特征词：talc/5.0.3/依赖浮动/whoami 等）无果——定稿会话记录不在本机存档。按仲裁口径仅登记 plan 内可引片段，不得以替代物充数：
 
-| # | 裁定要点（按方案锚点） | 本段落地 |
-|---|---|---|
-| 1 | （冷读仲裁意见 2 落地）**BROKER=caller 身份链**：不采纳 whoami getter，走自署名探针（notarize 哑 deal）钉死 caller 串 | D4b 已执行：`"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"`（EIP-55）经探针钉死并回填 BROKER（§④） |
-| 2 | **版本对齐属平台要求，非依赖浮动**（D7 的执行化口径）：仅凭证据触发，触发即换 rev 并全量重对照重验证 | D7 已凭节点日志证据触发：三处 pin `tag="v0.7.3"` → `rev="fd575e88a920448e646f23968775e52982c5201c"`，对照/重编译/重部署/重跑全通过（§⑤） |
-| 3 | （同批流程裁定）**编码员职责边界**：实测命令即交付物；如实回报，不虚报运行结果 | 本文档所有"已验证"均为本轮实跑；不可达项如实标注（§⑦ shaker test 未跑项） |
+- plan.md:49（F12 行）："...**裁定文本写 5.0.3**，实测锁定为 5.1.1——v0.7.3 平台解析结果"
+- plan.md:126（D7 登记行）："...平台要求，非依赖浮动（**裁定 2 原文口径**）。"
+
+**裁定表（空）**：三条原文均不可引，正文表不设行。
+
+**原裁定表两行的降级归属**（不再冠"用户裁定"名义）：
+
+- **计划决策 D4b 落地**（原表 #1，BROKER=caller 身份链）：自署名探针钉死 caller 串 `"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"`（EIP-55）并回填 BROKER——证据见 §④。
+- **流程纪律**（原表 #3，编码员职责边界）：实测命令即交付物、不虚报运行结果——本修订轮对 §⑦-1 误记的更正即该纪律的执行。
 
 ## ② 传递 crate 登记（F12 实测）
 
@@ -23,40 +28,40 @@
 | `ahash` | **0.8.12** | 同上，与裁定文本一致 |
 | `lyquid` / `lyquid-llm` / `lyquid-test` | 0.8.1 @ `rev=fd575e8…` | D7 后锁（§⑤）；talc/ahash 为 ldk feature 传递依赖，非新增直依（红线豁免） |
 
-## ③ SPIKE 登记表（23 行全量；grep↔表双向勾稽 `grep -c "SPIKE(" src/*.rs` = lib.rs 10 + timeout.rs 7 + assessor.rs 3 + committee.rs 2 + types.rs 1 = 23，core.rs 0）
+## ③ SPIKE 登记表（23 行全量；行号 = 原 T6 稿 → **现 @740e810 重算**；计数勾稽 `grep -c "SPIKE(" src/*.rs` = lib.rs 10 + timeout.rs 7 + assessor.rs 3 + committee.rs 2 + types.rs 1 = 23，core.rs 0）
 
 ### 处置/登记 15 行（S5 内落地或登记结论）
 
-| 位点 | 假设 | 验证方式（本轮实跑/实读） | 处置 |
+| 位点（原→现@740e810） | 假设 | 验证方式（本轮实跑/实读） | 处置 |
 |---|---|---|---|
-| lib.rs:8（现 :10 区） | 文件头 W1 待验总说明 | S5 完成 | 改为"S5 已验证 + 残余指向 W1-B" |
-| lib.rs:53（现 :57） | 平台是否导出 LyquidResult | `$V7/lyquid/src/lib.rs:199`（v0.7.3）与 v0.8.1 同面实读 | 改结论：已导出同名同形，本地别名退役为 `pub use lyquid::LyquidResult;` |
-| lib.rs:59（现 :65） | 错误构造器形态 | v0.7.3 `LyquidError` 枚举 :172-189（无 `msg`）+ erc20:31 同款 | 改结论：`LyquidError::LyquidRuntime(String)` |
-| lib.rs:182（现 :203） | caller 访问器 | `CallContext.caller: Address`（:162）+ erc20:161 `ctx.caller` | 改结论：`ctx.caller`；BROKER 经 D4b 探针回填（§④） |
-| lib.rs:236（现 :259） | network Err 是否原子回滚 | 设计不依赖该假设（fund 预检使两语义均正确）；T5 fund status=1 行为证据 | 登记：不依赖；devnet 实跑为证 |
-| lib.rs:356（现 :384） | network HashMap→Vec 确定性迭代语法 | `state.committee_members.iter()` 编译通过 + :358 顺序无关性论证（ahash 种子确定） | 登记结论 |
-| lib.rs:491（现 :524） | 真实 slot/height 访问器 | bartender:90-96 `lyquor_api::chain_pos()` + primitives `.block()`（u64） | 改结论：`.block()` 落地单点 |
-| lib.rs:501（现 :537） | current_slot 替换为 ctx 派生 | `chain_pos()` 为无 ctx host API（runtime/mod.rs:299），单点形态保留 | 改结论；实证：T5 后 deal `created_slot=31`/`deadline_slot=331` 与链高一致 |
-| lib.rs:505（现 :542） | caller 提取（ctx.from/signer） | CallContext 字段实证 | 改结论：`caller_agent(&ctx.caller)` = `caller.to_string()`（形态 D4b 钉死） |
-| lib.rs:510（现 :550） | caller_agent 体内标记 | 同上 | 改结论，随 :505 落地 |
-| timeout.rs:29 | 引用型注记（剩余清单） | inline 四项（34/41/44/49）全部落地 | 改写：inline 已验证，残余仅 W1-1 两处（:13/:67） |
-| timeout.rs:34 | `#[method::instance]` 属性与 Context 形态 | template:48 `ctx: &mut _` 同款 + 编译通过 | 改结论 |
-| timeout.rs:41 | instance fn 内取共识时间 | `crate::current_slot` 单点复用（内部 `chain_pos()`，无 ctx 依赖）+ 编译 | 改结论 |
-| timeout.rs:44 | call! 跨调用形态 | **A 档**：basicswap:31 命名参数+返回解包语法，目标 `ctx.lyquid_id`（InstanceContext 字段），编译通过——无需 B 档 | 改结论（A 档落地） |
-| timeout.rs:49 | guard 幂等（Funded-only, terminal-safe） | core 测试既钉（阶段一，壳 39/39 持续为证） | 登记结论 |
+| lib.rs 8→8 | 文件头 W1 待验总说明 | S5 完成 | 改为"S5 已验证 + 残余指向 W1-B" |
+| lib.rs 53→57 | 平台是否导出 LyquidResult | `$V7/lyquid/src/lib.rs:199`（v0.7.3）与 v0.8.1 同面实读 | 改结论：已导出同名同形，本地别名退役为 `pub use lyquid::LyquidResult;` |
+| lib.rs 59→65 | 错误构造器形态 | v0.7.3 `LyquidError` 枚举 :172-189（无 `msg`）+ erc20:31 同款 | 改结论：`LyquidError::LyquidRuntime(String)` |
+| lib.rs 182→220 | caller 访问器 | `CallContext.caller: Address`（:162）+ erc20:161 `ctx.caller` | 改结论：`ctx.caller`；BROKER 经 D4b 探针回填（§④） |
+| lib.rs 236→276 | network Err 是否原子回滚 | 设计不依赖该假设（fund 预检使两语义均正确）；T5 fund status=1 行为证据 | 登记：不依赖；devnet 实跑为证 |
+| lib.rs 356→412 | network HashMap→Vec 确定性迭代语法 | `state.committee_members.iter()` 编译通过 + :358（现 :414 附近）顺序无关性论证（ahash 种子确定） | 登记结论 |
+| lib.rs 491→573 | 真实 slot/height 访问器 | bartender:90-96 `lyquor_api::chain_pos()` + primitives `.block()`（u64） | 改结论：`.block()` 落地单点 |
+| lib.rs 501→586 | current_slot 替换为 ctx 派生 | `chain_pos()` 为无 ctx host API（runtime/mod.rs:299），单点形态保留 | 改结论；实证：T5 后 deal `created_slot=31`/`deadline_slot=331` 与链高一致 |
+| lib.rs 505→591 | caller 提取（ctx.from/signer） | CallContext 字段实证 | 改结论：`caller_agent(&ctx.caller)` = `caller.to_string()`（形态 D4b 钉死） |
+| lib.rs 510→599 | caller_agent 体内标记 | 同上 | 改结论，随 591 落地 |
+| timeout.rs 29→30 | 引用型注记（剩余清单） | inline 四项（现 37/43/47/56）全部落地 | 改写：inline 已验证，残余仅 W1-1 两处（现 13/75） |
+| timeout.rs 34→37 | `#[method::instance]` 属性与 Context 形态 | template:48 `ctx: &mut _` 同款 + 编译通过 | 改结论 |
+| timeout.rs 41→43 | instance fn 内取共识时间 | `crate::current_slot` 单点复用（内部 `chain_pos()`，无 ctx 依赖）+ 编译 | 改结论 |
+| timeout.rs 44→47 | call! 跨调用形态 | **A 档**：basicswap:31 命名参数+返回解包语法，目标 `ctx.lyquid_id`（InstanceContext 字段），编译通过——无需 B 档 | 改结论（A 档落地） |
+| timeout.rs 49→56 | guard 幂等（Funded-only, terminal-safe） | core 测试既钉（阶段一，壳 39/39 持续为证） | 登记结论 |
 
 ### 保留 8 行（W1-B 范围，标记原文未动）
 
-| 位点 | 假设 | 保留理由 |
+| 位点（原→现@740e810） | 假设 | 保留理由 |
 |---|---|---|
-| timeout.rs:13 | trigger 语义需 W1-1 在 4 节点 devnet 证明 | S1/W1-B 范围 |
-| timeout.rs:67 | W1-1 验收标准（kill/重启不双退、延迟上限） | S1/W1-B 范围 |
-| assessor.rs:14 | lyquid-llm 导入路径（v0.7.3 实证面） | S3/W1-B 范围 |
-| assessor.rs:63 | 真实后端接线前 fallback 说明 | S3/W1-B 范围 |
-| assessor.rs:90 | json crate story 待定 | S3/W1-B 范围 |
-| committee.rs:46 | 委员会证据集与 network evidence_log 同源假定 | S2 域（读-算-校同源已钉） |
-| committee.rs:70 | Vec-in-network-state 语法待验 | S2 域（S5 编译通过即旁证） |
-| types.rs:18 | devnet slot 长度参数 | S1/W1-B 定时语义（实测注：devnet `SLOT_MS` 语义下 60000ms→300 slots，见 T5 输出 `timeout_slots:300`） |
+| timeout.rs 13→13 | trigger 语义需 W1-1 在 4 节点 devnet 证明 | S1/W1-B 范围 |
+| timeout.rs 67→75 | W1-1 验收标准（kill/重启不双退、延迟上限） | S1/W1-B 范围 |
+| assessor.rs 14→14 | lyquid-llm 导入路径（v0.7.3 实证面） | S3/W1-B 范围 |
+| assessor.rs 63→63 | 真实后端接线前 fallback 说明 | S3/W1-B 范围 |
+| assessor.rs 90→90 | json crate story 待定 | S3/W1-B 范围 |
+| committee.rs 46→53 | 委员会证据集与 network evidence_log 同源假定 | S2 域（读-算-校同源已钉） |
+| committee.rs 70→77 | Vec-in-network-state 语法待验 | S2 域（S5 编译通过即旁证） |
+| types.rs 18→18 | devnet slot 长度参数 | S1/W1-B 定时语义（实测注：60000ms→300 slots，见 T5 输出 `timeout_slots:300`） |
 
 ### 追加行（方案 §5.6-③ 预留）
 
@@ -64,6 +69,22 @@
 |---|---|
 | D7 触发行 | 见 §⑤：rev 上移 `fd575e8`（v0.8.1），全量对照后代码零改动、重部署重验证通过 |
 | D6 追加行 | 不适用（A 档直接编译通过，B 档未启用，≤5 遗留预算消耗 **0**） |
+
+### 行号双向复验（修订轮 R1 实测 @740e810）
+
+命令（在 `trustbridge/lyquid`）：
+
+    grep -n "SPIKE(" src/*.rs
+
+输出（23 行，行号即上表现列）：
+
+    src/committee.rs:53 / :77
+    src/assessor.rs:14 / :63 / :90
+    src/lib.rs:8 / :57 / :65 / :220 / :276 / :412 / :573 / :586 / :591 / :599
+    src/types.rs:18
+    src/timeout.rs:13 / :30 / :37 / :43 / :47 / :56 / :75
+
+勾稽判定：**正向**——上列 23 行 grep 命中逐一可在本表找到归属行（处置 15：lib.rs 10 + timeout.rs 5；保留 8：timeout.rs 2 + assessor.rs 3 + committee.rs 2 + types.rs 1）；**反向**——本表 23 行逐一可反查至上述 grep 行，无孤儿。修订前原表行号为 T6 稿时点值，本次全部按 HEAD 重算更正。
 
 ## ④ T4.5 调用信封 + D4b 探针 + T5 Funded
 
@@ -81,6 +102,7 @@
   1. v0.7.3/0.8.1 的 `EthAbiType` 无裸 `u128`（仅 U8..U64 + `U64/U128/U256` 包装，ethabi.rs:218-281）→ faucet/create_deal 的 `amount` 改收 `U128`，边界 `.to::<u128>()` 转回领域域（数值语义不变，native/call! 面不变，W1-B RPC 对齐以此为准）。
   2. 官方文档明示 `()` 返回不可经 ETH API 读调用——实测**发送**不受影响（faucet/fund 均 `LyquidResult<()>`，`cast send` 成功）。
   3. 节点读路径缺陷：`eth_call` 对非-bartender lyquid 一律 `Invalid contract address`（对照：同 selector 对 bartender `0x9fE4…a6e0` 可路由可执行）→ `deal_info`（view 导出，亦不可作 tx 发送）在本 devnet 不可达。**deal_info 的字面输出转由 fund 的 Ok 路径经 `lyquid::println!` 输出同一 DealView JSON**（`shaker console` 取回；console 非共识状态，语义零影响）。
+  4. **http 读路径尝试失败（修订轮 R1，仲裁指令 1）**：将 deal_info 改 `export = http`（完整合法形态 `#[method::network(export = http, method = "GET", path_prefix = "/deal-info")]`）→ proc 宏在方法类别面拒绝：`error: \`export = http\` is only supported on #[lyquid::method::instance]`（v0.8.1 lyquid/proc/src/lib.rs:366/381；两次属性形态迭代+完整编译输出存档 `w1a-deal-info-evidence.txt` 与 `_dealinfo-http-attempt-full.txt`）。http 导出仅限 instance 方法，deal_info 改 instance = 类别语义变更，红线禁止——"新实例 + shaker serve 实调 deal_info"无构建物可部署，路径实测失败，代码已还原（export=eth，还原后通道复验 0 错）。
 
 ### D4b 探针（caller 串钉死）
 
@@ -128,8 +150,8 @@ fund:deal_view: {"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb922
 
 ## ⑦ 未跑/偏离项（如实登记）
 
-1. **`shaker test`（guest 单测）未跑**：`shaker test /tmp/tb-lyquid/Cargo.toml` 失败于下载自定义 sysroot `rust-std-1.99.0-wasm32-unknown-unknown.tar.xz`（github.com 容器/宿主均不可达，Connection refused / connect timeout；全本机镜像/卷亦无该归档）。原始错误全文存档 `w1a-t3-shaker-test-blocked.txt`。替代证据（如实定性）：`lyquid/tests/` 纯核心测试与壳挂载文件同源，壳 39/39 覆盖同一断言面；native `cargo test` 不可行（平台 crate 仅 wasm 可编译）。
-2. **deal_info 字面输出通道替换**：节点读路径限制（§④-3），字面 `"state":"Funded"` 由 fund 控制台输出承载（内容 = deal_info body 的同一序列化）。deal_info 自身编译、部署、ABI 注册均在案（wasm 导出节含 `maindeal_info`）。
+1. **`shaker test`（guest 单测）已跑、全绿（0 tests 空转：guest 单测面仅跑 lib 单测、当前为 0；断言覆盖由宿主壳 39/39 承担）**。修订轮 R1 在容器 `/tmp/tb-lyquid`（src/*.rs + Cargo.toml + Cargo.lock 与 HEAD 逐文件 md5 一致，对照存档 `_container-md5.txt`）复跑：`shaker test Cargo.toml` → `running 0 tests` / `test result: ok. 0 passed; 0 failed` / **EXIT:0**（成功输出存档 `w1a-t3-shaker-test.txt`）。更正：T6 稿 §⑦-1 曾据 `w1a-t3-shaker-test-blocked.txt` 记为"未跑/被阻断"——经仲裁指出并复核，该文件实为一次**成功**的 shaker test（v0.7.3 时点，Finished test profile 23.69s → 0 tests ok），系本人当时仅看头部模板噪声行即误判，该文件已删除。补充：S5 当轮确有两次真实的 sysroot 下载失败尝试（github 不可达），其逐字实录另档 `w1a-t3-shaker-test-sysroot-download-failed.txt`（修订轮尝试复现失败时下载已成功、EXIT:0，系当时 transient 网络状况，故以会话实录形式归档并明示非本次实跑）。
+2. **deal_info 字面输出通道替换**：节点读路径限制（§④-3），字面 `"state":"Funded"` 由 fund 控制台输出承载（内容 = deal_info body 的同一序列化）。deal_info 自身编译、部署、ABI 注册均在案（wasm 导出节含 `maindeal_info`）。**修订轮 R1 补记**：已按仲裁指令尝试 http 读路径（export=http 于 network 方法）——平台 proc 宏在方法类别面硬性拒绝（http 仅限 instance 方法），存档 `w1a-deal-info-evidence.txt`；替代作证口径维持，✅ 撤下（§⑧.4），并已向用户/终裁官申请对完成定义第 4 条的显式豁免，豁免下达前不恢复。
 3. **committee.rs 意外修法**（§5.3 赋权范围内）：`CommitteeCertWire` 补 `#[derive(serde::Serialize, serde::Deserialize)]`——method 宏入参解码要求；纯 serde（trustbridge 与壳同款依赖），**零 `lyquid::` 路径**，领域逻辑零改动；壳 39/39 持续全绿为证。
 4. **lib.rs 三项通道形态适配**（超出 §5.1 预设、由 T4.5 实测强制，逐条已内注释）：`export = eth` 五方法属性面；faucet/create_deal `amount: U128`（边界转换）；fund Ok 路径 `lyquid::println!` 输出 DealView。三者的 native 语义/方法清单/矩阵均未变。
 5. **hashbrown/std 桥**（S5 新形态发现，登记）：v0.7.3/0.8.1 network state `HashMap` = hashbrown+ahash（prelude 别名），领域 `MisconductLog` = std HashMap（types.rs:181，冻结）——`apply_committee_verdict` 经 std 镜像传入/Ok 写回桥接（lib.rs 平台层，计数单点仍在 core::apply_verdict）。
@@ -137,9 +159,9 @@ fund:deal_view: {"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb922
 
 ## ⑧ 验收口径对照（§2 六条）
 
-1. **S5 编译清零（通道限定）**：✅ 选定通道 0 错（`w1a-t3-cargo-check-final.txt`，D7 后终态）；shaker test 未跑（§⑦-1，≤5 遗留预算消耗 0）。
+1. **S5 编译清零（通道限定）**：✅ 选定通道 0 错（`w1a-t3-cargo-check-final.txt`，D7 后终态）；shaker test 已跑全绿（0 tests）（§⑦-1，存档 `w1a-t3-shaker-test.txt`，EXIT:0）。
 2. **壳不回退**：✅ 39/39 × 4 轮。
 3. **escrow 部署**：✅ `Lyquid-rkkfz4d3…` @ `0x4A67…5319`（Platform 0.8，hosted；`w1a-deploy-output.txt`）。
-4. **走到 Funded**：✅ faucet→create_deal→fund 全经 PoC 通道（ETH API），fund 过 Buyer+余额+core 三重守卫；字面 `"state":"Funded"` 经 console（`w1a-funded-evidence.txt`）。
+4. **走到 Funded**：⚠️ 部分达成（deal_info 未实际执行，由 fund 控制台同一 DealView 序列化替代作证）——faucet→create_deal→fund 全经 PoC 通道（ETH API），fund 过 Buyer+余额+core 三重守卫；字面 `"state":"Funded"` 经 console（`w1a-funded-evidence.txt`）。deal_info 字面执行被平台双重关闭（eth_call 读路由不含非-bartender 实例 + http 导出仅限 instance 方法，尝试失败存档 `w1a-deal-info-evidence.txt`）。**已向用户/终裁官申请对完成定义第 4 条的显式豁免；豁免下达前本条不恢复 ✅。**
 5. **deploy.sh 校正**：✅ 按 D8 实测通道重写并复跑通过（复跑产出 ss7x5ed 实例，见部署档案尾注）。
-6. **implementation.md**：✅ 本文件（SPIKE 23 行双向勾稽 + talc/ahash F12 + 裁定锚点登记）。
+6. **implementation.md**：✅ 本文件（SPIKE 23 行双向勾稽 + talc/ahash F12 + 裁定登记）。**修订轮 R1 行号复验证据**：命令 `grep -n "SPIKE(" src/*.rs`（@740e810）输出 23 行 = lib.rs 8/57/65/220/276/412/573/586/591/599 + timeout.rs 13/30/37/43/47/56/75 + assessor.rs 14/63/90 + committee.rs 53/77 + types.rs 18，与 §③ 表现列逐一对应、无孤儿（正反双向，摘录见 §③"行号双向复验"）。

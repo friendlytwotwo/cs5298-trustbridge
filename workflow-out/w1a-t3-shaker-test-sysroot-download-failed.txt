@@ -1,0 +1,29 @@
+W1-A T3：shaker test 的 sysroot 下载失败——历史实录（修订轮归档）
+=====================================================================
+性质：以下为 S5 当轮（修订前会话）两次真实命令输出的逐字摘录，非本次修订
+实跑——修订轮实测复现失败（移除已播种 sysroot 后重跑 shaker test）时下载
+成功、EXIT:0，说明当时为 transient 网络状况，现无法复现，故以实录归档。
+
+背景：容器无外网直连 github（当时实测 Connection refused / TLS 中断）；
+本人曾以宿主 rustup 工具链 std 播种 /root/.lyquor/rust-std/atomics-20261002/
+绕过（shaker 后续运行受益于平台自取成功，播种非其成功的必要条件）。
+
+—— 第一次尝试（逐字）：
+Error: Failed to prepare the custom rust-std sysroot.
+
+Caused by:
+    0: Failed to download rust-std archive from https://github.com/lyquor-labs/rust-toolchain/releases/download/atomics-20261002/rust-std-1.99.0-wasm32-unknown-unknown.tar.xz
+    1: error sending request for url (https://github.com/lyquor-labs/rust-toolchain/releases/download/atomics-20261002/rust-std-1.99.0-wasm32-unknown-unknown.tar.xz)
+    2: client error (SendRequest)
+    3: connection error
+    4: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof
+
+—— 第二次尝试（同会话稍后，逐字）：
+Error: Failed to prepare the custom rust-std sysroot.
+
+Caused by:
+    0: Failed to download rust-std archive from https://github.com/lyquor-labs/rust-toolchain/releases/download/atomics-20261002/rust-std-1.99.0-wasm32-unknown-unknown.tar.xz
+    1: error sending request for url (...)
+    2: client error (Connect)
+    3: tcp connect error
+    4: Connection refused (os error 111)

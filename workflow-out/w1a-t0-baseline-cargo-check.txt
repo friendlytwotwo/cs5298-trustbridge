@@ -1,0 +1,582 @@
+error: invalid character `{` in package name: `{{project-name}}`, the first character must be a Unicode XID start character (most letters or `_`)
+ --> ../../usr/local/cargo/git/checkouts/ldk-b72281d44a8ce511/3b10b6a/lyquid-template/Cargo.toml:2:8
+  |
+2 | name = "{{project-name}}"
+  |        ^^^^^^^^^^^^^^^^^^
+    Checking trustbridge v0.1.0 (/tmp/tb-lyquid)
+error[E0433]: cannot find module or crate `method` in this scope
+  --> src/timeout.rs:36:3
+   |
+36 | #[method::instance]
+   |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:159:3
+    |
+159 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:169:3
+    |
+169 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:225:3
+    |
+225 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:255:3
+    |
+255 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:275:3
+    |
+275 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:288:3
+    |
+288 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:308:3
+    |
+308 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:322:3
+    |
+322 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:337:3
+    |
+337 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:353:3
+    |
+353 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:386:3
+    |
+386 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:401:3
+    |
+401 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:410:3
+    |
+410 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:417:3
+    |
+417 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error[E0433]: cannot find module or crate `method` in this scope
+   --> src/lib.rs:428:3
+    |
+428 | #[method::network]
+    |   ^^^^^^ use of unresolved module or unlinked crate `method`
+
+error: cannot find macro `call` in this scope
+  --> src/timeout.rs:46:28
+   |
+46 |     let due: Vec<DealId> = call!(ctx, due_deals(now))?;
+   |                            ^^^^
+
+error: cannot find macro `call` in this scope
+  --> src/timeout.rs:51:17
+   |
+51 |         let _ = call!(ctx, claim_timeout(id.clone()))?;
+   |                 ^^^^
+
+error: cannot find macro `state` in this scope
+  --> src/lib.rs:31:1
+   |
+31 | state! {
+   | ^^^^^
+
+error: cannot find macro `log` in this scope
+   --> src/lib.rs:163:5
+    |
+163 |     log!("faucet:{}:+{}", to, amount);
+    |     ^^^
+
+error: cannot find macro `log` in this scope
+   --> src/lib.rs:248:5
+    |
+248 |     log!("fund:{}:by:{}", deal_id, buyer);
+    |     ^^^
+
+error[E0425]: cannot find type `Context` in this scope
+  --> src/timeout.rs:37:26
+   |
+37 | pub fn watcher_step(ctx: Context) -> LyquidResult<Vec<DealId>> {
+   |                          ^^^^^^^ not found in this scope
+   |
+help: consider importing this struct
+   |
+21 + use std::task::Context;
+   |
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:136:34
+    |
+136 | fn require(access: Access, ctx: &Context, deal: Option<&Deal>) -> LyquidResult<AgentId> {
+    |                                  ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `committee_members` in this scope
+   --> src/lib.rs:147:30
+    |
+147 |         Access::Committee => committee_members.get(&caller).copied().unwrap_or(false),
+    |                              ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:160:20
+    |
+160 | pub fn faucet(ctx: Context, to: AgentId, amount: u128) -> LyquidResult<()> {
+    |                    ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:171:10
+    |
+171 |     ctx: Context,
+    |          ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deal_counter` in this scope
+   --> src/lib.rs:198:5
+    |
+198 |     deal_counter += 1;
+    |     ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deal_counter` in this scope
+   --> src/lib.rs:199:33
+    |
+199 |     let id = format!("deal-{}", deal_counter);
+    |                                 ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:220:5
+    |
+220 |     deals.insert(id.clone(), deal);
+    |     ^^^^^
+    |
+help: a local variable with a similar name exists
+    |
+220 -     deals.insert(id.clone(), deal);
+220 +     deal.insert(id.clone(), deal);
+    |
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:226:18
+    |
+226 | pub fn fund(ctx: Context, deal_id: DealId) -> LyquidResult<()> {
+    |                  ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:228:20
+    |
+228 |         let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:233:20
+    |
+233 |         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:240:19
+    |
+240 |         let bal = balances.get(&buyer).copied().unwrap_or(0);
+    |                   ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:256:22
+    |
+256 | pub fn notarize(ctx: Context, deal_id: DealId, from: AgentId, to: AgentId, payload_digest: Digest) -> LyquidResult<u64> {
+    |                      ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `evidence_log` in this scope
+   --> src/lib.rs:269:19
+    |
+269 |     let entries = evidence_log.entry(deal_id.clone()).or_default();
+    |                   ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:276:32
+    |
+276 | pub fn submit_deliverable(ctx: Context, deal_id: DealId, deliverable_digest: Digest) -> LyquidResult<()> {
+    |                                ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:278:20
+    |
+278 |         let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:282:16
+    |
+282 |     let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:289:22
+    |
+289 | pub fn complete(ctx: Context, deal_id: DealId) -> LyquidResult<()> {
+    |                      ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:291:20
+    |
+291 |         let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:296:20
+    |
+296 |         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:309:27
+    |
+309 | pub fn claim_timeout(ctx: Context, deal_id: DealId) -> LyquidResult<bool> {
+    |                           ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:313:20
+    |
+313 |         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:323:20
+    |
+323 | pub fn cancel(ctx: Context, deal_id: DealId) -> LyquidResult<()> {
+    |                    ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:325:20
+    |
+325 |         let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:329:20
+    |
+329 |         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:338:26
+    |
+338 | pub fn open_dispute(ctx: Context, deal_id: DealId, reason_digest: Digest) -> LyquidResult<()> {
+    |                          ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:342:20
+    |
+342 |         let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:345:16
+    |
+345 |     let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:354:37
+    |
+354 | pub fn apply_committee_verdict(ctx: Context, deal_id: DealId, cert: committee::CommitteeCertWire) -> LyquidResult<()> {
+    |                                     ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `committee_members` in this scope
+   --> src/lib.rs:359:33
+    |
+359 |     let members: Vec<AgentId> = committee_members.iter().map(|(m, _)| m.clone()).collect();
+    |                                 ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `committee_threshold` in this scope
+   --> src/lib.rs:360:21
+    |
+360 |     let threshold = committee_threshold as usize;
+    |                     ^^^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `evidence_log` in this scope
+   --> src/lib.rs:370:39
+    |
+370 |     let entries: Vec<EvidenceEntry> = evidence_log.get(&deal_id).cloned().unwrap_or_default();
+    |                                       ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:376:20
+    |
+376 |         let deal = deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                    ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `misconduct` in this scope
+   --> src/lib.rs:377:85
+    |
+377 |         let p = core::apply_verdict(deal, cert, &members, threshold, &entries, &mut misconduct).map_err(bridge_core_err)?;
+    |                                                                                     ^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:387:30
+    |
+387 | pub fn committee_config(ctx: Context, members: Vec<AgentId>, threshold: u32) -> LyquidResult<()> {
+    |                              ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `committee_members` in this scope
+   --> src/lib.rs:391:5
+    |
+391 |     committee_members.clear();
+    |     ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `committee_members` in this scope
+   --> src/lib.rs:393:9
+    |
+393 |         committee_members.insert(m, true);
+    |         ^^^^^^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `committee_threshold` in this scope
+   --> src/lib.rs:395:5
+    |
+395 |     committee_threshold = threshold;
+    |     ^^^^^^^^^^^^^^^^^^^
+    |
+help: you might have meant to introduce a new binding
+    |
+395 |     let committee_threshold = threshold;
+    |     +++
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:402:23
+    |
+402 | pub fn deal_info(ctx: Context, deal_id: DealId) -> LyquidResult<String> {
+    |                       ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:404:16
+    |
+404 |     let deal = deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+    |                ^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:411:35
+    |
+411 | pub fn evidence_entries_json(ctx: Context, deal_id: DealId) -> LyquidResult<String> {
+    |                                   ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `evidence_log` in this scope
+   --> src/lib.rs:413:31
+    |
+413 |     Ok(serde_json::to_string(&evidence_log.get(&deal_id).cloned().unwrap_or_default())
+    |                               ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:418:24
+    |
+418 | pub fn balance_of(ctx: Context, agent: AgentId) -> LyquidResult<u128> {
+    |                        ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:420:8
+    |
+420 |     Ok(balances.get(&agent).copied().unwrap_or(0))
+    |        ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:429:23
+    |
+429 | pub fn due_deals(ctx: Context, now: u64) -> LyquidResult<Vec<DealId>> {
+    |                       ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0425]: cannot find value `deals` in this scope
+   --> src/lib.rs:431:30
+    |
+431 |     Ok(core::due_for_timeout(deals.iter(), now))
+    |                              ^^^^^ not found in this scope
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:439:15
+    |
+439 |     let bal = balances.get(agent).copied().unwrap_or(0);
+    |               ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:443:5
+    |
+443 |     balances.insert(agent.clone(), bal - amount);
+    |     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:448:15
+    |
+448 |     let bal = balances.get(agent).copied().unwrap_or(0);
+    |               ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find value `balances` in this scope
+   --> src/lib.rs:449:5
+    |
+449 |     balances.insert(agent.clone(), bal + amount);
+    |     ^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find type `Context` in this scope
+   --> src/lib.rs:509:24
+    |
+509 | fn caller_agent(_ctx: &Context) -> LyquidResult<AgentId> {
+    |                        ^^^^^^^ not found in this scope
+    |
+help: consider importing one of these structs
+    |
+ 21 + use std::task::Context;
+    |
+ 21 + use ::core::task::Context;
+    |
+
+error[E0599]: no variant, associated function, or constant named `msg` found for enum `LyquidError` in the current scope
+  --> src/lib.rs:60:26
+   |
+60 |     lyquid::LyquidError::msg(msg)
+   |                          ^^^ variant, associated function, or constant not found in `LyquidError`
+
+Some errors have detailed explanations: E0425, E0433, E0599.
+For more information about an error, try `rustc --explain E0425`.
+error: could not compile `trustbridge` (lib) due to 73 previous errors

@@ -1,0 +1,40 @@
+W1-A T4: 部署通道实测（D8 三选一）+ D7 版本对齐部署史
+=====================================================================
+通道选型实测（T4.0）：
+  - 宿主:      which shaker => 无
+  - 容器挂载:  docker inspect ldk-tools-1 => 仅 "F:\...\ldk" -> /ldk（trustbridge 不可见，R4 命中）
+  - 工具链:    rustup target list --installed => wasm32-unknown-unknown + x86_64-unknown-linux-gnu; cargo 1.99.0
+  - 结论:      docker cp + 容器内 shaker deploy（deploy.sh 已按此固化）
+  - 部署命令:  docker exec ldk-tools-1 sh -c "cd /tmp/tb-lyquid && shaker deploy Cargo.toml"
+               （constructor 输入由 shaker 自动合成，含 bartender 地址与镜像 digest，无需 --input）
+
+D7 版本对齐部署史（触发证据见 docker logs ldk-node-1 摘录于下）：
+  [0.7.3 锁] Lyquid-ahjg4... @ 0xCf7Ed3...（deploy 成功/Platform 0.7，但托管失败）
+             Lyquid-wsd6v4...（同上；多次 --update 得 0x5FC8/0x610178/0x9A67...）
+  [D7 后 rev=fd575e8] 0x68B1...（--update：Platform 0.8，但旧 0.7.3 时代历史重放 pin 住 sequencing）
+                      Lyquid-zz2juejwa3xj5cx6jqespjhlzzr7bjchoi7aa @ 0x3Aa5ebB10DC797CAC828524e59A333d0A371443c
+                      => 节点日志: "Lyquid discovered and hosted"（首次完整存活）
+                      T5 首轮 Funded 全路径在本实例实证（tx 见 w1a-funded-evidence.txt 附录段/上一轮）
+  [最终] 加 fund-println 后全新部署:
+                      Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa @ 0x4A679253410272dd5232B3Ff7cF5dbB88f295319
+                      T5 全路径重跑通过（本档案主体）
+
+shaker deploy 尾部输出（最终实例，Platform Version: 0.8）：
+------------------------------------------------------------
+Status: created
+Lyquid ID: Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa
+Contract: 0x4A679253410272dd5232B3Ff7cF5dbB88f295319
+Platform Version: 0.8
+2026-10-24T05:27:38.595536Z  INFO ThreadId(01) shaker: created Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa => 0x4A679253410272dd5232B3Ff7cF5dbB88f295319
+------------------------------------------------------------
+（deploy.sh 复跑可复现：2026-10-24 再跑一次得 Lyquid-ss7x5edzcxjszfykf3edlyl44etxn256htzqa @ 0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB，Platform Version: 0.8）
+
+D7 触发证据（docker logs ldk-node-1 实测摘录）：
+------------------------------------------------------------
+ERROR lyquor_lib::discovery: failed to load Lyquid lyquid_id=Lyquid-ahjg4... class=core/runtime
+error=Hosting(..., VmRuntime(VM(Instance(Artifact(IncompatibleLdk { image: "0.7.3", node: "0.8.2-dev",
+hint: "rebuild the Lyquid against lyquid 0.8.2-dev or upgrade the node" })))))
+INFO lyquor_lib::discovery: Lyquid discovered and hosted lyquid_id=Lyquid-zz2jue...（rev=fd575e8 构建后）
+------------------------------------------------------------
+注：部署（sequencing）层接受 v0.7.3 产物，但托管/VM 层拒绝——即 D7 判据 (a)
+"0.8 devnet/shaker 拒绝 v0.7.3 构建的 cdylib"以托管拒绝的形式命中。

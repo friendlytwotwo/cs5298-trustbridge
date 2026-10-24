@@ -118,11 +118,15 @@ fn bridge_core_err(e: core::TransitionError) -> lyquid::LyquidError {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Access { Buyer, Seller, BuyerOrSeller, Broker, Committee, Anyone }
 
-/// Broker identity for devnet runs. W1-A placeholder: backfilled with the
-/// deployer/caller address string confirmed by the T4.5 self-signed
-/// notarize probe (D4b of workflow-out/plan.md). TODO(W2): real deployer
-/// identity via the real deployment flow.
-const BROKER: &str = "TBD-CALLER-ADDR";
+/// Broker identity for devnet runs. W1-A: pinned by the T4.5 self-signed
+/// notarize probe (D4b) — the string below returned status=1 (Ok(seq)) on
+/// `notarize("probe-deal-d4b", <this string>, ...)`; per the from==caller
+/// check (enforced before any state write) that means it equals
+/// `ctx.caller.to_string()` exactly, EIP-55 checksummed hex. Evidence: tx
+/// 0xf962ef3bb9ff4fc16a2830fd6e46c816e1963ae2522a0c2ab3759aa8f466c9af
+/// (workflow-out/w1a-call-poc.txt). TODO(W2): real deployer identity via
+/// the real deployment flow.
+const BROKER: &str = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 
 /// The matrix — one row per network fn. Data, so the audit is one glance.
 /// Reviewer: diff this against core's guard docs.
@@ -165,6 +169,12 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
 // ---------------------------------------------------------------------------
 // Network functions (deterministic, replayed by all nodes)
 // ---------------------------------------------------------------------------
+// 调用通道注记（T4.5 实测，D8b 备选落地）：shaker serve 的虚拟主机 HTTP 面
+// 仅服务 `export = http` 的 instance 方法（对 native 面全部 Not found，探针
+// 存档 workflow-out/w1a-call-poc.txt）——而本 crate 方法清单冻结、不得新增
+// http 包装方法。故 Funded 路径 + 探针五方法（faucet/create_deal/fund/
+// notarize/deal_info）按 D8b 备选加 `export = eth`，经容器内 cast 以 ETH ABI
+// 调用；属性面变化而已，方法清单/矩阵零增删。其余方法维持 native 形态。
 // 借用纪律（S5 实证，D3-2）：每个方法开头单点 reborrow
 // `let state = &mut *ctx.network;`（只读 getter 用 `&*`），体内一律
 // `state.<field>`；不逐处 `ctx.network.` 前缀——多字段并存时逐处前缀触发
@@ -175,8 +185,13 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
 /// Devnet-only faucet so the demo can mint internal-ledger tokens.
 /// TODO(W2): gate behind a DEMO flag; listed in the report's trust-assumption
 /// table as a demo-only trust hole.
-#[method::network]
-pub fn faucet(ctx: &mut _, to: AgentId, amount: u128) -> LyquidResult<()> {
+#[method::network(export = eth)]
+pub fn faucet(ctx: &mut _, to: AgentId, amount: U128) -> LyquidResult<()> {
+    // T4.5 通道形态（登记 implementation.md）：export = eth 要求参数实现
+    // EthAbiType，v0.7.3 无 u128 裸型（仅 U64/U128/U256 alloy 包装，ethabi.rs:218-281）
+    // ——故 wire 面收 U128（ABI uint128），边界 to::<u128>() 转回领域域，
+    // 数值语义不变（native/call! 面不变，W1-B RPC 对齐以此为准）。
+    let amount: u128 = amount.to::<u128>();
     let state = &mut *ctx.network;
     credit(state, &to, amount);
     log!(faucet, &format!("faucet:{}:+{}", to, amount));
@@ -185,12 +200,12 @@ pub fn faucet(ctx: &mut _, to: AgentId, amount: u128) -> LyquidResult<()> {
 
 /// Broker creates a deal from an accepted assessment (see assessor.rs for the
 /// instance->network two-step). The timeout must be estimate-derived.
-#[method::network]
+#[method::network(export = eth)]
 pub fn create_deal(
     ctx: &mut _,
     buyer: AgentId,
     seller: AgentId,
-    amount: u128,
+    amount: U128,
     fee_bps: u16,
     terms_digest: Digest,
     acceptance_digest: Digest,
@@ -199,6 +214,8 @@ pub fn create_deal(
 ) -> LyquidResult<DealId> {
     let state = &mut *ctx.network;
     require(Access::Broker, &ctx.caller, state, None)?;
+    // T4.5 通道形态：同 faucet —— wire 面收 U128，边界转回 u128 领域域。
+    let amount: u128 = amount.to::<u128>();
     // Broker-only creation enforced above (ACCESS_MATRIX Broker row).
     // S5-verified（was SPIKE(W1)）: caller accessor is `ctx.caller: Address`
     // （erc20 src/lib.rs:161 + CallContext 定义）；BROKER 地址经 T4.5 探针
@@ -244,7 +261,7 @@ pub fn create_deal(
 }
 
 /// Buyer escrows the full amount (internal ledger debit + state transition).
-#[method::network]
+#[method::network(export = eth)]
 pub fn fund(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     let buyer = {
@@ -268,13 +285,24 @@ pub fn fund(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     };
     debit(state, &buyer, amount)?;
     log!(fund, &format!("fund:{}:by:{}", deal_id, buyer));
+    // T4.5 通道注记：本 devnet 构建的 eth_call 读路径对非-bartender lyquid
+    // 一律 "Invalid contract address"（节点侧限制，对照实测：同 selector 对
+    // bartender 可路由；登记 implementation.md，S4/W1-B 对齐范围）。
+    // deal_info 因此不可达，转由 fund 的 Ok 路径经控制台输出与 deal_info
+    // 完全相同的 DealView JSON（字面 "state":"Funded" 证据）——console
+    // 输出非共识状态，语义零影响。
+    {
+        let deal = state.deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+        let view = serde_json::to_string(&DealView::from(deal)).map_err(|e| lyquid_error(&format!("json serialize: {e}")))?;
+        lyquid::println!("fund:deal_view: {}", view);
+    }
     Ok(())
 }
 
 /// Append-only communication notarization. Anyone may submit; entries are
 /// sequenced per deal. This is the fulfillment evidence the committee rules on.
 /// 裁决时的证书根由本日志条目折叠派生（core::evidence_root，经 apply_committee_verdict 单点读取）。
-#[method::network]
+#[method::network(export = eth)]
 pub fn notarize(ctx: &mut _, deal_id: DealId, from: AgentId, to: AgentId, payload_digest: Digest) -> LyquidResult<u64> {
     // 自署名强制（仲裁#3）：任何人可提交，但条目的 from 必须等于提交者本人
     // ——`check_evidence_shape` 的 `e.from == deal.seller`（committee.rs:58）
@@ -442,13 +470,21 @@ pub fn committee_config(ctx: &mut _, members: Vec<AgentId>, threshold: u32) -> L
 
 // --- getters used by agents and the watcher ---
 
-#[method::network]
+#[method::network(export = eth)]
 pub fn deal_info(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
     let state = &*ctx.network;
     let deal = state.deals.get(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
     // Consensus replay must not panic: serialization errors become platform
     // errors instead of an unwrap.
-    Ok(serde_json::to_string(&DealView::from(deal)).map_err(|e| lyquid_error(&format!("json serialize: {e}")))?)
+    let json = serde_json::to_string(&DealView::from(deal)).map_err(|e| lyquid_error(&format!("json serialize: {e}")))?;
+    // T4.5 通道注记（登记 implementation.md）：本 devnet 构建（node main-latest
+    // 0.8.x）的 eth_call 读路径对 lyquid 合约一律回 "Invalid contract
+    // address"（节点侧问题，属 S4/W1-B RPC 对齐范围）；导出 getter 亦不可作
+    // 交易发送（staticcall-only 路由，revert）。deal_info 的输出改经控制台
+    // 单点导出（lyquid::println!，erc20 transfer 同款），shaker console 可取
+    // ——控制台输出非共识状态，语义零影响。
+    lyquid::println!("deal_info: {}", json);
+    Ok(json)
 }
 
 #[method::network]

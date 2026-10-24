@@ -1,0 +1,50 @@
+W1-A T4.5: 调用通道 PoC + D4b caller 形态探针（硬门禁记录）
+=====================================================================
+【通道负探针——shaker serve（D8b 首选）对 native 面不可达】
+代理建立成功：
+  $ shaker serve Lyquid-wsd6v4xjliqgjrcaiikuafrjmaho4q4hqiwqa
+  proxying http://127.0.0.1:8080/ => wsd6v4...qiwqa.ve3tav...@ http://node:10087
+POST / | /api | /faucet | /api/faucet | /rpc | /call | /lyquid（JSON-RPC 或裸 JSON）：
+  全部 => Not found
+结论：虚拟主机 HTTP 面仅服务 `export = http` 的 instance 方法（proc 宏
+文档同款约束）；native 网络方法不可达。方法清单冻结不得新增 http 包装，
+转 D8b 备选：export = eth + 容器内 cast 1.7.1。
+
+【信封】ETH API（文档 docs.lyquor.dev/docs/tutorial/test/ 同款）：
+  URL:    http://node:10087/api   （容器内；宿主等价 127.0.0.1:10087/api）
+  发送:   cast send <CONTRACT> "<sig>" <args...> --private-key $KEY
+  编码:   Ethereum ABI（faucet(string,uint128) 等；u128 参数以 U128 包装=uint128）
+  响应:   anvil 兼容回执（status/blockNumber/transactionHash/logs）
+  KEY:    0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+          （= 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266, anvil #0）
+
+【PoC（最终实例 Lyquid-rkkfz4d3... @ 0x4A679253410272dd5232B3Ff7cF5dbB88f295319）】
+$ cast send 0x4A679253410272dd5232B3Ff7cF5dbB88f295319 \
+    "faucet(string,uint128)" "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" 1000 \
+    --private-key $KEY --rpc-url http://node:10087/api
+  blockNumber          27
+  status               1 (success)
+  transactionHash      0xb53a36de6e4e266a93bfa827a4bac01e98a4a2b2900a6bda0eaadca71092f554
+  （回执 logs 含 LyteLog：tag "faucet"，params alice/A/1000 可辨识）
+  历史同款 PoC（zz2jue 实例）：tx 0x0d301eacbc5d8a6f16499d3641d537be6ee585ca64917ae067a6be99dc909d9b，block 21，status 1
+
+【D4b 自署名探针（caller 串钉死）】
+机制：notarize 的 from==caller 校验先于一切状态写入（lib.rs），Ok(seq) ⟺
+候选串与 ctx.caller.to_string() 完全一致（含 EIP-55 大小写）。
+$ cast send <ADDR> "notarize(string,string,string,string)" \
+    "probe-deal-d4b" "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" "bob" "deadbeef" ...
+  status               1 (success)     ==> Ok(seq)（探针命中）
+  transactionHash      0x9f1b5c34f5ead0e16eace6f9d4c77b2ac0dbb699760512a96c299cb39924abc3
+  （rkkfz4 实例；zz2jue 实例同款：tx 0x2c07d9486a62fc94a1d8dc4c690a013077a5018dfe32e7a7582d206bb115cd09）
+钉死结论：ctx.caller.to_string() = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+（EIP-55 checksummed hex；已回填 BROKER 常量，create_deal broker 守卫经 T5.2 实证活化）
+
+【读路径限制（如实登记）】
+$ cast call <ADDR> "deal_info(string)" "deal-1"
+  Error: server returned an error response: error code -1: Invalid contract address.
+对照实验：同 RPC 对 bartender（0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0）
+  eth_call 0x554de29b => Execution error: Barrel(Lyquid(LyquorInput))   ← 可路由、可执行
+即本 devnet 构建（node main-latest）的读路由只覆盖 bartender 类实例；
+非-bartender lyquid 的读调用被节点拒之门外。deal_info/view 导出亦不可作
+交易发送（无链上 selector 路由，gas 估算即 revert）。属节点侧限制，
+S4/W1-B RPC 对齐范围。状态字面证据改经 shaker console（见 w1a-funded-evidence.txt）。

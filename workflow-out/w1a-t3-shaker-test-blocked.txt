@@ -1,0 +1,204 @@
+error: invalid character `{` in package name: `{{project-name}}`, the first character must be a Unicode XID start character (most letters or `_`)
+ --> ../../usr/local/cargo/git/checkouts/ldk-b72281d44a8ce511/3b10b6a/lyquid-template/Cargo.toml:2:8
+  |
+2 | name = "{{project-name}}"
+  |        ^^^^^^^^^^^^^^^^^^
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.5
+   Compiling typenum v1.20.1
+   Compiling serde v1.0.229
+   Compiling paste v1.0.15
+   Compiling const-oid v0.10.2
+   Compiling unicode-segmentation v1.13.3
+   Compiling foldhash v0.2.0
+   Compiling cpufeatures v0.2.17
+   Compiling unicode-xid v0.2.6
+   Compiling ruint-macro v1.2.1
+   Compiling keccak v0.2.2
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.14
+   Compiling heck v0.5.0
+   Compiling dunce v1.0.5
+   Compiling equivalent v1.0.3
+   Compiling thiserror v2.0.21
+   Compiling cpufeatures v0.3.1
+   Compiling cc v1.8.0
+   Compiling itoa v1.0.18
+   Compiling constant_time_eq v0.4.2
+   Compiling version_check v0.9.5
+   Compiling arrayvec v0.7.8
+   Compiling convert_case v0.10.0
+   Compiling zerocopy v0.8.63
+   Compiling bs58 v0.5.1
+   Compiling base32 v0.5.1
+   Compiling scopeguard v1.2.0
+   Compiling zmij v1.0.23
+   Compiling lock_api v0.4.14
+   Compiling once_cell v1.21.4
+   Compiling allocator-api2 v0.4.0
+   Compiling ahash v0.8.12
+   Compiling serde_json v1.0.154
+   Compiling memchr v2.8.3
+   Compiling trustbridge v0.1.0 (/tmp/tb-lyquid)
+   Compiling hybrid-array v0.4.15
+   Compiling talc v5.1.1
+   Compiling syn v2.0.119
+   Compiling syn v3.0.9
+   Compiling proc-macro-error-attr3 v3.0.1
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling blake3 v1.8.7
+   Compiling digest v0.11.3
+   Compiling sha3 v0.11.0
+   Compiling sha2 v0.11.1
+   Compiling hashbrown v0.17.1
+   Compiling const-hex v1.19.3
+   Compiling ruint v1.20.1
+   Compiling cb58 v0.0.3
+   Compiling indexmap v2.14.2
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling macro-string v0.2.0
+   Compiling syn-solidity v1.7.3
+   Compiling proc-macro-error3 v3.0.1
+   Compiling cobs v0.3.0
+   Compiling derive_more-impl v2.1.1
+   Compiling typed-builder-macro v0.23.2
+   Compiling typed-builder v0.23.2
+   Compiling alloy-sol-macro-input v1.7.3
+   Compiling alloy-sol-macro-expander v1.7.3
+   Compiling bytes v1.12.1
+   Compiling postcard v1.1.3
+   Compiling derive_more v2.1.1
+   Compiling alloy-primitives v1.7.3
+   Compiling alloy-sol-macro v1.7.3
+   Compiling alloy-sol-types v1.7.3
+   Compiling lyquor-primitives v0.7.3 (https://github.com/lyquor-labs/ldk?tag=v0.7.3#3b10b6ad)
+   Compiling lyquid-proc v0.7.3 (https://github.com/lyquor-labs/ldk?tag=v0.7.3#3b10b6ad)
+   Compiling lyquid v0.7.3 (https://github.com/lyquor-labs/ldk?tag=v0.7.3#3b10b6ad)
+   Compiling lyquid-test v0.7.3 (https://github.com/lyquor-labs/ldk?tag=v0.7.3#3b10b6ad)
+   Compiling lyquid-llm v0.7.3 (https://github.com/lyquor-labs/ldk?tag=v0.7.3#3b10b6ad)
+warning: unstable feature specified for `-Ctarget-feature`: `atomics`
+  |
+  = note: this feature is not stably supported; its behavior can change in the future
+
+warning: unused doc comment
+   --> src/lib.rs:175:1
+    |
+175 | / /// Devnet-only faucet so the demo can mint internal-ledger tokens.
+176 | | /// TODO(W2): gate behind a DEMO flag; listed in the report's trust-assumption
+177 | | /// table as a demo-only trust hole.
+    | |_-----------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+   --> src/lib.rs:186:1
+    |
+186 | / /// Broker creates a deal from an accepted assessment (see assessor.rs for the
+187 | | /// instance->network two-step). The timeout must be estimate-derived.
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:246:1
+    |
+246 | /// Buyer escrows the full amount (internal ledger debit + state transition).
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:274:1
+    |
+274 | / /// Append-only communication notarization. Anyone may submit; entries are
+275 | | /// sequenced per deal. This is the fulfillment evidence the committee rules on.
+276 | | /// 裁决时的证书根由本日志条目折叠派生（core::evidence_root，经 apply_committee_verdict 单点读取）。
+    | |_---------------------------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:311:1
+    |
+311 | /// Buyer-consented settlement of a submitted deal.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:331:1
+    |
+331 | / /// Permissionless timeout claim — the on-chain guard half of the
+332 | | /// "off-chain trigger; on-chain guard" pattern (watcher: timeout.rs).
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:346:1
+    |
+346 | /// Buyer cancels a deal that has no submitted evidence yet.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:377:1
+    |
+377 | / /// Apply a committee verdict. The certificate is re-validated against the
+378 | | /// on-chain committee config; `Malicious` bumps the misconduct log.
+379 | | /// Production path: verdict arrives via oracle certified call — see committee.rs.
+    | |_---------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:467:1
+    |
+467 | / /// Advisory-only listing of deals past their timeout at the CALLER-supplied
+468 | | /// `now`. The parameter cannot move funds: the only guard on money movement
+469 | | /// is `claim_timeout`, which re-derives time via `current_slot` — a forged
+470 | | /// `now` at most perturbs this informational list. Signature kept identical
+471 | | /// to the FakeNode mirror (rpc.py `due_deals(now)`); stage-four alignment.
+    | |_--------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/timeout.rs:25:1
+   |
+25 | / /// Instance watcher body: fetch due deals via the network getter and submit
+26 | | /// claims for each. Ledger effects are zero when the guard rejects — safe to
+27 | | /// re-run, safe to run on every node.
+   | |_-------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: `trustbridge` (lib test) generated 11 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 23.69s
+     Running unittests src/lib.rs (/tmp/./lyquid_tools_target/wasm32-unknown-unknown/debug/deps/trustbridge-dd7a867d4a9d75d9.wasm)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+

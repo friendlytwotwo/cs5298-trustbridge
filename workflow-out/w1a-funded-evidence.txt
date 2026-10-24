@@ -1,0 +1,42 @@
+W1-A T5: Funded 路径实测证据（最终实例）
+=====================================================================
+实例: Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa
+合约: 0x4A679253410272dd5232B3Ff7cF5dbB88f295319  (Platform Version: 0.8)
+镜像: ldk rev=fd575e88a920448e646f23968775e52982c5201c (v0.8.1, D7 后)
+调用通道: T4.5 PoC 通过的 ETH API 通道（容器内 cast send，rpc-url http://node:10087/api，
+          devnet key = anvil #0 = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266）
+时间: 2026-10-24T05:2x UTC（devnet 单节点）
+
+T5.1 faucet(A, 1000000)   ——  cast send <ADDR> "faucet(string,uint128)" <A> 1000000
+  blockNumber          29
+  status               1 (success)
+  transactionHash      0x8670ba331785ac53a6cb204e1682120e6dd159f42c4af3c3d04503c3868b2cd0
+
+T5.2 create_deal(buyer=A, seller="bob", amount=1000, fee_bps=200,
+                 terms="terms-digest-001", acceptance="accept-digest-001",
+                 est_duration_ms=60000, est_confidence=90)
+  —— cast send <ADDR> "create_deal(string,string,uint128,uint16,string,string,uint64,uint8)" ...
+  （Access::Broker 守卫：BROKER=T4.5 探针钉死的 A 串，caller==BROKER 通过）
+  blockNumber          30
+  status               1 (success)
+  transactionHash      0x5965503f167ab3774637871066d3823710f8ba9fd28443398312141028ba9dd1
+
+T5.3 fund("deal-1")
+  —— cast send <ADDR> "fund(string)" "deal-1"
+  （Access::Buyer 守卫 caller==deal.buyer 通过；余额预检通过；core::fund
+   Qualified->Funded 是唯一转移路径，revert 否则——status=1 即行为证据）
+  blockNumber          31
+  status               1 (success)
+  transactionHash      0xfde05b2f07e225763f6f4a40b731263f09890f0d7aec39d873fb171937b076be
+
+T5.4 状态字面证据 —— shaker console Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa
+  fund 的 Ok 路径经 lyquid::println! 输出与 deal_info 完全相同的 DealView JSON：
+  fund:deal_view: {"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","seller":"bob","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":331}
+
+  ==> "state":"Funded"（字面）
+
+通道偏差登记（如实）：deal_info 的字面输出改由 fund 的控制台输出承载——本
+devnet 节点构建的 eth_call 读路径对非-bartender lyquid 一律回
+"Invalid contract address"（同 selector 对 bartender 0x9fE4...a6e0 可路由，
+节点侧限制，S4/W1-B RPC 对齐范围）；deal_info 为只读导出亦不可作交易发送。
+两者输出同一 DealView 序列化（deal_info 的 body 即该 serde_json::to_string）。

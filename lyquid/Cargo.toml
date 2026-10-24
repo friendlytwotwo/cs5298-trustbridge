@@ -15,8 +15,13 @@ description = "Committee-attested fulfillment trust layer for A2A deals on Lyquo
 # ldk's own optional deps (talc 5.0.3, ahash 0.8.12, hashbrown/lyquid-proc —
 # ldk lyquid/Cargo.toml [features]); versions are the platform's choice, not
 # ours. Git tag stays pinned at v0.7.3; no new crates.io direct deps.
-lyquid = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3", features = ["ldk"] }
-lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+# D7 版本对齐（2026-10-24 触发，证据 workflow-out/implementation.md）：devnet 节点
+# （main-latest, LDK "0.8.2-dev"）托管层拒绝 v0.7.3 构建产物
+# （IncompatibleLdk{image:"0.7.3", node:"0.8.2-dev"}，docker logs ldk-node-1 实测）。
+# 目标 = 本地 ldk 克隆 v0.8.1（rev=fd575e8，F15；与 0.7.3 所用面逐字一致，
+# implementation.md 登记对照）。语义仍是平台 pin，不是依赖浮动。
+lyquid = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
+lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c" }
 # Re-export declaration, not a new third-party dep: serde_json 1.0.154 is
 # already the locked transitive dependency of the git-pinned ldk crates
 # (Cargo.lock). Version strategy: caret "1" only — never bump past what the
@@ -31,7 +36,7 @@ serde_json = "1"
 serde = { version = "1", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
-lyquid-test = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+lyquid-test = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c" }
 
 # W1 conclusion (was SPIKE(W1)): verbatim match with lyquid-template/Cargo.toml
 # [lib] — no drift. rlib keeps `cargo test` working on the pure core without a

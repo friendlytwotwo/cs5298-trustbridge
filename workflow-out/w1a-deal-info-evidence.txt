@@ -61,3 +61,27 @@ instance 方法；deal_info 是 network 方法，改为 instance = 节点本地�
   3) cast send 交易   —— execution reverted（本节）
 deal_info 字面执行在当前平台面无通道；替代作证（fund Ok 路径控制台输出同一
 DealView 序列化）与豁免申请状态见 implementation.md §⑧.4。
+
+=====================================================================
+修订轮 R3 结案节（仲裁豁免下达，2026-10-24）
+---------------------------------------------------------------------
+仲裁豁免原文（逐字）：
+'【仲裁豁免（W1-A 独立仲裁人 GLM-5.3，第 3 轮，2026-10-24）】完成定义第 4 条中 deal_info 实际执行之子要求，在本 devnet 构建（node main-latest 0.8.x）经三通道实测不可达（eth_call 拒绝非-bartender 读路由 / export=http 被 proc 宏类别面禁止 / cast send 交易 revert），属节点侧限制非实现缺陷；据此按已裁准偏离结案。条件：(a) 偏离登记永续保留，任何处不得表述为 deal_info 已实际执行；(b) W1-B 或节点读路由修复后补跑 deal_info 实调并存档（遗留验证项）；(c) 本豁免仅覆盖第 4 条 deal_info 子要求，不及其余验收条目。'
+
+三条结案支柱：
+1) 三通道证据索引（本档案）：
+   - eth_call：Invalid contract address（zz2jue 0x3Aa5…/rkkfz4 0x4A67… 两地址；对照 bartender 0x9fE4…a6e0 同 selector 可路由——节点侧限制）
+   - export=http：proc 宏方法类别面拒绝（`export = http` is only supported on #[lyquid::method::instance]，v0.8.1 proc/src/lib.rs:366/381；三种属性形态迭代见上节）
+   - cast send：Failed to estimate gas … execution reverted（R2 节复跑，EXIT:1，与仲裁人输出一致）
+2) 同构性（替代作证与 deal_info 输出同源同构）：
+   - fund Ok 路径控制台输出块：lyquid/src/lib.rs:292-298（DealView::from(deal) + serde_json::to_string → lyquid::println!）
+   - deal_info 函数体：lyquid/src/lib.rs:473-487（同一 state.deals 共识状态、同一 DealView::from、同一 serde_json::to_string）
+3) deal_info 自身编译/部署/ABI 注册核验（可复现命令与命中）：
+   docker exec ldk-tools-1 strings /tmp/tb-lyquid/lyquid_tools_target/wasm32-unknown-unknown/release/trustbridge.wasm | grep deal_info
+   → 命中 maindeal_info（×6，导出节 GROUP+METHOD 记录）与
+     __lyquid_method_network_3oANTF_deal_info（network 方法注册符号）
+   （wasm 构建于 2026-10-24 05:29，ldk rev=fd575e8 release 构建）
+
+遗留验证项（豁免条件 (b)）：W1-B 或节点读路由修复后补跑 deal_info 实调
+（预期通道：修复后的 eth_call 或任意可达读通道）并存档；补跑前任何处不得
+表述为 deal_info 已实际执行（豁免条件 (a)）。

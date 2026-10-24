@@ -28,6 +28,13 @@ use crate::core;
 
 /// Wire format for a verdict submitted to `apply_committee_verdict`.
 /// `signers` are committee member ids; `verdict` is 0=Fulfilled,1=NotFulfilled,2=Malicious.
+//
+// S5（W1-A）追加 derives（意外修法，登记 implementation.md）：method 宏
+// 生成的入参解码要求每个参数实现 serde::Deserialize，故补
+// Serialize+Deserialize。纯 serde（本文件零平台依赖红线不变：serde 同为
+// 验证壳依赖，verify_core/Cargo.toml [dependencies] serde derive 同款配置），
+// 未引入任何 `lyquid::` 路径（plan §5.3 允许的非平台修法），领域逻辑零改动。
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct CommitteeCertWire {
     pub verdict_code: u8,
     pub signers: Vec<AgentId>,

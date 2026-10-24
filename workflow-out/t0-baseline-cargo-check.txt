@@ -1,0 +1,80 @@
+error: invalid character `{` in package name: `{{project-name}}`, the first character must be a Unicode XID start character (most letters or `_`)
+ --> C:\Users\lenovo\.cargo\git\checkouts\ldk-b72281d44a8ce511\3b10b6a\lyquid-template\Cargo.toml:2:8
+  |
+2 | name = "{{project-name}}"
+  |        ^^^^^^^^^^^^^^^^^^
+    Checking trustbridge v0.1.0 (F:\canvus auto\downloads\202609CS5298\trustbridge\lyquid)
+src\timeout.rs:36:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:159:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:169:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:225:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:255:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:275:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:288:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:308:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:322:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:337:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:353:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:386:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:401:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:410:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:417:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\lib.rs:428:3: error[E0433]: cannot find module or crate `method` in this scope: use of unresolved module or unlinked crate `method`
+src\timeout.rs:46:28: error: cannot find macro `call` in this scope
+src\timeout.rs:51:17: error: cannot find macro `call` in this scope
+src\lib.rs:31:1: error: cannot find macro `state` in this scope
+src\lib.rs:163:5: error: cannot find macro `log` in this scope
+src\lib.rs:248:5: error: cannot find macro `log` in this scope
+src\timeout.rs:37:26: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:136:34: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:147:30: error[E0425]: cannot find value `committee_members` in this scope: not found in this scope
+src\lib.rs:160:20: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:171:10: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:198:5: error[E0425]: cannot find value `deal_counter` in this scope: not found in this scope
+src\lib.rs:199:33: error[E0425]: cannot find value `deal_counter` in this scope: not found in this scope
+src\lib.rs:220:5: error[E0425]: cannot find value `deals` in this scope
+src\lib.rs:226:18: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:228:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:233:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:240:19: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:256:22: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:269:19: error[E0425]: cannot find value `evidence_log` in this scope: not found in this scope
+src\lib.rs:276:32: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:278:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:282:16: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:289:22: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:291:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:296:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:309:27: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:313:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:323:20: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:325:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:329:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:338:26: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:342:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:345:16: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:354:37: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:359:33: error[E0425]: cannot find value `committee_members` in this scope: not found in this scope
+src\lib.rs:360:21: error[E0425]: cannot find value `committee_threshold` in this scope: not found in this scope
+src\lib.rs:370:39: error[E0425]: cannot find value `evidence_log` in this scope: not found in this scope
+src\lib.rs:376:20: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:377:85: error[E0425]: cannot find value `misconduct` in this scope: not found in this scope
+src\lib.rs:387:30: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:391:5: error[E0425]: cannot find value `committee_members` in this scope: not found in this scope
+src\lib.rs:393:9: error[E0425]: cannot find value `committee_members` in this scope: not found in this scope
+src\lib.rs:395:5: error[E0425]: cannot find value `committee_threshold` in this scope
+src\lib.rs:402:23: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:404:16: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:411:35: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:413:31: error[E0425]: cannot find value `evidence_log` in this scope: not found in this scope
+src\lib.rs:418:24: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:420:8: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:429:23: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:431:30: error[E0425]: cannot find value `deals` in this scope: not found in this scope
+src\lib.rs:439:15: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:443:5: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:448:15: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:449:5: error[E0425]: cannot find value `balances` in this scope: not found in this scope
+src\lib.rs:509:24: error[E0425]: cannot find type `Context` in this scope: not found in this scope
+src\lib.rs:60:26: error[E0599]: no variant, associated function, or constant named `msg` found for enum `LyquidError` in the current scope: variant, associated function, or constant not found in `LyquidError`
+error: could not compile `trustbridge` (lib) due to 73 previous errors

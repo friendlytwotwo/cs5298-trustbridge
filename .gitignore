@@ -10,3 +10,4 @@ __pycache__/
 # secrets / local
 .env
 .env.*
+workflow-out/_lyquor-node-bin

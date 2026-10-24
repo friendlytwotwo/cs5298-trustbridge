@@ -8,7 +8,14 @@ description = "Committee-attested fulfillment trust layer for A2A deals on Lyquo
 # crates.io `lyquid-llm` / `lyquid-flow` entries are name placeholders (v0.0.0), so ALL
 # platform deps are git-pinned to the same tag. Do not upgrade without a team decision.
 [dependencies]
-lyquid = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
+# `features = ["ldk"]` mirrors lyquid-template/Cargo.toml verbatim: without it
+# ldk v0.7.3 gates `pub mod method` / `pub mod runtime` / `pub use
+# runtime::prelude` behind #[cfg(feature = "ldk")] (ldk lyquid/src/lib.rs:24-25,153-157),
+# so state!/method/log!/prelude types do not exist at all. The feature pulls
+# ldk's own optional deps (talc 5.0.3, ahash 0.8.12, hashbrown/lyquid-proc —
+# ldk lyquid/Cargo.toml [features]); versions are the platform's choice, not
+# ours. Git tag stays pinned at v0.7.3; no new crates.io direct deps.
+lyquid = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3", features = ["ldk"] }
 lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
 # Re-export declaration, not a new third-party dep: serde_json 1.0.154 is
 # already the locked transitive dependency of the git-pinned ldk crates
@@ -18,15 +25,17 @@ serde_json = "1"
 # Re-export declaration, not a new third-party dep: serde 1.0.229 is already
 # the locked transitive dependency (Cargo.lock:668, via serde_json/serde_derive
 # of the git-pinned ldk crates). default-features=false + derive only.
-# SPIKE(W1): revisit at the wasm/json story check (assessor.rs parse_report).
+# W1 conclusion (was SPIKE(W1)): ldk's own CallContext/LyteLog are serde-based
+# (ldk lyquid/src/lib.rs:48-50,161), so serde+derive composes with the
+# platform as-is; the wasm/json story needs no further serde config change.
 serde = { version = "1", default-features = false, features = ["derive"] }
 
 [dev-dependencies]
 lyquid-test = { git = "https://github.com/lyquor-labs/ldk", tag = "v0.7.3" }
 
-# rlib keeps `cargo test` working on the pure core (types/core modules) without a
-# wasm build; cdylib is what shaker deploys. SPIKE(W1): confirm the crate-type the
-# lyquid-template uses and mirror it exactly.
+# W1 conclusion (was SPIKE(W1)): verbatim match with lyquid-template/Cargo.toml
+# [lib] — no drift. rlib keeps `cargo test` working on the pure core without a
+# wasm build; cdylib is what shaker deploys.
 [lib]
 crate-type = ["cdylib", "rlib"]
 

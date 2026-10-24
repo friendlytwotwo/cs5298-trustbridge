@@ -1,0 +1,8 @@
+# W1-B1 T5 final test gate (2026-10-24T15:36:05Z)
+command: cd workflow-out/verify_core && cargo test --lib --tests
+running 32 tests
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

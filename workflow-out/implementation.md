@@ -1,5 +1,6 @@
 # W1-A 实现说明（S5 宏漂移审计编译清零 + escrow 上 devnet 走到 Funded）
 
+
 执行基线：`workflow-out/plan.md`（独立终裁官定稿）。代码仓 `trustbridge/`（git）。
 提交序列：T0.5 基线 `5d0380f` → S5 编译清零 `4b0df10` → 部署/登记 `a1721b7` → T6 登记 `740e810`。
 **修订轮 R1（代码基线不变 740e810，仅文档/证据修订，单独提交）**：① deal_info http 读路径尝试失败并撤 ✅（§④-3/§⑦-2/§⑧.4，存档 `w1a-deal-info-evidence.txt`）；② §① 裁定原文不可再取证、两行降级（§①）；③ shaker test 复跑成功 0 tests（§⑦-1/§⑧.1，存档 `w1a-t3-shaker-test.txt`）；④ SPIKE 行号 @740e810 重算双列（§③/§⑧.6）。
@@ -181,3 +182,81 @@ fund:deal_view: {"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb922
 4. **走到 Funded**：✅（经仲裁豁免结案，偏离登记如下）——deal_info 未实际执行（三通道全闭，`w1a-deal-info-evidence.txt`）；字面 `"state":"Funded"` 由 fund Ok 路径控制台输出承载，与 deal_info 输出同源同构（同一共识状态 + 同一 DealView::from + serde_json::to_string，lib.rs:292-298 / :473-487）；deal_info 自身已编译、部署、ABI 注册在案（release wasm 导出节含 maindeal_info）。仲裁豁免原文：'【仲裁豁免（W1-A 独立仲裁人 GLM-5.3，第 3 轮，2026-10-24）】完成定义第 4 条中 deal_info 实际执行之子要求，在本 devnet 构建（node main-latest 0.8.x）经三通道实测不可达（eth_call 拒绝非-bartender 读路由 / export=http 被 proc 宏类别面禁止 / cast send 交易 revert），属节点侧限制非实现缺陷；据此按已裁准偏离结案。条件：(a) 偏离登记永续保留，任何处不得表述为 deal_info 已实际执行；(b) W1-B 或节点读路由修复后补跑 deal_info 实调并存档（遗留验证项）；(c) 本豁免仅覆盖第 4 条 deal_info 子要求，不及其余验收条目。
 5. **deploy.sh 校正**：✅ 按 D8 实测通道重写并复跑通过（复跑产出 ss7x5ed 实例，见部署档案尾注）。
 6. **implementation.md**：✅ 本文件（SPIKE 23 行双向勾稽 + talc/ahash F12 + 裁定登记——**三条裁定原文逐字誊录及出处/效力精度注记见 §①**（主控会话任务文本，R2 经仲裁人取证取回），逐条映射：裁定 1→§② F12、裁定 2→§⑤ D7、裁定 3→§③ 表结构）。**修订轮 R1 行号复验证据**：命令 `grep -n "SPIKE(" src/*.rs`（@740e810）输出 23 行 = lib.rs 8/57/65/220/276/412/573/586/591/599 + timeout.rs 13/30/37/43/47/56/75 + assessor.rs 14/63/90 + committee.rs 53/77 + types.rs 18，与 §③ 表现列逐一对应、无孤儿（正反双向，摘录见 §③"行号双向复验"）。
+
+---
+
+# W1-B1 实现说明（平台机制探针：多节点拓扑 + S1 timer 语义 + S2 认证回合）
+
+执行基线：`workflow-out/plan.md`（独立终裁官定稿）。代码基线 f83ab52（W1-A 完成态）。**本节 journal 与全部实验证据分档**：S1 → `w1b1-s1-timer.md`，S2 → `w1b1-s2-oracle.md`，拓扑/环境 → `w1b1-topology.md`，证据存档 `w1b1-t0-baseline.txt` / `w1b1-t2-gate.txt` / `w1b1-t2-cargo-check-final.txt` / `w1b1-t2-deploy.txt` / `w1b1-t5-gate.txt`（未入库伴档：`_w1b1-r1-submodule-state-check.txt`、`_w1b1-setupdevnet-bootstrap.log`、`_w1b1-deploy-zz2jue.txt`）。
+
+## B-① Journal（T0→T5，2026-10-24）
+
+| T | 内容 | 结果 | 断点产物 |
+|---|---|---|---|
+| T0 | git 基线（HEAD=f83ab52）、verify_core 39/39、docker ps（单节点在跑）、`ldk_cargo-cache` 卷在册 | 全过 | `w1b1-t0-baseline.txt` |
+| T1 | 停单节点（`-p ldk down`，保卷）→ 起 multi 4 节点 v0.8.1 → bootstrap 三步完成（bartender `Lyquid-f7vljmg2…`→0x9fE4…a6e0，availability 4 节点 threshold 1）→ GetNodeInfo/GetPeers/GetLyquidInfo ×4 + availability status 全过 | 拓扑可用 | `w1b1-topology.md`、`_w1b1-setupdevnet-bootstrap.log` |
+| T2 | R1 先验（state! 子模块）→ probe 三文件 + lib.rs 挂载 → 容器 cargo check 0 实错 → 39/39 → multi-tools 部署（4 实例迭代，最终 #4 rkkfz4d3） | 部署成功 | `w1b1-t2-cargo-check-final.txt`、`w1b1-t2-deploy.txt`、`_w1b1-r1-submodule-state-check.txt` |
+| T3 | 通道先行证明 → 实验 a（reset→baseline→arm×2→delta）/ b（kill 节点服务→链连续性→双组计数）/ c（三组 delay + Recurrent 对照） | 全实录 | `w1b1-s1-timer.md` |
+| T4 | 成员换算 → configure → 两阶段激活（cast call 通道）→ run_round 认证回合（on_certified 全链路 console 留痕）→ bump_threshold true/false | 认证回合跑通 | `w1b1-s2-oracle.md` |
+| T5 | timeout.rs timer SPIKE 落地（仅注释，cargo check 复验）→ 三份 w1b1 文档 → 终跑测试门 → 提交 → 环境处置 | 本节 | `w1b1-t5-gate.txt` |
+
+中断恢复说明：本轮未发生配额中断；各 T 产物文件即断点粒度（与方案 R8 约定一致）。
+
+## B-② 受影响文件清单勾稽（10 项）
+
+| # | 文件 | 实际改动 |
+|---|---|---|
+| 1 | `lyquid/src/probe/mod.rs` | 新建（模块文档 + `pub mod s1_timer/s2_oracle`；R1 记录在案） |
+| 2 | `lyquid/src/probe/s1_timer.rs` | 新建（arm/arm_recurrent/on_timer/mark_fire/reset_net/get_report/**net_report（新增，通道适配）**） |
+| 3 | `lyquid/src/probe/s2_oracle.rs` | 新建（configure/propose/aggregate/on_certified/run_round/bump_threshold/config + **net_config（新增）**；propose/aggregate 命名见 B-③-2） |
+| 4 | `lyquid/src/lib.rs` | 3 处：`pub mod probe;`、文件头 W1-B1 注记、state! 块末尾 probe 字段（S1 instance×4 + S1 network×2 + S2 network×4 含 `network oracle cert_probe;` + S2 instance×1，主 escrow 字段零改动） |
+| 5 | `lyquid/Cargo.toml` | **零改动**（方案预期兑现；无新增依赖、无 feature 变更） |
+| 6 | `lyquid/src/timeout.rs` | 仅注释/SPIKE 标记三列落地（timeout.rs:2-19 模块头、:28-35 wire note、:65-84 SPIKE_1 段；`cargo check` 复验 Finished 0 实错），逻辑/签名/断言零改动 |
+| 7 | `workflow-out/implementation.md` | 本节 |
+| 8-10 | `w1b1-topology.md` / `w1b1-s1-timer.md` / `w1b1-s2-oracle.md` | 新建（含各自人工复现命令清单） |
+
+伴档入库（超出 10 项清单的纯增量证据文件，随本提交一并入库以便文档引用不断链）：`w1b1-t0-baseline.txt`、`w1b1-t2-gate.txt`、`w1b1-t2-cargo-check-final.txt`、`w1b1-t2-deploy.txt`、`w1b1-t5-gate.txt`。`_` 前缀诊断伴档按 W1-A §⑦-6 惯例不入库。
+
+## B-③ 偏离与发现登记（逐条，全部 SPIKE 或正文标注）
+
+1. **R1 判定（state! 单例）——实证不可行，走方案既定回退**。先验读宏：`state!` 展开为调用点 `pub mod __lyquid`（ldk lyquid/src/runtime/syntax.rs:105-127），而一切方法包装宏硬编码 `crate::__lyquid::*` 上下文（syntax.rs:257 等）。cargo check 实证（子模块 state! + 探针字段，完整输出 `_w1b1-r1-submodule-state-check.txt`）：E0609 `no field probe_r1_canary on &mut __lyquid::NetworkState`（方法面解析到 crate 根 escrow state）+ E0616 `__internal ... is private`（子模块重复生成面冲突）。→ 探针字段并入 lib.rs state! 块末尾（probe_ 前缀 + 注释行，方案 §④-4 原案）。
+2. **two_phase 方法命名偏离方案 §④**：宏臂字面匹配 `fn aggregate` / `fn propose`（syntax.rs:447/470），方案的 `probe_propose/probe_aggregate` 拼写无法进入 oracle 机制——落地为 `propose`/`aggregate`（group 前缀 `oracle::two_phase::cert_probe` 区分）。certified 回调名自由（`probe_on_certified`）。
+3. **serde 字段名契约 + 官方 demo 潜在缺陷**：encode/decode_by_fields 按 serde 字段名严格对应（primitives/src/lib.rs:461-486；本地 serde 最小复现：`_avg_num` 无法解码 `avg_num` 编码 → `missing field`）。price-feed（rev fd575e8）propose 声明 `_avg_num/_target` 与其 run_round 编码 `avg_num/target` 不匹配，属上游 demo 潜在 bug；探针统一正确拼写（`avg_num`/`target`/`round` 三处编解码同名），s2_oracle.rs 模块头注明。
+4. **`__internal` 不可达 → 方案既定回退**：`ctx.network.__internal.oracle_dest_epoch_info` 的字段无 pub（proc lib.rs:1521；cargo check E0616）——dest epoch 观测改走 host API `lyquor_api::fetch_oracle_info`（runtime/mod.rs:322；平台 `validate_finalize_epoch` 同款，source.rs:461-472），probe_config/probe_net_config 双份落档。
+5. **SPIKE-1（console 可见性）**：v0.8.1 节点 console 转发按**执行通道**区分——cast send（链序）仅 network 方法 println 可见；cast call（节点本地）instance+network 均可见。适配：新增 network 观测原语 `probe_net_report`/`probe_net_config`，`probe_bump_threshold` network 化（方案 §④ 写 instance——通道适配偏离，s2_oracle.rs:224 SPIKE 标注），arm 成功分母 = cast send 回执 status。
+6. **SPIKE-2（cast call 可用，方案前提修正）**："eth_call 不可用"是 W1-A 单节点 0.8.2-dev 实测；本 multi v0.8.1 读+执行均可用（`__lyquor_oracle_dest_epoch_info` 结构化读、`() `返回仍不可读调与 W1-A 一致）。激活与 run_round 改走官方 demo 的 cast call 形态（demo.sh:319-362/257-259）——cast send 通道下内层跨节点提交静默丢失（advance ×2 与 run_round 各一次实录；机制在节点侧未深挖），cast call 首试即 true。**激活等待仍按方案"观测驱动"**：dest epoch cast call 轮询（0→1 实录），无"返回 true 门"依赖。
+7. **SPIKE-3（S1 结论）**：native instance trigger（Once/Recurrent）注册成功（arm status 1、无节点侧报错）但**在 multi v0.8.1 devnet 从不触发**——a：delta 0/2；b：重启 0→0 无重放（链连续 42→46）；c：三组 delay + Recurrent 产块 60s 全零。**native trigger 判定 = 不可用 → 主方案 keeper 模式（不算失败）**；timeout.rs 三处 SPIKE 标记按三列纪律落地。
+8. **部署语义**：`shaker deploy` 每次创建新实例（4 个实例沿革见 w1b1-topology.md §5b；W1-A R8 已警示）， Lyquid ID 由部署者+内容确定性派生（#4 与 W1-A 主实例同 ID，异链无冲突）。
+9. **单节点交叉验证未完成（S1 判定的版本维度未标定）**：切回单节点后 shaker deploy 被 rust-std sysroot 下载阻断（github 不可达：容器 TLS 掐断/拒连/挂起三种形态 ×4 次尝试；宿主直连亦不通；sysroot 缓存不随 `ldk_cargo-cache` 卷持久化，随容器层丢失——w1b1-topology.md §5 边界登记）。**"不触发"结论严格限定 multi v0.8.1 环境**；0.8.2-dev 是否同病留 W1-B2 网络可达时补测。
+
+## B-④ SPIKE 新增标记勾稽（grep `SPIKE(W1-B1)` = 6 处，双向无孤儿）
+
+| 位点 | 内容 | 处置 |
+|---|---|---|
+| s1_timer.rs:36 | trigger 目标形态（默认组 instance 方法 + `= expr` 注册期冻结） | 结论（编译+部署佐证） |
+| s1_timer.rs:105 | console 通道按执行域区分（SPIKE-1 摘要） | 登记观察结论 |
+| s2_oracle.rs:109 | CertifiedCallParams 构造形态镜像 price-feed | 结论（S2 回合实跑验证） |
+| s2_oracle.rs:224 | bump_threshold instance→network 化（方案偏离） | 登记（通道适配） |
+| s2_oracle.rs:247 | `__internal` 私有 → fetch_oracle_info 回退 | 结论（E0616 实证） |
+| s2_oracle.rs:284 | 同 247（probe_config 侧注记） | 同上 |
+
+timeout.rs 的 SPIKE(W1-1)（原保留行 timeout.rs:13/75）在本轮**结案改写**（三列假设→验证→结论，:2-19/:28-35/:65-84），W1-A §③"保留 8 行"表相应减 2（余 6 行属 S2/S3 域不动）。types.rs:18（slot 参数）未动——本轮未测 slot 时长语义。
+
+## B-⑤ 验收口径对照（plan §⑥ 七条）
+
+1. 测试门 ✅：`cd workflow-out/verify_core && cargo test --lib --tests` = 39/39（T0/T2/T5 三档存档 w1b1-t0-baseline / w1b1-t2-gate / w1b1-t5-gate）；部署产物编译核验 = 容器内 `cargo check --target wasm32-unknown-unknown`（w1b1-t2-cargo-check-final.txt，0 实错；`{{project-name}}` 行为 W1-A §⑥ 已登记通道噪声）。
+2. 多节点 ✅：4 节点 GetNodeInfo + GetPeers≥3×4（并集=4 ID 与 toml 预置一致）+ GetLyquidInfo 同 contract×4 + ldk_cargo-cache 卷复用实测登记，全在 w1b1-topology.md §2-§5。
+3. S1 ✅（多节点环境）：通道先行证明在前（w1b1-s1-timer.md §0，含通道不可见的如实登记与适配）；a/b/c 命令+原始输出齐全；a 判定域=共识 network 计数 delta（0 ≠ 2）；b 只杀节点服务、链连续性证据（42→46）+ 双组计数逐项；结论表注明判定域并对齐 timeout.rs:75-77 口径；native trigger 判定=**不可用**（附 keeper 衔接）。
+4. S2 ✅：成员来源 GetNodeInfo×4 + 并集交叉核对 + 编码表/示例数组；configure（bytes32[] + creator 守卫 + 同钥）；两阶段激活 advance→dest epoch 推进→finalize→激活确认（dest epoch=1 + full config 4 成员 threshold1 + node2/3 可见）；run_round 认证回合 + on_certified println + ctx.cert.signers 原始形态（Vec<SignerID>=[0]）与映射（→Node-ve3tav…）+ set_threshold true/false——全部真实输出在 w1b1-s2-oracle.md。**通道偏离（cast send→cast call）已 SPIKE-2 登记**。
+5. timeout.rs ✅：三处标记三列落地，diff 仅注释，`cargo check` 复验通过。
+6. 依赖 ✅：`lyquid/Cargo.toml` 零改动（git diff 空即证）。
+7. implementation.md ✅：本节含 journal 与断点说明。
+
+## B-⑥ W1-B2 边界条件（后续输入）
+
+1. keeper.py（W1-B2 范围）：watcher 的驱动端；S1 结论已锁"native trigger 不可依赖"。
+2. S1 单节点复测（0.8.2-dev）：网络可达时补部署（w1b1-s1-timer.md §5-1）。
+3. cast-send 通道下内层跨节点提交丢失（advance/run_round 同症）与 instance println console 丢失（SPIKE-1）：节点侧机制，可在 W1-B2 向平台求证或升级节点版本复测。
+4. threshold=2 双签聚合（S2 加分项）未执行；bump 已入 staging，二轮 advance/finalize 即可激活。
+5. 读路径补验（W1-A R3 豁免遗留项）：本环境 eth_call 可用——**deal_info 实调补跑仍未做**（本轮未部署 escrow 主合约实例，不留混探针实例；W1-B2 在干净部署上补）。
+6. 环境现场：multi 栈保留运行（W1-B2 可复用；实例 #3/#4 的探针状态在卷内）；单节点切回命令见 w1b1-topology.md §7/§10。

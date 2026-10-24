@@ -1,0 +1,24 @@
+# W1-B1 T0 baseline (2026-10-24T10:39:42Z)
+
+## git (trustbridge)
+f83ab52fe9f757ae8bd14aa750cb0042794deb3a
+ M workflow-out/plan.md
+?? workflow-out/w1b1-t0-baseline.txt
+
+## verify_core test gate
+command: cd workflow-out/verify_core && cargo test --lib --tests
+running 32 tests
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+total passed: 39/39
+
+## docker ps
+ldk-tools-1	ghcr.io/lyquor-labs/lyquor-tools:main-latest	Up 16 hours (healthy)
+ldk-setup-devnet-1	ghcr.io/lyquor-labs/lyquor-tools:main-latest	Exited (0) 16 hours ago
+ldk-node-1	ghcr.io/lyquor-labs/lyquor-node:main-latest	Up 17 hours
+
+## docker volumes (ldk_cargo-cache check)
+local     ldk_cargo-cache

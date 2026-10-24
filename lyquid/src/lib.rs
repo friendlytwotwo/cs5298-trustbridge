@@ -14,12 +14,19 @@
 //! Two seams own the platform-side structure (stage-two W2 work, now landed):
 //!   error bridging    -> "Platform error bridge" block below;
 //!   caller permission -> "Caller-permission matrix" block below.
+//!
+//! W1-B1: the platform-mechanism probes are mounted at `probe/` (S1 timer
+//! semantics, S2 oracle certification round; fields below prefixed `probe_`
+//! plus the `cert_probe` oracle topic). See probe/mod.rs and
+//! workflow-out/w1b1-*.md for the experiment record. Escrow surface
+//! untouched.
 
 pub mod types;
 pub mod core;
 pub mod committee;
 pub mod assessor;
 pub mod timeout;
+pub mod probe;
 
 use types::*;
 use lyquid::prelude::*;
@@ -45,6 +52,25 @@ state! {
     // --- node-local (instance) state ---
     instance assessment_cache: HashMap<DealId, AssessmentReport> = new_hashmap();
     instance watcher_last_slot: u64 = 0;
+
+    // probe state (W1-B1) — 主 escrow 字段零改动。R1 已证子模块不能自带
+    // state!（ldk syntax.rs:105-167 展开为调用点 `pub mod __lyquid`，而方法
+    // 宏硬编码 `crate::__lyquid` 上下文；cargo check 实录
+    // workflow-out/_w1b1-r1-submodule-state-check.txt），故探针字段并入本块。
+    // S1 instance 域（节点本地观测）
+    instance probe_fires: u64 = 0;
+    instance probe_registered_at_ms: u64 = 0;
+    instance probe_last_fire_at_ms: u64 = 0;
+    instance probe_arm_delay_ms: u64 = 0;
+    // S1 network 域（共识观测面 = exactly-once 判定域）
+    network probe_net_fires: u64 = 0;
+    network probe_net_last_fire_ms: u64 = 0;
+    // S2 域：oracle 委员会探针 + 认证回合记录（price-feed:167 声明形态）
+    network oracle cert_probe;
+    network probe_rounds: u64 = 0;
+    network probe_last_signers_raw: Vec<u64> = Vec::new();
+    network probe_last_signers_nodes: Vec<String> = Vec::new();
+    instance probe_propose_count: u64 = 0;
 }
 
 // ---------------------------------------------------------------------------

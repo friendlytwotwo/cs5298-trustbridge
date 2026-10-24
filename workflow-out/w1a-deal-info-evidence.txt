@@ -40,3 +40,24 @@ instance 方法；deal_info 是 network 方法，改为 instance = 节点本地�
   - §⑦-2 保留并补记本次 http 尝试及失败证据（本档案）；
   - 向用户/终裁官申请对完成定义第 4 条的显式豁免，豁免下达前 ✅ 不恢复。
 代码已还原（export=eth，HEAD 740e810 不变），还原后通道复验 0 错。
+
+=====================================================================
+修订轮 R2 追加：第三通道实测（cast send，仲裁人已跑、修订方复跑）
+---------------------------------------------------------------------
+命令（ldk-tools-1 容器内，2026-10-24）：
+  cast send 0x4A679253410272dd5232B3Ff7cF5dbB88f295319 "deal_info(string)" "deal-1" \
+    --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+    --rpc-url http://node:10087/api
+复跑输出（逐字）：
+  Error: Failed to estimate gas: server returned an error response: error code -1: Call(ErrorObject { code: ServerError(3), message: "execution reverted", data: Some(RawValue("0x")) })
+  EXIT:1
+与仲裁人本轮先行实测输出一致。根因：deal_info 为只读导出，链上 selector
+路由（sequencer 合约）不注册非交易可执行方法，gas 估算即 revert（data 0x）。
+
+至此 deal_info 三通道全闭：
+  1) eth_call 读路由  —— Invalid contract address（zz2jue/rkkfz4 两地址，
+     对照 bartender 同 selector 可路由，节点侧限制）
+  2) export=http      —— proc 宏方法类别面拒绝（本档案上节，w1a-deal-info-evidence.txt）
+  3) cast send 交易   —— execution reverted（本节）
+deal_info 字面执行在当前平台面无通道；替代作证（fund Ok 路径控制台输出同一
+DealView 序列化）与豁免申请状态见 implementation.md §⑧.4。

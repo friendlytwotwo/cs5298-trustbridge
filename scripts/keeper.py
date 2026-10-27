@@ -26,9 +26,12 @@ import sys
 import time
 
 
-def cast(container: str, rpc: str, mode: str, contract: str, sig: str, *args: str) -> str:
+def cast(container: str, rpc: str, mode: str, contract: str, sig: str, *args: str, pk: str | None = None) -> str:
     """Run cast call/send inside the tools container; return raw stdout."""
-    cmd = ["docker", "exec", container, "cast", mode, "--rpc-url", rpc, contract, sig, *args]
+    cmd = ["docker", "exec", container, "cast", mode, "--rpc-url", rpc]
+    if pk and mode == "send":
+        cmd += ["--private-key", pk]
+    cmd += [contract, sig, *args]
     if mode == "send":
         cmd += "--json"  # structured receipt; guard reverts return non-zero exit
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -38,30 +41,36 @@ def cast(container: str, rpc: str, mode: str, contract: str, sig: str, *args: st
     return out.strip()
 
 
-def parse_cast_json(raw: str):
-    """cast call output is plain text of the ABI-decoded value(s); deal_info is
-    a single string return, so the value arrives as-is (no json wrapper)."""
-    return raw
+def decode_abi_string(hexdata: str) -> str:
+    """Decode a single dynamic `string` return value from cast call hex output."""
+    h = hexdata.strip()
+    if h.startswith("0x"):
+        h = h[2:]
+    if not h:
+        return ""
+    data = bytes.fromhex(h)
+    if len(data) >= 64:  # offset(32) + length(32) + bytes
+        ln = int.from_bytes(data[32:64], "big")
+        return data[64:64 + ln].decode("utf-8", "replace")
+    return data.decode("utf-8", "replace")
 
 
 def deal_state(container: str, rpc: str, contract: str, deal_id: str):
     """deal_info(string) -> DealView JSON string (single string return)."""
     raw = cast(container, rpc, "call", contract, "deal_info(string)", deal_id)
-    text = raw.strip()
-    if text.startswith('"') and text.endswith('"'):
-        text = json.loads(text)  # ABI string return: unquote
+    text = decode_abi_string(raw)
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         return {"raw": text}
 
 
-def claim_timeout(container: str, rpc: str, contract: str, deal_id: str):
+def claim_timeout(container: str, rpc: str, contract: str, deal_id: str, pk: str):
     """claim_timeout(string) — guard-side idempotent; revert = not eligible."""
-    return cast(container, rpc, "send", contract, "claim_timeout(string)", deal_id)
+    return cast(container, rpc, "send", contract, "claim_timeout(string)", deal_id, pk=pk)
 
 
-def poll_once(container: str, rpc: str, contract: str, deals: list[str]) -> dict:
+def poll_once(container: str, rpc: str, contract: str, deals: list[str], pk: str) -> dict:
     report = {}
     for deal_id in deals:
         try:
@@ -79,7 +88,7 @@ def poll_once(container: str, rpc: str, contract: str, deals: list[str]) -> dict
         # Funded: attempt the claim every poll. The guard rejects until the
         # deadline; one success flips to Refunded and further sends revert.
         try:
-            claim_timeout(container, rpc, contract, deal_id)
+            claim_timeout(container, rpc, contract, deal_id, pk)
             after = deal_state(container, rpc, contract, deal_id)
             report[deal_id] = {"state": after.get("state", "?"), "action": "claimed"}
         except RuntimeError as e:

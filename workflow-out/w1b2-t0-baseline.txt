@@ -1,0 +1,11 @@
+=== W1-B2 T0 baseline 2026-10-25 ===
+$ git -C trustbridge log --oneline -1
+1c0e45f W1-B1 platform probes: multi-node topology + S1 timer semantics + S2 certification round
+
+$ cargo test --lib --tests (cwd=workspace-root workflow-out/verify_core)
+     Running unittests src\lib.rs (target\debug\deps\trustbridge-9dc3fb62bbbae988.exe)
+test result: ok. 32 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\escrow_lifecycle.rs (target\debug\deps\escrow_lifecycle-7a64a2794b7cf014.exe)
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+     Running tests\modelcheck_refund.rs (target\debug\deps\modelcheck_refund-b946f2856aa885a1.exe)
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s

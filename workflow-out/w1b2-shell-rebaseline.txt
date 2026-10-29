@@ -1,0 +1,193 @@
+=== W1-B2 T0 壳修复与重定基线证据（w1b2-shell-rebaseline.txt）===
+日期：2026-10-28（宿主 Git Bash / Windows 10.0.26300；壳目录 = ../workflow-out/verify_core）
+所选路线：**① 本地最小签名存根**（verify_core/stubs/lyquid-llm，包名 lyquid_llm）；
+          壳仍挂**工作树** lyquid/src/assessor.rs（含未提交 S3 接线与第 6 测）。
+最终计数：**33 + 5 + 2 = 40，全绿**（原硬约束字面 "39/39" 的意图=壳全绿，数字漂移见 §5）。
+
+-------------------------------------------------------------------------------
+§0 T-init 预检门 G-init（三项全过）
+-------------------------------------------------------------------------------
+① docker ps —— 守护进程可达，multi 栈 7 容器全 Up：
+   $ docker ps --format "{{.Names}}\t{{.Status}}\t{{.Image}}"
+   multi-tools      Up 25 minutes  ghcr.io/lyquor-labs/lyquor-tools:v0.8.1
+   multi-node1-1    Up 25 minutes  ghcr.io/lyquor-labs/lyquor-node:v0.8.1
+   multi-node4-1    Up 25 minutes  ghcr.io/lyquor-labs/lyquor-node:v0.8.1
+   multi-node2-1    Up 25 minutes  ghcr.io/lyquor-labs/lyquor-node:v0.8.1
+   multi-node3-1    Up 25 minutes  ghcr.io/lyquor-labs/lyquor-node:v0.8.1
+   multi-registry-1 Up 25 minutes  registry:3
+   multi-anvil-1    Up 25 minutes  ghcr.io/foundry-rs/foundry:v1.7.1
+
+② 宿主节点 API 探活：
+   $ curl -s -X POST http://127.0.0.1:10087/api -H 'content-type: application/json' \
+       --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+   {"jsonrpc":"2.0","id":1,"result":"0x60"}
+
+③ 宿主 cargo —— **初始失败，经修复后通过**（详细见 §1）：
+   $ cargo --version
+   (初始) /usr/bin/bash: line 3: cargo: command not found   # ~/.cargo/bin/cargo.exe -> rustup.exe 断链，
+                                                             # rustup.exe 及其余 shim 目标均缺失
+   (修复后) cargo 1.99.1 (5f94df478 2026-08-27)
+            rustc 1.99.1 (58cf8f9c3 2026-10-13)
+
+-------------------------------------------------------------------------------
+§1 宿主工具链损坏与修复（G-init ③ 处置：修复 rustup 工具链）
+-------------------------------------------------------------------------------
+初始实测（与 plan §2-3 的规划期诊断一致，且比其记录更深一层）：
+  $ ls -la ~/.cargo/bin/
+    cargo.exe -> rustup.exe（rustup.exe 不存在；全部 shim 同为断链）
+  $ ls ~/.rustup/toolchains/1.99.0-x86_64-pc-windows-msvc/bin/   # 仅 cargo.pdb
+  $ ls ~/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin/   # rustc.exe 在，cargo.exe 缺失（仅 cargo.pdb）
+
+修复步骤（全部实跑）：
+  1) 从 rustup 官方 dist 装回 rustup（rustup-init，不改 PATH）：
+     $ curl -s -o rustup-init.exe https://static.rust-lang.org/rustup/dist/x86_64-pc-windows-msvc/rustup-init.exe
+     $ ./rustup-init.exe -y --no-modify-path --default-toolchain none
+       ... info: skipping toolchain installation / Rust is installed now. Great!
+     $ cargo --version → cargo 1.99.1 (5f94df478 2026-08-27)   # shim 复活
+  2) 但首跑 cargo test 仍失败 —— 说明 rust-std 文件亦被删（比 plan §2-3 多一层损坏）：
+     error: only metadata stub found for `rlib` dependency `core` ...
+     error[E0463]: can't find crate for `std` ...
+       = note: the `x86_64-pc-windows-msvc` target may not be installed
+     实测 sysroot：libcore-f9527ed7f1165c0a.rlib 在，**libcore-...rmeta 缺失**（其余组件文件亦部分缺失）。
+  3) rustup 不检测文件缺失（--force 无效）：
+     $ rustup toolchain install stable --profile minimal --component rust-std --force
+       info: component rust-std is up to date
+       stable-x86_64-pc-windows-msvc unchanged - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+  4) 走**卸载重装**（plan T-init ③ 的 "重装 rustup / rustup toolchain install" 路径）：
+     $ rustup toolchain uninstall stable
+     $ rustup toolchain install stable --profile minimal
+       info: latest update on 2026-10-15 for version 1.99.1 (58cf8f9c3 2026-10-13)
+       info: downloading 3 components
+         stable-x86_64-pc-windows-msvc installed - rustc 1.99.1 (58cf8f9c3 2026-10-13)
+     $ ls ~/.rustup/toolchains/stable-.../lib/rustlib/x86_64-pc-windows-msvc/lib/libcore*
+       libcore-f9527ed7f1165c0a.rlib
+       libcore-f9527ed7f1165c0a.rmeta        # 已恢复
+  结论：宿主 cargo 通道已可用（stable 1.99.1），未走容器路线（壳内 #[path] 保持宿主绝对路径原样）。
+
+-------------------------------------------------------------------------------
+§2 修复前失败输出（T0-2 前；plan §2-1 所述 E0432/E0433 在本轮复现）
+-------------------------------------------------------------------------------
+$ cd "F:/canvus auto/downloads/202609CS5298/workflow-out/verify_core" && cargo test --lib --tests
+   Compiling trustbridge v0.0.0 (F:\canvus auto\downloads\202609CS5298\workflow-out\verify_core)
+error[E0433]: cannot find module or crate `lyquid_llm` in this scope
+  --> F:\canvus auto\downloads\202609CS5298\trustbridge\lyquid\src\assessor.rs:37:5
+   |
+37 | use lyquid_llm::backend::openai_compat::OpenAiCompatBackend;
+   |     ^^^^^^^^^^ use of unresolved module or unlinked crate `lyquid_llm`
+   |
+   = help: if you wanted to use a crate named `lyquid_llm`, use `cargo add lyquid_llm` to add it to your `Cargo.toml`
+
+error[E0432]: unresolved import `lyquid_llm`
+  --> F:\canvus auto\downloads\202609CS5298\trustbridge\lyquid\src\assessor.rs:38:5
+   |
+38 | use lyquid_llm::{call_model, ModelRequest, OutputFormat};
+   |     ^^^^^^^^^^ use of unresolved module or unlinked crate `lyquid_llm`
+   |
+   = help: if you wanted to use a crate named `lyquid_llm`, use `cargo add lyquid_llm` to add it to your `Cargo.toml`
+
+Some errors have detailed explanations: E0432, E0433.
+For more information about an error, try `rustc --explain E0432`.
+error: could not compile `trustbridge` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `trustbridge` (lib test) due to 2 previous errors
+(exit=101)
+
+-------------------------------------------------------------------------------
+§3 §2-1a 容器实证复跑（git pin 路线不可达；git pin / ldk path 依赖两条路线均勿再尝试）
+-------------------------------------------------------------------------------
+最小 crate（宿主 /tmp/probe-llm，docker cp 进容器）：
+  Cargo.toml:
+    [package] name = "probe-llm" version = "0.0.0" edition = "2021"
+    [dependencies]
+    lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
+  src/lib.rs: pub fn probe() -> &'static str { "probe" }
+
+命令与输出尾部（实跑，容器 cargo 1.99.0）：
+  $ MSYS_NO_PATHCONV=1 docker exec -w /tmp/probe-llm multi-tools cargo check --offline
+  error: invalid character `{` in package name: `{{project-name}}` ... (lyquid-template/Cargo.toml:2，ldk 树内模板的既有噪音，非本探针问题)
+    Checking lyquid v0.8.1 (https://github.com/lyquor-labs/ldk?rev=...fd575e8#fd575e88)
+  error[E0432]: unresolved import `super::NativeGuestAbi`
+    --> /usr/local/cargo/git/checkouts/ldk-b72281d44a8ce511/fd575e8/lyquid/src/runtime/internal.rs:3:37
+   3 | use super::{GuestSlice, GuestUsize, NativeGuestAbi};
+     |                                     ^^^^^^^^^^^^^^ no `NativeGuestAbi` in `runtime`
+    note: found an item that was configured out
+      --> .../lyquid/src/runtime/mod.rs:32-33
+     32 | #[cfg(all(target_arch = "wasm32", target_pointer_width = "32"))]
+     33 | pub type NativeGuestAbi = crate::mem::Wasm32;
+  error[E0425]: cannot find type `NativeGuestAbi` in this scope
+    --> .../lyquid/src/runtime/mod.rs:38:24 / :40:24 / :42:41
+   = help: ... (wasm64 同款 note)
+  error: could not compile `lyquid` (lib) due to 4 previous errors
+  (exit=101)
+
+解读：`NativeGuestAbi` 是 `#[cfg(target_arch = "wasm32"/"wasm64")]` 门控项——宿主
+（x86_64）目标下 ldk 自身即不可编译。故任何把 lyquid-llm（feature=ldk）以
+git pin / ldk path 依赖引入**宿主**编译的路线在 ldk 源码层即失败（E0425/E0432），
+与 plan §2-1a 记录逐字一致。路线①（签名存根）是壳自用的唯一可行解。
+
+-------------------------------------------------------------------------------
+§4 修复后复跑（路线①：stubs/lyquid-llm + 壳挂工作树 assessor）——全绿
+-------------------------------------------------------------------------------
+改动（壳侧，非仓库）：
+  verify_core/Cargo.toml       + lyquid_llm = { path = "stubs/lyquid-llm" }
+  verify_core/stubs/lyquid-llm/Cargo.toml     新 crate（package name = lyquid_llm）
+  verify_core/stubs/lyquid-llm/src/lib.rs     最小签名面；call_model 恒 Err（测试不触 LLM 路径）
+
+$ cd "F:/canvus auto/downloads/202609CS5298/workflow-out/verify_core" && cargo test --lib --tests
+     Running unittests src\lib.rs (target\debug\deps\trustbridge-*.exe)
+   ...（33 个单测全 ok，节选）
+   test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\escrow_lifecycle.rs (target\debug\deps\escrow_lifecycle-*.exe)
+   running 5 tests ... test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+     Running tests\modelcheck_refund.rs (target\debug\deps\modelcheck_refund-*.exe)
+   running 2 tests ... test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+
+（exit=0）
+
+-------------------------------------------------------------------------------
+§5 计数漂移说明（39 → 40）
+-------------------------------------------------------------------------------
+- 原基线（w1b2-t0-baseline.txt，HEAD 1c0e45f）：32（lib）+ 5 + 2 = 39；其中 lib 的
+  assessor 部分为 HEAD 版 **5 个** `#[test]`。
+- 工作树（含未提交 W1-B2 S3 改动）assessor 有 **6 个** `#[test]`（新增
+  report_json_roundtrip_is_the_wire_shape，R2#1 wire-shape pin），其余 lib 测试数不变。
+- 路线①挂工作树 assessor → lib = 32 + 1 = **33** → 33 + 5 + 2 = **40**。
+- 该漂移即 plan §2-2 预判的路线①计数；"39/39" 的字面数字按意图重定为"壳全绿"，
+  实际 = **40/40**（路线② 才会回到 32+5+2=39，且须登记"不覆盖工作树第 6 测"偏差，本
+  轮未采用路线②）。
+
+-------------------------------------------------------------------------------
+§6 T7 终验复跑（探针移除后，2026-10-28）
+-------------------------------------------------------------------------------
+[1] 探针零残留（lyquid/ scripts/ agents/ 全扫）：
+    $ grep -rn "probe_claim_sim\|W1-B2-claim-debug" lyquid/ scripts/ agents/
+    (无输出；grep_rc=1) → 零残留 ✓
+
+[2] core 语义冻结（T1 与 T7 双时点）：
+    $ git diff --stat lyquid/src/types.rs lyquid/src/core.rs
+    (空) → 零改动 ✓
+
+[3] lib.rs 终态 vs T0 快照（以 _pre-task-snapshot.patch 重建 T0 版后 diff）：
+    $ mkdir -p /tmp/t0/lyquid/src && git show HEAD:lyquid/src/lib.rs > /tmp/t0/lyquid/src/lib.rs
+    $ sed -n '625,838p' workflow-out/_pre-task-snapshot.patch > /tmp/lib-t0.patch
+    $ cd /tmp/t0 && patch -p1 < /tmp/lib-t0.patch          # 751 行 = T0 工作树版
+    $ diff -u <(tr -d '' < /tmp/t0/lyquid/src/lib.rs)                <(tr -d '' < trustbridge/lyquid/src/lib.rs)
+    → 仅 3 处**登记性偏离**（无任何探针残留）：
+      (a) assess_brief 文档句「native face; 原 export=eth 已撤下」
+      (b) assess_brief 属性 #[method::instance(export = eth)] → #[method::instance]
+          （+ 偏离登记注释；solc Stack too deep 平台限制，见
+           w1b2-claim-probe-evidence.txt §2）
+      (c) 两处 map_err 编译修复（report_json / LyquidLlmModel::new 的 String→&str 转接）
+    探针（probe_claim_sim 块 + ACCESS_MATRIX 行 + W1-B2-claim-debug 标记）已整块删除，
+    lib.rs 其余字节与 T0 一致 ✓
+
+[4] 壳复跑（路线①，工作树 assessor）：
+    $ cd ../workflow-out/verify_core && cargo test --lib --tests
+       unittests src\lib.rs        → test result: ok. 33 passed; 0 failed
+       tests\escrow_lifecycle.rs   → test result: ok.  5 passed; 0 failed
+       tests\modelcheck_refund.rs  → test result: ok.  2 passed; 0 failed
+    (exit=0) → **40/40 全绿** ✓（与 §4 T0 后复跑一致，探针移除未影响壳）
+
+[5] finding superseded 注记：w1b2-claim-revert-finding.md 头部已插入（正文未改）✓

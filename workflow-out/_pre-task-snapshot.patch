@@ -1,0 +1,1531 @@
+diff --git a/agents/common/rpc.py b/agents/common/rpc.py
+index 4650522..d63ce1d 100644
+--- a/agents/common/rpc.py
++++ b/agents/common/rpc.py
+@@ -2,11 +2,31 @@
+ 
+ Two transports, one interface:
+ 
+-  NodeClient — talks to the Lyquor devnet node (default http://127.0.0.1:10087,
+-               JSON-RPC at /lyquor/api per the docs). The exact call envelope
+-               (method naming, arg encoding for Vec/struct params) is
+-               SPIKE(W1-4): until then `call()` posts the obvious shape and the
+-               demo runs on FakeNode.
++  NodeClient — talks to the Lyquor devnet node over the ETH JSON-RPC 2.0 API
++               (W1-B2 S4: envelope verified against the multi v0.8.1 devnet,
++               evidence + probe matrix archived in workflow-out/w1b2-s4-rpc.md).
++               Envelope, verified by probes, not assumptions:
++                 POST  {base}/api  with {"jsonrpc":"2.0","id",...}
++                 reads  = eth_call   [{to, data}, "latest"]
++                 writes = eth_sendTransaction [{from, to, data}] — the node
++                          signs with its dev backend for the `from` account
++                          (dual-sender decision gate passed: anvil #0 AND #1;
++                          §B-①), so per-call sender selection is just the
++                          `from` field. eth_estimateGas is NOT usable on
++                          lyquid contracts (§B-③④b) and not needed: the node
++                          auto-gasses sends without a gas field.
++                 receipt = eth_getTransactionReceipt, `status == "0x1"`.
++               Method names on the wire are the BARE Ethereum-ABI function
++               names of the lyquid's exported fns (e.g. "deal_info(string)"),
++               routed by 4-byte selectors pinned in _SELECTORS below (frozen
++               from `cast sig` output; cross-checked against the LyteLog
++               selector bytes of the T1 receipts, w1b2-s4-rpc.md §B-⓪).
++               CAVEAT (measured, T1 A-1 note 3): `status == "0x1"` means the
++               transaction was sequenced, NOT that the lyquid method returned
++               Ok — a method Err is swallowed by the platform and the tx still
++               lands (non-revert semantics, implementation.md §③). Callers
++               that need success must read back state (create_deal does;
++               keeper.py re-checks deal_info/balance_of).
+ 
+   FakeNode   — in-process mirror of the Lyquid's semantics for orchestration
+                smoke tests (dev velocity before the devnet is wired). The
+@@ -19,62 +39,341 @@ from __future__ import annotations
+ 
+ import json
+ import os
++import time
+ from dataclasses import dataclass, field
+ 
+ from agents.common.protocol import evidence_root
+ 
+ DEFAULT_NODE = os.environ.get("TB_NODE", "http://127.0.0.1:10087")
+ 
++# ---------------------------------------------------------------------------
++# ETH-side constants (all values measured on the multi v0.8.1 devnet; sources
++# cited per line — reproducible via the commands in workflow-out/w1b2-s4-rpc.md)
++# ---------------------------------------------------------------------------
++
++# anvil deterministic dev account #0 (BROKER on-chain). Address verified two
++# ways: `eth_accounts` listing (w1b2-s4-rpc.md §A-0) and the `from` field of
++# receipts for txs signed by the #0 dev key (§B-②).
++DEFAULT_SENDER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
++
++# Selector + wire-type table. Source: `cast sig "<sig>"` in the multi-tools
++# container, 2026-10-25 (w1b2-s4-rpc.md §B-⓪); faucet/fund/create_deal bytes
++# additionally cross-checked against the LyteLog data of the T1 receipts.
++# Types are exactly what the export=eth wire面 accepts (u128 domain values
++# travel as uint128/uint64 per lib.rs edge conversions — R1#1).
++_ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
++    # sig: (selector, param types, return type)
++    "faucet(string,uint128)": ("b540def8", ("string", "uint128"), None),
++    "create_deal(string,string,uint128,uint16,string,string,uint64,uint8)": (
++        "bd827024",
++        ("string", "string", "uint128", "uint16", "string", "string", "uint64", "uint8"),
++        None,
++    ),
++    "fund(string)": ("73451f65", ("string",), None),
++    "notarize(string,string,string,string)": ("b1fecd5a", ("string",) * 4, None),
++    "submit_deliverable(string,string)": ("7ecc9d46", ("string", "string"), None),
++    "complete(string)": ("ad932b5c", ("string",), None),
++    "claim_timeout(string)": ("786cfc8f", ("string",), "bool"),
++    "cancel(string)": ("0b4f3f3d", ("string",), None),
++    "open_dispute(string,string)": ("a48ab911", ("string", "string"), None),
++    "committee_config(string[],uint32)": ("15df3c73", ("string[]", "uint32"), None),
++    "deal_info(string)": ("ec78f86e", ("string",), "string"),
++    "evidence_entries_json(string)": ("16417010", ("string",), "string"),
++    "balance_of(string)": ("3e6b4459", ("string",), "uint128"),
++    "due_deals(uint64)": ("4704839a", ("uint64",), "string[]"),
++}
++
++# apply_committee_verdict is deliberately NOT in this table: its wire param is
++# the CommitteeCertWire struct, which has no EthAbiType in ldk v0.8.1 (plan R3)
++# — it stays un-exported and the adversarial flow is sim-only (R2#2).
++
++
++class NodeError(RuntimeError):
++    """A JSON-RPC error object came back (transport accepted, call failed).
++
++    Carries the raw error verbatim — no collapsing into a generic message
++    (the error text is the only on-chain diagnostic: e.g.
++    `Execution error: Barrel(Lyquid(LyquidRuntime("no such deal"))).`)."""
++
++    def __init__(self, method: str, error: dict):
++        self.method = method
++        self.code = error.get("code")
++        self.message = error.get("message")
++        self.data = error.get("data")
++        extra = f" data={self.data!r}" if self.data is not None else ""
++        super().__init__(f"{method}: rpc error {self.code}: {self.message}{extra}")
++
++
++class TxError(RuntimeError):
++    """Receipt came back with status != 0x1 (transport-level failure)."""
++
++
++# ---------------------------------------------------------------------------
++# Minimal Ethereum-ABI codec (pure stdlib; covers exactly the _ABI type set:
++# string / uint8..uint128 / bool / string[] — no tuples, no nested arrays).
++# ---------------------------------------------------------------------------
++
++
++def _word(v: int) -> bytes:
++    return int(v).to_bytes(32, "big")
++
++
++def _pad32(b: bytes) -> bytes:
++    return b + b"\x00" * ((32 - len(b) % 32) % 32)
++
++
++def _enc_value(t: str, v) -> bytes:
++    if t == "string":
++        b = str(v).encode()
++        return _word(len(b)) + _pad32(b)  # length word + padded payload
++    if t == "string[]":
++        items = list(v)
++        head_size = 32 * (len(items) + 1)  # length word + one offset per item
++        out = _word(len(items))
++        tails = []
++        off = head_size
++        for it in items:
++            out += _word(off)
++            tb = _enc_value("string", it)
++            tails.append(tb)
++            off += len(tb)
++        return out + b"".join(tails)
++    if t.startswith("uint"):
++        return _word(int(v))
++    if t == "bool":
++        return _word(1 if v else 0)
++    raise ValueError(f"unsupported ABI type: {t}")
++
++
++def _is_dynamic(t: str) -> bool:
++    return t in ("string", "string[]")
++
++
++def _encode_args(types: tuple[str, ...], values: tuple) -> bytes:
++    if len(types) != len(values):
++        raise ValueError(f"arity mismatch: {types} vs {values}")
++    head, tail, head_size = b"", b"", 32 * len(types)
++    for t, v in zip(types, values):
++        if _is_dynamic(t):
++            head += _word(head_size + len(tail))  # offset to this value's tail
++            tail += _enc_value(t, v)
++        else:
++            head += _enc_value(t, v)
++    return head + tail
++
++
++def _decode_ret(t: str, hexdata: str):
++    data = bytes.fromhex(hexdata[2:] if hexdata.startswith("0x") else hexdata)
++    if t == "string":
++        off = int.from_bytes(data[0:32], "big")
++        ln = int.from_bytes(data[off:off + 32], "big")
++        return data[off + 32:off + 32 + ln].decode()
++    if t == "string[]":
++        base = int.from_bytes(data[0:32], "big")
++        n = int.from_bytes(data[base:base + 32], "big")
++        out = []
++        for i in range(n):
++            eo = int.from_bytes(data[base + 32 * (i + 1):base + 32 * (i + 2)], "big")
++            ln = int.from_bytes(data[base + eo:base + eo + 32], "big")
++            out.append(data[base + eo + 32:base + eo + 32 + ln].decode())
++        return out
++    if t == "bool":
++        return int.from_bytes(data[0:32], "big") == 1
++    if t.startswith("uint"):
++        return int.from_bytes(data[0:32], "big")
++    raise ValueError(f"unsupported return type: {t}")
++
++
++def _sig_types(sig: str) -> tuple[str, ...]:
++    inner = sig[sig.index("(") + 1:sig.index(")")]
++    return tuple(t for t in inner.split(",") if t)
++
++
++# ---------------------------------------------------------------------------
++# NodeClient
++# ---------------------------------------------------------------------------
++
+ 
+ class NodeClient:
+-    def __init__(self, base_url: str = DEFAULT_NODE):
++    """ETH JSON-RPC transport with the same method face as FakeNode.
++
++    `sender` is the default EIP-55 address used for guarded writes; every
++    mutating wrapper also accepts keyword-only `sender=` for per-call role
++    selection (demo maps ALICE/BOB to dev accounts #1/#2 — the on-chain
++    Buyer/Seller guards compare `ctx.caller.to_string()` exactly, lib.rs:624).
++    """
++
++    def __init__(self, base_url: str = DEFAULT_NODE, contract: str | None = None,
++                 sender: str | None = None):
+         self.base_url = base_url.rstrip("/")
++        contract = contract or os.environ.get("TB_CONTRACT")
++        if not contract:
++            raise ValueError(
++                "contract address required: pass --contract <addr> or set TB_CONTRACT")
++        self.contract = contract
++        self.sender = sender or DEFAULT_SENDER
++
++    # -- transport core ----------------------------------------------------
+ 
+-    def call(self, method: str, *args):
++    def _rpc(self, method: str, params: list):
+         import requests  # imported lazily so sim mode needs no deps
+ 
+-        # SPIKE(W1-4): confirm envelope — method name mangling for #[method] fns,
+-        # arg serialization, error shape. Placeholder uses the obvious form.
+-        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(args)}
+-        r = requests.post(f"{self.base_url}/lyquor/api", json=payload, timeout=10)
++        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
++        r = requests.post(f"{self.base_url}/api", json=payload, timeout=30)
+         r.raise_for_status()
+         body = r.json()
+         if "error" in body:
+-            raise RuntimeError(f"node error: {body['error']}")
++            raise NodeError(method, body["error"])
+         return body.get("result")
+ 
+-    # -- convenience wrappers mirroring the Lyquid surface --
+-    def faucet(self, agent: str, amount: int): return self.call("faucet", agent, amount)
+-    def create_deal(self, buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf):
+-        return self.call("create_deal", buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf)
+-    def fund(self, deal_id): return self.call("fund", deal_id)
+-    def notarize(self, deal_id, frm, to, payload_digest): return self.call("notarize", deal_id, frm, to, payload_digest)
+-    def submit_deliverable(self, deal_id, d): return self.call("submit_deliverable", deal_id, d)
+-    def complete(self, deal_id): return self.call("complete", deal_id)
+-    def claim_timeout(self, deal_id): return self.call("claim_timeout", deal_id)
+-    def cancel(self, deal_id): return self.call("cancel", deal_id)
+-    def open_dispute(self, deal_id, reason_digest): return self.call("open_dispute", deal_id, reason_digest)
+-    def apply_committee_verdict(self, deal_id, cert, caller=None):
+-        """cert is the DOMAIN-level triple (verdict_code, evidence_root, signers)
+-        (types.rs CommitteeCert shape, shared with FakeNode — two transports,
+-        one interface).
+-
+-        SPIKE(W1-4): the Rust wire carries only 2 fields
+-        (CommitteeCertWire { verdict_code, signers }); the chain derives the
+-        root itself from its own evidence log (committee.rs into_domain). The
+-        root travels in the domain-level cert only until the real envelope
+-        lands. `caller` is carried by the connection identity on a real
+-        transport (lib.rs `caller_agent`); it is a placeholder here and is
+-        deliberately NOT sent.
+-        """
+-        return self.call("apply_committee_verdict", deal_id, cert)
+-    def committee_config(self, members, threshold): return self.call("committee_config", members, threshold)
+-    def deal_info(self, deal_id): return json.loads(self.call("deal_info", deal_id))
+-    def evidence_entries(self, deal_id):
++    def block_number(self) -> int:
++        return int(self._rpc("eth_blockNumber", []), 16)
++
++    def _view(self, sig: str, args: tuple, frm: str | None = None):
++        sel, types, ret = _ABI[sig]
++        data = "0x" + sel + _encode_args(types, args).hex()
++        call = {"to": self.contract, "data": data}
++        if frm:
++            call["from"] = frm
++        raw = self._rpc("eth_call", [call, "latest"])
++        return _decode_ret(ret, raw) if ret else None
++
++    def _send(self, sig: str, args: tuple, sender: str | None = None):
++        """Write path: eth_sendTransaction + receipt wait.
++
++        Returns when receipt.status == "0x1". NOTE the measured caveat in the
++        module docstring: 0x1 = sequenced, not necessarily method-Ok. Methods
++        that must prove effect read back afterwards (create_deal / keeper)."""
++        sel, types, _ret = _ABI[sig]
++        data = "0x" + sel + _encode_args(types, args).hex()
++        txh = self._rpc("eth_sendTransaction",
++                        [{"from": sender or self.sender, "to": self.contract, "data": data}])
++        deadline = time.time() + 60
++        receipt = None
++        while time.time() < deadline:
++            receipt = self._rpc("eth_getTransactionReceipt", [txh])
++            if receipt is not None:
++                break
++            time.sleep(0.5)
++        if receipt is None:
++            raise TxError(f"{sig}: no receipt within 60s (tx {txh})")
++        if receipt.get("status") != "0x1":
++            raise TxError(f"{sig}: tx {txh} status={receipt.get('status')} receipt={receipt}")
++        return receipt
++
++    def _addr(self, sender: str | None) -> str:
++        return sender or self.sender
++
++    # -- convenience wrappers mirroring the Lyquid surface ------------------
++
++    def faucet(self, agent: str, amount: int, *, sender: str | None = None):
++        self._send("faucet(string,uint128)", (agent, amount), sender)
++
++    def create_deal(self, buyer, seller, amount, fee_bps, terms_d, acceptance_d,
++                    est_ms, est_conf, *, sender: str | None = None) -> str:
++        # deal_id discovery (plan R1#3 fallback algorithm): eth_sendTransaction
++        # cannot return the lyquid's return value, so probe existing ids from
++        # deal-1 upward for the pre-call max, then verify the expected successor
++        # appeared and belongs to the buyer we passed (read-back = the success
++        # proof, per the status!=Ok caveat).
++        n = 1
++        while n <= 10_000 and self._deal_exists(f"deal-{n}"):
++            n += 1
++        if n > 10_000:
++            raise RuntimeError("deal id probe overflow (>10k deals)")
++        expected = f"deal-{n}"
++        self._send("create_deal(string,string,uint128,uint16,string,string,uint64,uint8)",
++                   (buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf),
++                   sender)
++        info = self._poll_deal(expected)
++        if info.get("buyer") != buyer:
++            raise RuntimeError(
++                f"{expected} exists but buyer={info.get('buyer')!r} != {buyer!r}; refusing to guess")
++        return expected
++
++    def _deal_exists(self, deal_id: str) -> bool:
++        try:
++            self.deal_info(deal_id)
++            return True
++        except NodeError:
++            return False
++
++    def _poll_deal(self, deal_id: str, attempts: int = 10) -> dict:
++        # consensus finality retry: the write is sequenced before we get here,
++        # but give the read path a few ticks (automine: usually first try).
++        last: Exception | None = None
++        for _ in range(attempts):
++            try:
++                return self.deal_info(deal_id)
++            except NodeError as e:  # pragma: no cover - finality window
++                last = e
++                time.sleep(0.4)
++        raise last  # type: ignore[misc]
++
++    def fund(self, deal_id, *, sender: str | None = None):
++        self._send("fund(string)", (deal_id,), sender)
++
++    def notarize(self, deal_id, frm, to, payload_digest, *, sender: str | None = None):
++        # FakeNode returns the entry seq; the ETH write path has no return
++        # value (receipt-only), and no flow consumes the seq — documented
++        # asymmetry, same as claim_timeout's bool below.
++        self._send("notarize(string,string,string,string)", (deal_id, frm, to, payload_digest),
++                   sender)
++        return True
++
++    def submit_deliverable(self, deal_id, d, *, sender: str | None = None):
++        self._send("submit_deliverable(string,string)", (deal_id, d), sender)
++
++    def complete(self, deal_id, *, sender: str | None = None):
++        self._send("complete(string)", (deal_id,), sender)
++
++    def claim_timeout(self, deal_id, *, sender: str | None = None) -> bool:
++        # Permissionless (Access::Anyone) — the on-chain guard re-derives
++        # eligibility; a non-due/terminal deal errors on-chain ( swallowed by
++        # the platform: status stays 0x1). keeper.py therefore re-checks
++        # deal_info after sending; see its idempotency note.
++        self._send("claim_timeout(string)", (deal_id,), sender)
++        return True
++
++    def cancel(self, deal_id, *, sender: str | None = None):
++        self._send("cancel(string)", (deal_id,), sender)
++
++    def open_dispute(self, deal_id, reason_digest, *, sender: str | None = None):
++        self._send("open_dispute(string,string)", (deal_id, reason_digest), sender)
++
++    def apply_committee_verdict(self, deal_id, cert, caller=None, *, sender: str | None = None):
++        """cert is the DOMAIN-level triple (verdict_code, evidence_root, signers).
++
++        NOT reachable over the ETH API: CommitteeCertWire's struct param has no
++        EthAbiType, so the method is not eth-exported (plan R3; measured
++        FuncNotFound for un-exported methods: w1b2-s4-rpc.md §B-④h). The
++        adversarial flow is sim-only by design (R2#2)."""
++        raise RuntimeError(
++            "apply_committee_verdict is not ETH-exported (struct wire param, plan R3): "
++            "adversarial flow is sim-only — run with --sim (w1b2-s4-rpc.md §B-④h)")
++
++    def committee_config(self, members, threshold, *, sender: str | None = None):
++        self._send("committee_config(string[],uint32)", (list(members), int(threshold)), sender)
++
++    def deal_info(self, deal_id) -> dict:
++        return json.loads(self._view("deal_info(string)", (deal_id,),
++                                     frm=self._addr(None)))
++
++    def evidence_entries(self, deal_id) -> list:
+         """Mirror of the chain's evidence_entries_json getter."""
+-        return json.loads(self.call("evidence_entries_json", deal_id))
+-    def balance_of(self, agent): return self.call("balance_of", agent)
+-    def due_deals(self, now): return self.call("due_deals", now)
++        return json.loads(self._view("evidence_entries_json(string)", (deal_id,),
++                                     frm=self._addr(None)))
++
++    def balance_of(self, agent, *, sender: str | None = None) -> int:
++        # wire面 is uint128 (R1#1 edge conversion at the balance_of signature).
++        return self._view("balance_of(string)", (agent,), frm=self._addr(sender or self.sender))
++
++    def due_deals(self, now: int | None = None, *, sender: str | None = None) -> list:
++        # `now` defaults to the current block height (the chain treats it as
++        # advisory-only; money movement re-derives time in claim_timeout).
++        if now is None:
++            now = self.block_number()
++        return self._view("due_deals(uint64)", (int(now),), frm=self._addr(sender or self.sender))
+ 
+ 
+ # ---------------------------------------------------------------------------
+diff --git a/lyquid/Cargo.toml b/lyquid/Cargo.toml
+index 677ac81..618c5fd 100644
+--- a/lyquid/Cargo.toml
++++ b/lyquid/Cargo.toml
+@@ -21,7 +21,12 @@ description = "Committee-attested fulfillment trust layer for A2A deals on Lyquo
+ # 目标 = 本地 ldk 克隆 v0.8.1（rev=fd575e8，F15；与 0.7.3 所用面逐字一致，
+ # implementation.md 登记对照）。语义仍是平台 pin，不是依赖浮动。
+ lyquid = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
+-lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c" }
++# W1-B2（S3 接线）：追加 features = ["ldk"] —— call_model 是 lyquid-llm 的
++# #[cfg(feature = "ldk")] 项（lyquid-llm/src/lib.rs:458，default=[] 不含之），
++# 官方 shopping-assistant 依赖行同款形态（shopping-assistant/Cargo.toml:11）。
++# 同一 git pin、零新增 crates.io 依赖（方案"明示不动 Cargo.toml"理由为"零新
++# 增依赖"，本行不新增依赖仅开官方 feature 门——偏离登记见 implementation.md）。
++lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
+ # Re-export declaration, not a new third-party dep: serde_json 1.0.154 is
+ # already the locked transitive dependency of the git-pinned ldk crates
+ # (Cargo.lock). Version strategy: caret "1" only — never bump past what the
+diff --git a/lyquid/src/assessor.rs b/lyquid/src/assessor.rs
+index 01a983d..c39a619 100644
+--- a/lyquid/src/assessor.rs
++++ b/lyquid/src/assessor.rs
+@@ -5,24 +5,37 @@
+ //! the result is then committed to network state via a separate network call
+ //! (the documented two-step pattern). Nothing here ever touches consensus
+ //! replay. `shopping-assistant` is the official precedent for the lyquid-llm
+-//! call shape; refinement loops exist in lyquid-flow if needed later.
++//! call shape (lyquid-examples/shopping-assistant/src/lib.rs:113-131);
++//! refinement loops exist in lyquid-flow if needed later.
+ //!
+ //! B1 reproducibility: prompts request JsonSchema output; the agent-side
+ //! ScriptedMock (agents/common/llm.py) can replay identical responses for
+ //! tests; real backends only for the recorded demo.
+-
+-// Verified API surface (docs/source, v0.7.3) — exact import paths SPIKE(W1):
+-//   lyquid_llm::call_model::<B>(&backend, &ModelRequest) -> LlmResult<ModelResponse>
+-//   lyquid_llm::backend::openai_compat::OpenAiCompatBackend::openai(...)
+-//   lyquid_llm::backend::gemini::GeminiBackend::google_ai(...)
+-//   ModelRequest::new(...).system(...).timeout_ms(..).max_output_tokens(..)
+-//   OutputFormat::Json / JsonSchema
+-//
+-// The functions below are written against that surface with a mock seam so the
+-// logic is testable before the spike lands.
++//!
++//! W1-B2 S3 wiring (was SPIKE(W1) items at :14/:63/:90 — all resolved and
++//! rewritten as conclusions below; ledger in workflow-out/implementation.md):
++//!   - import/API face pinned against ldk v0.8.1 (rev fd575e8, read this
++//!     round): `lyquid_llm::call_model` (lyquid-llm/src/lib.rs:459,
++//!     feature "ldk" — the shopping-assistant Cargo.toml:11 form), backend
++//!     construction per plan R1#4: custom endpoint =
++//!     `OpenAiCompatBackend::chat_completions(provider, base_url)
++//!     .bearer_auth(api_key)` (backend/openai_compat.rs:114-132); default
++//!     OpenAI endpoint only = `openai(api_key)` (:94-98, hardcoded
++//!     api.openai.com/v1/responses); `.output_format(OutputFormat::json_schema(..))`
++//!     (:146-155); `ModelRequest::new(model, prompt).system(..).timeout_ms(..)
++//!     .max_output_tokens(..)` (lib.rs:390-431); `OutputFormat::JsonSchema
++//!     {name, schema}` (lib.rs:40-47).
++//!   - HeuristicModel is now the shipped "TB_LLM replay mode" component (not
++//!     a placeholder): with empty api_key/base_url params the chain runs it
++//!     so demos/tests behave identically to the recorded scripts.
++//!   - serde_json is the explicit json-crate choice (already the locked
++//!     transitive dep of the git-pinned ldk crates; declaration comment in
++//!     lyquid/Cargo.toml — no crates.io addition).
+ 
+ use crate::types::AssessmentReport;
+ use serde::Deserialize;
++use lyquid_llm::backend::openai_compat::OpenAiCompatBackend;
++use lyquid_llm::{call_model, ModelRequest, OutputFormat};
+ 
+ pub struct DealBrief {
+     pub buyer_profile_digest: String,
+@@ -55,23 +68,79 @@ pub fn build_request(brief: &DealBrief) -> String {
+     )
+ }
+ 
+-/// Backend seam: production = lyquid-llm `call_model`; tests = mock.
++/// Backend seam: production = lyquid-llm `call_model` (LyquidLlmModel below);
++/// replay/tests = HeuristicModel; unit tests = any local mock.
+ pub trait AssessmentModel {
+     fn complete_json(&self, prompt: &str) -> Result<String, String>;
+ }
+ 
+-/// Deterministic fallback used until SPIKE(W1) wires the real backend.
++/// TB_LLM 回放模式（W1-B2 转正，非占位）：确定性固定输出，与
++/// agents/common/llm.py DEFAULT_ASSESSMENT_SCRIPT 保持 lockstep（同 75 /
++/// heuristic-mode / 60000ms / 40 四元组）。assess_brief 在 api_key/base_url
++/// 参数任一为空时走本模型（R1#4 模式契约），离线演示与回归测试由此不依赖
++/// 外网——真实后端走 LyquidLlmModel。
+ pub struct HeuristicModel;
+ 
+ impl AssessmentModel for HeuristicModel {
+     fn complete_json(&self, prompt: &str) -> Result<String, String> {
+         let _ = prompt;
+         // Conservative fixed estimate: 60s p90 x safety handled by
+-        // timeout_slots_from_estimate. Replaced by the real backend in W2.
++        // timeout_slots_from_estimate.
+         Ok(r#"{"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}"#.to_string())
+     }
+ }
+ 
++/// JsonSchema constraint sent to the provider — mirrors the four-field
++/// RawAssessment contract below exactly (the parse is the local backstop;
++/// schema-constrained output minimizes the parse-failure surface).
++fn assessment_schema() -> serde_json::Value {
++    serde_json::json!({
++        "type": "object",
++        "properties": {
++            "qualification_score": {"type": "integer", "minimum": 0, "maximum": 100},
++            "risks": {"type": "array", "items": {"type": "string"}},
++            "est_duration_ms": {"type": "integer", "minimum": 0},
++            "est_confidence": {"type": "integer", "minimum": 0, "maximum": 100}
++        },
++        "required": ["qualification_score", "risks", "est_duration_ms", "est_confidence"],
++        "additionalProperties": false
++    })
++}
++
++/// Real backend (W1-B2 S3): OpenAI-compatible chat-completions endpoint via
++/// lyquid-llm. Constructed per plan R1#4 — a non-empty `base_url` selects
++/// `chat_completions(provider, base_url).bearer_auth(api_key)`; an EMPTY
++/// base_url (with non-empty key) means the stock OpenAI endpoint, whose only
++/// legal constructor is `openai(api_key)` (hardcoded
++/// https://api.openai.com/v1/responses, openai_compat.rs:94-98).
++pub struct LyquidLlmModel {
++    backend: OpenAiCompatBackend,
++    model: String,
++}
++
++impl LyquidLlmModel {
++    pub fn new(base_url: &str, api_key: &str, model: &str) -> Result<Self, String> {
++        let backend = if base_url.is_empty() {
++            OpenAiCompatBackend::openai(api_key).map_err(|e| format!("llm backend: {e}"))?
++        } else {
++            OpenAiCompatBackend::chat_completions("openai-compat", base_url)
++                .bearer_auth(api_key)
++        }
++        .output_format(OutputFormat::json_schema("trustbridge_assessment", assessment_schema()));
++        Ok(Self { backend, model: model.to_string() })
++    }
++}
++
++impl AssessmentModel for LyquidLlmModel {
++    fn complete_json(&self, prompt: &str) -> Result<String, String> {
++        let req = ModelRequest::new(&self.model, prompt)
++            .timeout_ms(30_000)
++            .max_output_tokens(1_024);
++        let resp = call_model(&self.backend, &req).map_err(|e| format!("llm call: {e}"))?;
++        resp.text.ok_or_else(|| "llm call: empty response text".to_string())
++    }
++}
++
+ /// Wire contract mirror of the prompt schema (QUALIFICATION_SYSTEM above):
+ /// exactly four fields. Missing field = error（与旧解析器 ok_or_else 同严），
+ /// unknown fields ignored（与旧 split-scan 同宽，收严属阶段四评估）。
+@@ -85,11 +154,32 @@ struct RawAssessment {
+     est_confidence: u8,
+ }
+ 
++/// Serialization single point (R2#1): the ONLY place the report's JSON wire
++/// shape is produced. types.rs is frozen and `AssessmentReport` has no
++/// Serialize derive (types.rs:186-192), so this local view borrows the four
++/// fields; lib.rs's `assess_brief` returns exactly this string over the
++/// export=eth face, keeping the wire shape defined in one file.
++pub(crate) fn report_json(r: &AssessmentReport) -> Result<String, String> {
++    #[derive(serde::Serialize)]
++    struct ReportView<'a> {
++        qualification_score: u8,
++        risks: &'a [String],
++        est_duration_ms: u64,
++        est_confidence: u8,
++    }
++    serde_json::to_string(&ReportView {
++        qualification_score: r.qualification_score,
++        risks: &r.risks,
++        est_duration_ms: r.est_duration_ms,
++        est_confidence: r.est_confidence,
++    })
++    .map_err(|e| format!("assessment serialize: {e}"))
++}
++
+ pub fn parse_report(raw: &str) -> Result<AssessmentReport, String> {
+     // serde_json contract parse replaces the hand split-scan (its E0277×4 and
+-    // delimiter fragility) — until SPIKE(W1) decides the json crate story
+-    // inside Lyquids, serde_json is now the explicit contract choice (same dep
+-    // as the lib.rs getters).
++    // delimiter fragility) — serde_json is the explicit contract choice, same
++    // dep as the lib.rs getters (declaration comment in lyquid/Cargo.toml).
+     // TODO(W2): real JsonSchema-validated parse — serde 字段集校验 ≠ schema
+     // 校验（区间/语义约束仍缺）。
+     let r: RawAssessment = serde_json::from_str(raw)
+@@ -167,4 +257,12 @@ mod tests {
+         assert_eq!(r.est_duration_ms, 1000);
+         assert_eq!(r.est_confidence, 50);
+     }
++
++    #[test]
++    fn report_json_roundtrip_is_the_wire_shape() {
++        // R2#1 pin: report_json emits exactly the four-field contract string.
++        let r = parse_report(r#"{"qualification_score":80,"risks":["a","b"],"est_duration_ms":1000,"est_confidence":50}"#).unwrap();
++        let j = report_json(&r).unwrap();
++        assert_eq!(j, r#"{"qualification_score":80,"risks":["a","b"],"est_duration_ms":1000,"est_confidence":50}"#);
++    }
+ }
+diff --git a/lyquid/src/lib.rs b/lyquid/src/lib.rs
+index 2619759..91fc117 100644
+--- a/lyquid/src/lib.rs
++++ b/lyquid/src/lib.rs
+@@ -20,6 +20,24 @@
+ //! plus the `cert_probe` oracle topic). See probe/mod.rs and
+ //! workflow-out/w1b1-*.md for the experiment record. Escrow surface
+ //! untouched.
++//!
++//! W1-B2: S3 LLM wiring + S4 RPC alignment landed (plan/evidence:
++//! workflow-out/w1b2-*.md). (a) `assess_brief` — instance-side assessment
++//! with the real lyquid-llm backend (mode contract R1#4: empty api_key OR
++//! base_url => HeuristicModel replay; else LyquidLlmModel), report cached in
++//! instance `assessment_cache` keyed by the brief summary and returned as the
++//! JSON string over the export=eth face (R2#1 wire shape, single
++//! serialization point in assessor::report_json). (b) export=eth attribute
++//! additions ONLY (method list / ACCESS_MATRIX / bodies untouched), precedent
++//! = the W1-A five methods: submit_deliverable, complete, claim_timeout,
++//! cancel, committee_config, evidence_entries_json, balance_of, due_deals —
++//! the keeper/demo write path (w1b2-s4-rpc.md §B-④h proved un-exported
++//! methods are `FuncNotFound` over the ETH API). open_dispute and
++//! apply_committee_verdict deliberately stay non-eth (adversarial flow is
++//! sim-only, R2#2/R3). The single signature exception (registered deviation):
++//! `balance_of` now returns wire `U128` — bare `u128` has no EthAbiType in
++//! v0.8.1 (ethabi.rs:218-281); same edge-conversion pattern as the
++//! faucet/create_deal amount params (R1#1).
+ 
+ pub mod types;
+ pub mod core;
+@@ -50,7 +68,10 @@ state! {
+     network deal_counter: u64 = 0;
+ 
+     // --- node-local (instance) state ---
+-    instance assessment_cache: HashMap<DealId, AssessmentReport> = new_hashmap();
++    // W1-B2：键型由 DealId 改为 brief 摘要串——「先评估后建 deal」时序下
++    // deal 尚不存在，键 = buyer|seller|terms|scope 摘要（assess_brief 写入）。
++    // 只动 instance 域，types.rs 冻结不触。
++    instance assessment_cache: HashMap<String, AssessmentReport> = new_hashmap();
+     instance watcher_last_slot: u64 = 0;
+ 
+     // probe state (W1-B1) — 主 escrow 字段零改动。R1 已证子模块不能自带
+@@ -201,6 +222,12 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
+ // http 包装方法。故 Funded 路径 + 探针五方法（faucet/create_deal/fund/
+ // notarize/deal_info）按 D8b 备选加 `export = eth`，经容器内 cast 以 ETH ABI
+ // 调用；属性面变化而已，方法清单/矩阵零增删。其余方法维持 native 形态。
++// W1-B2 属性面增补（D3）：正常流/keeper 所需的 network 方法补 `export = eth`
++//（submit_deliverable/complete/claim_timeout/cancel/committee_config/
++// evidence_entries_json/balance_of/due_deals），先例 = W1-A 五方法；仅属性行
++// + 行内注释，方法清单/ACCESS_MATRIX/函数体零改动。未列入者：
++// open_dispute / apply_committee_verdict —— 对抗流组件，刻意不 eth 化
++//（R2#2 注记 / R3 结构体参数无 EthAbiType），消除清单歧义。
+ // 借用纪律（S5 实证，D3-2）：每个方法开头单点 reborrow
+ // `let state = &mut *ctx.network;`（只读 getter 用 `&*`），体内一律
+ // `state.<field>`；不逐处 `ctx.network.` 前缀——多字段并存时逐处前缀触发
+@@ -349,7 +376,7 @@ pub fn notarize(ctx: &mut _, deal_id: DealId, from: AgentId, to: AgentId, payloa
+     Ok(seq)
+ }
+ 
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
+ pub fn submit_deliverable(ctx: &mut _, deal_id: DealId, deliverable_digest: Digest) -> LyquidResult<()> {
+     let state = &mut *ctx.network;
+     {
+@@ -363,7 +390,7 @@ pub fn submit_deliverable(ctx: &mut _, deal_id: DealId, deliverable_digest: Dige
+ }
+ 
+ /// Buyer-consented settlement of a submitted deal.
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
+ pub fn complete(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
+     let state = &mut *ctx.network;
+     {
+@@ -384,7 +411,7 @@ pub fn complete(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
+ 
+ /// Permissionless timeout claim — the on-chain guard half of the
+ /// "off-chain trigger; on-chain guard" pattern (watcher: timeout.rs).
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3）：keeper.py 写通道
+ pub fn claim_timeout(ctx: &mut _, deal_id: DealId) -> LyquidResult<bool> {
+     let state = &mut *ctx.network;
+     let now = current_slot();
+@@ -398,7 +425,7 @@ pub fn claim_timeout(ctx: &mut _, deal_id: DealId) -> LyquidResult<bool> {
+ }
+ 
+ /// Buyer cancels a deal that has no submitted evidence yet.
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
+ pub fn cancel(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
+     let state = &mut *ctx.network;
+     {
+@@ -414,6 +441,8 @@ pub fn cancel(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
+     Ok(())
+ }
+ 
++// W1-B2 注记（R2#2）：open_dispute 刻意不 eth 化——对抗流组件，与
++// apply_committee_verdict 同留 sim（消除「未列亦未说明」的清单歧义）。
+ #[method::network]
+ pub fn open_dispute(ctx: &mut _, deal_id: DealId, reason_digest: Digest) -> LyquidResult<()> {
+     let state = &mut *ctx.network;
+@@ -479,8 +508,11 @@ pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, cert: committee::Co
+ }
+ 
+ // --- committee config (demo: broker-managed; trust assumption documented) ---
++// W1-B2（D3）：参数面 Vec<AgentId> 的 EthAbiType 有实现（impl<T: EthAbiType>
++// EthAbiType for Vec<T>，ethabi.rs:395 实读），故可加 export=eth；demo 正常/
++// 超时流不前置委员会配置（R2#2），本导出仅备查。
+ 
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3）：Vec 参数 ABI 兼容（R3）
+ pub fn committee_config(ctx: &mut _, members: Vec<AgentId>, threshold: u32) -> LyquidResult<()> {
+     let state = &mut *ctx.network;
+     require(Access::Broker, &ctx.caller, state, None)?;
+@@ -513,17 +545,21 @@ pub fn deal_info(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
+     Ok(json)
+ }
+ 
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
+ pub fn evidence_entries_json(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
+     let state = &*ctx.network;
+     Ok(serde_json::to_string(&state.evidence_log.get(&deal_id).cloned().unwrap_or_default())
+         .map_err(|e| lyquid_error(&format!("json serialize: {e}")))?)
+ }
+ 
+-#[method::network]
+-pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<u128> {
++/// W1-B2（R1#1 明文豁免，唯一一处签名微调）：返回面 `u128` -> `U128`——裸
++/// u128 无 EthAbiType（ethabi.rs:218-281，仅 U8..U64 + U64/U128/U256 包装），
++/// 先例 = faucet/create_deal 的 amount 边界转换（本文件上方同款注释）。
++/// rpc.py 按 uint128 解码，keeper/demo 断言口径不变。
++#[method::network(export = eth)] // W1-B2 属性面增补（D3）+ 返回面 U128（R1#1）
++pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<U128> {
+     let state = &*ctx.network;
+-    Ok(state.balances.get(&agent).copied().unwrap_or(0))
++    Ok(U128::from(state.balances.get(&agent).copied().unwrap_or(0)))
+ }
+ 
+ /// Advisory-only listing of deals past their timeout at the CALLER-supplied
+@@ -531,12 +567,74 @@ pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<u128> {
+ /// is `claim_timeout`, which re-derives time via `current_slot` — a forged
+ /// `now` at most perturbs this informational list. Signature kept identical
+ /// to the FakeNode mirror (rpc.py `due_deals(now)`); stage-four alignment.
+-#[method::network]
++#[method::network(export = eth)] // W1-B2 属性面增补（D3）：keeper 读通道；Vec 返回 ABI 兼容（R3）
+ pub fn due_deals(ctx: &_, now: u64) -> LyquidResult<Vec<DealId>> {
+     let state = &*ctx.network;
+     Ok(core::due_for_timeout(state.deals.iter(), now))
+ }
+ 
++// ---------------------------------------------------------------------------
++// Instance functions (node-local; LLM egress lives ONLY here)
++// ---------------------------------------------------------------------------
++
++/// Instance-side assessment (W1-B2 S3 wiring, R2#1 wire shape): assess a
++/// buyer brief with the LLM and return the report JSON STRING over the
++/// export=eth face. The caller (broker) then submits `create_deal` with the
++/// returned estimate values — the documented two-step commit; nothing here
++/// touches consensus state (instance `assessment_cache` only).
++///
++/// Mode contract (R1#4): `api_key` OR `base_url` empty => HeuristicModel
++/// (TB_LLM replay, offline-deterministic); both non-empty => LyquidLlmModel
++/// (custom endpoint via chat_completions+bearer_auth, R1#4; empty base_url
++/// with a key would mean stock OpenAI). The println line tags the mode so
++/// console output doubles as mode evidence.
++///
++/// Backend params travel as METHOD PARAMETERS by design (devnet semantics):
++/// the eth wire call includes them in calldata, so the "key" is visible to
++/// whoever can read the chain anyway — a documented demo trust hole, to be
++/// moved behind instance config in W2'. Do NOT log the key.
++#[method::instance(export = eth)]
++pub fn assess_brief(
++    ctx: &mut _,
++    buyer_profile_digest: String,
++    seller_profile_digest: String,
++    terms_digest: String,
++    license_scope: String,
++    base_url: String,
++    api_key: String,
++    model: String,
++) -> LyquidResult<String> {
++    let brief = assessor::DealBrief {
++        buyer_profile_digest,
++        seller_profile_digest,
++        terms_digest,
++        license_scope,
++    };
++    // 模式契约（R1#4）：api_key/base_url 任一为空 => HeuristicModel（TB_LLM
++    // 回放，离线确定）；双非空 => LyquidLlmModel（R1#4 后端构造）。
++    let (mode, report) = if api_key.is_empty() || base_url.is_empty() {
++        let r = assessor::assess(&assessor::HeuristicModel, &brief)
++            .map_err(|e| lyquid_error(&format!("assess(replay): {e}")))?;
++        ("heuristic", r)
++    } else {
++        let lm = assessor::LyquidLlmModel::new(&base_url, &api_key, &model).map_err(lyquid_error)?;
++        let r = assessor::assess(&lm, &brief)
++            .map_err(|e| lyquid_error(&format!("assess(llm): {e}")))?;
++        ("llm", r)
++    };
++    // R2#1 序列化单点：返回面 = assessor::report_json 产出的报告 JSON 串。
++    let json = assessor::report_json(&report).map_err(lyquid_error)?;
++    // instance 缓存按 brief 摘要串键（「先评估后建 deal」时序下 deal 尚不
++    // 存在，DealId 键不可用；本方法唯一 instance 写点）。
++    let key = format!(
++        "{}|{}|{}|{}",
++        brief.buyer_profile_digest, brief.seller_profile_digest, brief.terms_digest, brief.license_scope
++    );
++    ctx.instance.assessment_cache.write().insert(key, report);
++    lyquid::println!("assess_brief: mode={mode} report={json}");
++    Ok(json)
++}
++
+ // ---------------------------------------------------------------------------
+ // Shared helpers (ledger effects)
+ // ---------------------------------------------------------------------------
+diff --git a/workflow-out/implementation.md b/workflow-out/implementation.md
+deleted file mode 100644
+index 3442a12..0000000
+--- a/workflow-out/implementation.md
++++ /dev/null
+@@ -1,262 +0,0 @@
+-# W1-A 实现说明（S5 宏漂移审计编译清零 + escrow 上 devnet 走到 Funded）
+-
+-
+-执行基线：`workflow-out/plan.md`（独立终裁官定稿）。代码仓 `trustbridge/`（git）。
+-提交序列：T0.5 基线 `5d0380f` → S5 编译清零 `4b0df10` → 部署/登记 `a1721b7` → T6 登记 `740e810`。
+-**修订轮 R1（代码基线不变 740e810，仅文档/证据修订，单独提交）**：① deal_info http 读路径尝试失败并撤 ✅（§④-3/§⑦-2/§⑧.4，存档 `w1a-deal-info-evidence.txt`）；② §① 裁定原文不可再取证、两行降级（§①）；③ shaker test 复跑成功 0 tests（§⑦-1/§⑧.1，存档 `w1a-t3-shaker-test.txt`）；④ SPIKE 行号 @740e810 重算双列（§③/§⑧.6）。
+-**修订轮 R2（代码基线不变 fa3980e，仅文档/证据修订，单独提交）**：① §① 裁定原文经仲裁人向主控会话取证取回，逐字誊录+出处注记+逐条映射（§①）；② deal_info 第三通道（cast send）复跑失败，三通道全闭补登（§④-3/§⑧.4，追加于 `w1a-deal-info-evidence.txt` R2 节）。
+-**修订轮 R3（代码基线不变 fa3980e，仅文档/证据修订，单独提交）**：§⑧.4 经仲裁豁免结案（豁免原文逐字引录，偏离登记永续保留 + W1-B 遗留验证项），§④-3/§⑦-2 同步补登第三通道与 wasm 导出核验，`w1a-deal-info-evidence.txt` 追加 R3 结案节。
+-
+----
+-
+-## ① 用户 3 条裁定（登记口径）
+-
+-### 裁定原文逐字誊录（R2 经仲裁人向主控会话取证取回；含半角标点，一字不改）
+-
+-> 【用户已裁定(写入 implementation.md 开头)】1) features=["ldk"] 引入的传递 crate(talc 5.0.3/ahash 0.8.12)豁免于"不新增 crates.io 依赖"约束——它们是平台官方 feature 的组成,登记即可;2) devnet=平台 0.8 与 SDK v0.7.3 的版本对齐属于 S5 范围:若 0.7.3 构建的 Lyquid 被 0.8 平台拒绝或宏/行为不匹配,允许把 git 锁从 tag v0.7.3 上移到已克隆的 ldk main HEAD(记录 commit hash),这算平台要求而非依赖浮动;3) SPIKE 纪律:标记可在假设被验证后移除/改写,每处登记(假设→验证方式→结论)。
+-
+-### 出处与效力精度注记（如实登记）
+-
+-三条裁定由**主控会话（orchestrator）于任务启动时写入任务文本**，本轮经仲裁人向主控取证取回。效力精度：**第 2、3 条 = 主控直接授权；第 1 条 = 主控裁定 + 终端用户默示**（启动即继续、未逐字批复）——按此精度登记，不得统称"用户逐字裁定"；如需终端用户逐字确认第 1 条，留待下次交互补认。
+-
+-### 附注：R1"不可再取证"检索记录（降为附注）
+-
+-R1 曾在本机可达记录（`trustbridge/.zcode/workflow-runs|workflow-drafts`、`202609CS5298/.workbuddy/memory`、`trustbridge/docs/`、W1 Spike 执行计划文档）穷尽检索裁定原文无果——检索过程属实，唯范围不含主控会话，故当时结论被 R2 取证推翻。
+-
+-### 逐条映射（落地证据）
+-
+-| 裁定 | 落地 |
+-|---|---|
+-| 裁定 1（传递 crate 豁免） | → §② F12：裁定写 talc 5.0.3、实测锁 **5.1.1** 的差异登记维持现状（talc/ahash 为 ldk feature 传递依赖，非新增直依） |
+-| 裁定 2（版本对齐属 S5） | → §⑤ D7：`rev="fd575e88a920448e646f23968775e52982c5201c"` 即"上移到已克隆的 ldk main HEAD（**记录 commit hash**）"要求的执行；触发证据 = 节点托管层 IncompatibleLdk 实录 |
+-| 裁定 3（SPIKE 纪律） | → §③ 表"假设→验证方式→结论"三列结构本身；23 处标记逐行登记、双向勾稽 |
+-
+-**原裁定表两行的降级归属（维持 R1 不变）**：
+-
+-- **计划决策 D4b 落地**（BROKER=caller 身份链）：自署名探针钉死 caller 串 `"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"`（EIP-55）并回填 BROKER——证据见 §④。
+-- **流程纪律**（编码员职责边界）：实测命令即交付物、不虚报运行结果——R1 对 §⑦-1 误记的更正即该纪律的执行。
+-
+-## ② 传递 crate 登记（F12 实测）
+-
+-| crate | 锁定版本 | 依据 |
+-|---|---|---|
+-| `talc` | **5.1.1** | `lyquid/Cargo.lock`（当前锁，D7 后）实测。裁定文本写 5.0.3——**与实测不符，按实测登记 5.1.1**（平台解析结果，非我方选择） |
+-| `ahash` | **0.8.12** | 同上，与裁定文本一致 |
+-| `lyquid` / `lyquid-llm` / `lyquid-test` | 0.8.1 @ `rev=fd575e8…` | D7 后锁（§⑤）；talc/ahash 为 ldk feature 传递依赖，非新增直依（红线豁免） |
+-
+-## ③ SPIKE 登记表（23 行全量；行号 = 原 T6 稿 → **现 @740e810 重算**；计数勾稽 `grep -c "SPIKE(" src/*.rs` = lib.rs 10 + timeout.rs 7 + assessor.rs 3 + committee.rs 2 + types.rs 1 = 23，core.rs 0）
+-
+-### 处置/登记 15 行（S5 内落地或登记结论）
+-
+-| 位点（原→现@740e810） | 假设 | 验证方式（本轮实跑/实读） | 处置 |
+-|---|---|---|---|
+-| lib.rs 8→8 | 文件头 W1 待验总说明 | S5 完成 | 改为"S5 已验证 + 残余指向 W1-B" |
+-| lib.rs 53→57 | 平台是否导出 LyquidResult | `$V7/lyquid/src/lib.rs:199`（v0.7.3）与 v0.8.1 同面实读 | 改结论：已导出同名同形，本地别名退役为 `pub use lyquid::LyquidResult;` |
+-| lib.rs 59→65 | 错误构造器形态 | v0.7.3 `LyquidError` 枚举 :172-189（无 `msg`）+ erc20:31 同款 | 改结论：`LyquidError::LyquidRuntime(String)` |
+-| lib.rs 182→220 | caller 访问器 | `CallContext.caller: Address`（:162）+ erc20:161 `ctx.caller` | 改结论：`ctx.caller`；BROKER 经 D4b 探针回填（§④） |
+-| lib.rs 236→276 | network Err 是否原子回滚 | 设计不依赖该假设（fund 预检使两语义均正确）；T5 fund status=1 行为证据 | 登记：不依赖；devnet 实跑为证 |
+-| lib.rs 356→412 | network HashMap→Vec 确定性迭代语法 | `state.committee_members.iter()` 编译通过 + :358（现 :414 附近）顺序无关性论证（ahash 种子确定） | 登记结论 |
+-| lib.rs 491→573 | 真实 slot/height 访问器 | bartender:90-96 `lyquor_api::chain_pos()` + primitives `.block()`（u64） | 改结论：`.block()` 落地单点 |
+-| lib.rs 501→586 | current_slot 替换为 ctx 派生 | `chain_pos()` 为无 ctx host API（runtime/mod.rs:299），单点形态保留 | 改结论；实证：T5 后 deal `created_slot=31`/`deadline_slot=331` 与链高一致 |
+-| lib.rs 505→591 | caller 提取（ctx.from/signer） | CallContext 字段实证 | 改结论：`caller_agent(&ctx.caller)` = `caller.to_string()`（形态 D4b 钉死） |
+-| lib.rs 510→599 | caller_agent 体内标记 | 同上 | 改结论，随 591 落地 |
+-| timeout.rs 29→30 | 引用型注记（剩余清单） | inline 四项（现 37/43/47/56）全部落地 | 改写：inline 已验证，残余仅 W1-1 两处（现 13/75） |
+-| timeout.rs 34→37 | `#[method::instance]` 属性与 Context 形态 | template:48 `ctx: &mut _` 同款 + 编译通过 | 改结论 |
+-| timeout.rs 41→43 | instance fn 内取共识时间 | `crate::current_slot` 单点复用（内部 `chain_pos()`，无 ctx 依赖）+ 编译 | 改结论 |
+-| timeout.rs 44→47 | call! 跨调用形态 | **A 档**：basicswap:31 命名参数+返回解包语法，目标 `ctx.lyquid_id`（InstanceContext 字段），编译通过——无需 B 档 | 改结论（A 档落地） |
+-| timeout.rs 49→56 | guard 幂等（Funded-only, terminal-safe） | core 测试既钉（阶段一，壳 39/39 持续为证） | 登记结论 |
+-
+-### 保留 8 行（W1-B 范围，标记原文未动）
+-
+-| 位点（原→现@740e810） | 假设 | 保留理由 |
+-|---|---|---|
+-| timeout.rs 13→13 | trigger 语义需 W1-1 在 4 节点 devnet 证明 | S1/W1-B 范围 |
+-| timeout.rs 67→75 | W1-1 验收标准（kill/重启不双退、延迟上限） | S1/W1-B 范围 |
+-| assessor.rs 14→14 | lyquid-llm 导入路径（v0.7.3 实证面） | S3/W1-B 范围 |
+-| assessor.rs 63→63 | 真实后端接线前 fallback 说明 | S3/W1-B 范围 |
+-| assessor.rs 90→90 | json crate story 待定 | S3/W1-B 范围 |
+-| committee.rs 46→53 | 委员会证据集与 network evidence_log 同源假定 | S2 域（读-算-校同源已钉） |
+-| committee.rs 70→77 | Vec-in-network-state 语法待验 | S2 域（S5 编译通过即旁证） |
+-| types.rs 18→18 | devnet slot 长度参数 | S1/W1-B 定时语义（实测注：60000ms→300 slots，见 T5 输出 `timeout_slots:300`） |
+-
+-### 追加行（方案 §5.6-③ 预留）
+-
+-| 追加 | 内容 |
+-|---|---|
+-| D7 触发行 | 见 §⑤：rev 上移 `fd575e8`（v0.8.1），全量对照后代码零改动、重部署重验证通过 |
+-| D6 追加行 | 不适用（A 档直接编译通过，B 档未启用，≤5 遗留预算消耗 **0**） |
+-
+-### 行号双向复验（修订轮 R1 实测 @740e810）
+-
+-命令（在 `trustbridge/lyquid`）：
+-
+-    grep -n "SPIKE(" src/*.rs
+-
+-输出（23 行，行号即上表现列）：
+-
+-    src/committee.rs:53 / :77
+-    src/assessor.rs:14 / :63 / :90
+-    src/lib.rs:8 / :57 / :65 / :220 / :276 / :412 / :573 / :586 / :591 / :599
+-    src/types.rs:18
+-    src/timeout.rs:13 / :30 / :37 / :43 / :47 / :56 / :75
+-
+-勾稽判定：**正向**——上列 23 行 grep 命中逐一可在本表找到归属行（处置 15：lib.rs 10 + timeout.rs 5；保留 8：timeout.rs 2 + assessor.rs 3 + committee.rs 2 + types.rs 1）；**反向**——本表 23 行逐一可反查至上述 grep 行，无孤儿。修订前原表行号为 T6 稿时点值，本次全部按 HEAD 重算更正。
+-
+-## ④ T4.5 调用信封 + D4b 探针 + T5 Funded
+-
+-### 调用信封（invocation envelope，T4.5 实测钉死）
+-
+-- **首选通道（shaker serve）证伪**：代理建立成功（`proxying http://127.0.0.1:8080/ => <id>.<vhost> @ http://node:10087`），但 `POST /、/api、/faucet、/api/faucet、/rpc、/call、/lyquid` 全部 `Not found`——虚拟主机 HTTP 面只服务 `export = http` 的 instance 方法；方法清单冻结不得新增包装方法 → **转 D8b 备选**。
+-- **实采通道（ETH API，D8b 备选）**：
+-  - URL：`http://node:10087/api`（容器内；宿主等价 `http://127.0.0.1:10087/api`）
+-  - 方法：`cast send <CONTRACT> "<ABI签名>" <参数…> --private-key $KEY --rpc-url http://node:10087/api`
+-  - 参数编码：Ethereum ABI（`faucet(string,uint128)`、`create_deal(string,string,uint128,uint16,string,string,uint64,uint8)`、`fund(string)`、`notarize(string,string,string,string)`、`deal_info(string)`）
+-  - 响应形状：anvil 兼容回执（`status`/`blockNumber`/`transactionHash`/`logs`；每笔成功 tx 携带平台 LyteLog，内含 tag+参数可辨识）
+-  - KEY：anvil devnet #0（`0xac09…ff80` = `0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266`）
+-  - 通道落地面：faucet/create_deal/fund/notarize/deal_info 五方法加 `export = eth`（仅属性面；方法清单/ACCESS_MATRIX 零增删）
+-- **实测限制（如实登记）**：
+-  1. v0.7.3/0.8.1 的 `EthAbiType` 无裸 `u128`（仅 U8..U64 + `U64/U128/U256` 包装，ethabi.rs:218-281）→ faucet/create_deal 的 `amount` 改收 `U128`，边界 `.to::<u128>()` 转回领域域（数值语义不变，native/call! 面不变，W1-B RPC 对齐以此为准）。
+-  2. 官方文档明示 `()` 返回不可经 ETH API 读调用——实测**发送**不受影响（faucet/fund 均 `LyquidResult<()>`，`cast send` 成功）。
+-  3. 节点读路径缺陷：`eth_call` 对非-bartender lyquid 一律 `Invalid contract address`（对照：同 selector 对 bartender `0x9fE4…a6e0` 可路由可执行）→ `deal_info`（view 导出，亦不可作 tx 发送）在本 devnet 不可达。**deal_info 的字面输出转由 fund 的 Ok 路径经 `lyquid::println!` 输出同一 DealView JSON**（`shaker console` 取回；console 非共识状态，语义零影响）。
+-  4. **http 读路径尝试失败（修订轮 R1，仲裁指令 1）**：将 deal_info 改 `export = http`（完整合法形态 `#[method::network(export = http, method = "GET", path_prefix = "/deal-info")]`）→ proc 宏在方法类别面拒绝：``error: `export = http` is only supported on #[lyquid::method::instance]``（v0.8.1 lyquid/proc/src/lib.rs:366/381；两次属性形态迭代+完整编译输出存档 `w1a-deal-info-evidence.txt` 与 `_dealinfo-http-attempt-full.txt`）。http 导出仅限 instance 方法，deal_info 改 instance = 类别语义变更，红线禁止——"新实例 + shaker serve 实调 deal_info"无构建物可部署，路径实测失败，代码已还原（export=eth，还原后通道复验 0 错）。
+-  5. **第三通道实测失败（修订轮 R2，仲裁人已跑、修订方复跑）**：`cast send 0x4A679253410272dd5232B3Ff7cF5dbB88f295319 "deal_info(string)" "deal-1" --private-key <anvil#0> --rpc-url http://node:10087/api` → `Error: Failed to estimate gas: server returned an error response: error code -1: Call(ErrorObject { code: ServerError(3), message: "execution reverted", data: Some(RawValue("0x")) })`（EXIT:1，与仲裁人输出一致；追加存档于 `w1a-deal-info-evidence.txt` R2 节）。根因：只读导出不被链上 selector 路由注册为交易可执行。**至此三通道全闭：eth_call（Invalid contract address，两地址）/ export=http（proc 宏类别面拒绝）/ cast send（execution reverted）**——deal_info 字面执行在当前平台面无通道。
+-
+-### D4b 探针（caller 串钉死）
+-
+-- 探针：`cast send <ADDR> "notarize(string,string,string,string)" "probe-deal-d4b" "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" "bob" "deadbeef"` → **status 1（Ok(seq)，命中）**
+-  - rkkfz4 实例 tx `0x9f1b5c34f5ead0e16eace6f9d4c77b2ac0dbb699760512a96c299cb39924abc3`；zz2jue 实例 tx `0x2c07d9486a62fc94a1d8dc4c690a013077a5018dfe32e7a7582d206bb115cd09`
+-- **钉死结论：`ctx.caller.to_string()` = `"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"`（EIP-55 checksummed hex）**；已回填 `BROKER` 常量（lib.rs），create_deal 的 broker 守卫经 T5.2 实证活化。
+-- 探针副作用：哑 deal_id 下留一条 evidence_log 条目（D4b-3 预告过，devnet 可接受）。
+-
+-### T5 四步（全部经 PoC 通道；终实例 `Lyquid-rkkfz4d3tvxcp4aflxpqu26gxmhyxepvei3qa` @ `0x4A679253410272dd5232B3Ff7cF5dbB88f295319`）
+-
+-| 步 | 命令（cast send …） | tx | block | status |
+-|---|---|---|---|---|
+-| faucet(A, 1000000) | `"faucet(string,uint128)" A 1000000` | `0x8670ba33…8b2cd0` | 29 | 1 |
+-| create_deal(A, "bob", 1000, 200, …) | `"create_deal(string,string,uint128,uint16,string,string,uint64,uint8)" …` | `0x5965503f…8ba9dd1` | 30 | 1 |
+-| fund("deal-1") | `"fund(string)" "deal-1"` | `0xfde05b2f…37b076be` | 31 | 1 |
+-| 状态字面 | `shaker console Lyquid-rkkfz4d3…` | — | — | — |
+-
+-控制台输出（与 deal_info 同一 DealView 序列化）：
+-
+-```
+-fund:deal_view: {"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","seller":"bob","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":331}
+-```
+-
+-**`"state":"Funded"`（字面，存档 `workflow-out/w1a-funded-evidence.txt`）**。
+-首实例 zz2jue 上同路径亦全部通过（PoC tx `0x0d301eac…` 等，`workflow-out/w1a-call-poc.txt`）。
+-
+-## ⑤ D7 触发记录
+-
+-- **触发判据 (a) 命中**（证据 = `docker logs ldk-node-1` 实测）：
+-  `failed to load Lyquid … error=Hosting(…, VmRuntime(VM(Instance(Artifact(IncompatibleLdk { image: "0.7.3", node: "0.8.2-dev", hint: "rebuild the Lyquid against lyquid 0.8.2-dev or upgrade the node" })))))`
+-  部署（sequencing）层接受 v0.7.3 产物，但**托管/VM 层拒绝**——escrow 上链后不可 hosting、console/读路由全不可用。
+-- **执行**：Cargo.toml 三处 `tag="v0.7.3"` → `rev="fd575e88a920448e646f23968775e52982c5201c"`（本地 `../ldk` 克隆 v0.8.1，F15；完整 hash `git rev-parse` 实测）+ `cargo update` 重锁。
+-- **对照登记**（0.7.3 ↔ 0.8.1，`--strip-trailing-cr` diff 实测）：prelude.rs **逐字一致**；`LyquidError`/`CallContext`/`NetworkContextImpl` 系列字段一致；`call!` 宏一致；ethabi impls 一致（含 U128、无裸 u128）；`chain_pos()` 一致。**代码零改动即编译通过**（换锁后 `cargo check --target wasm32-unknown-unknown` → Finished，0 错）。
+-- **重部署**：`Platform Version: 0.8`；节点日志 `Lyquid discovered and hosted lyquid_id=Lyquid-zz2jue…`（首次完整 hosting；`shaker list --hosted-only` 含之）。
+-- **回退口径**（R8）：恢复 T0.5 基线 commit `5d0380f` 的 `lyquid/Cargo.toml/Cargo.lock`。**注意**：跨 LDK 大版本 `--update` 会让节点重放旧时代槽位时 pin 住 sequencing（wsd6v4 实例实测 `execution failure left sequencing pinned`）——跨此边界应全新部署（deploy.sh 头注已登记）。
+-- **离线工程注记**：容器无外网，fd575e8 对象经宿主 shallow 克隆仅含单 commit 树，用 `git pack-objects`（commit+tree+全 blob，无历史遍历）注入容器 cargo git db（origin 指向本地 bare，`cargo update` 离线可解析）。
+-
+-## ⑥ T0 目标门与基线
+-
+-- **选定检查通道**：`docker cp <lyquid>` 入 `ldk-tools-1` → 容器内 `cargo check --target wasm32-unknown-unknown`。工具链实测：`rustup target list --installed` = wasm32-unknown-unknown + x86_64-unknown-linux-gnu；`cargo 1.99.0`；`shaker 0.8.2-dev+3c9d09c`；`cast` 在容器。宿主通道不可达（平台 crate 宿主编译 4×E0425 NativeGuestAbi，容器内亦复现——native `cargo test` 因此不可行，F14a 双向印证）。
+-- **新编译基线**（features 后、S5 前）：**73 错**（`w1a-t0-baseline-cargo-check.txt`；分桶 lib.rs 69 / timeout.rs 4 / 四挂载文件 **0**——红线前提成立）。错误面 E0425×51 / E0433×16 / E0599×1。基线首行另有 `{{project-name}}` 包名报错：git checkout 内 lyquid-template 成员被 workspace 扫描的**通道固有噪声**，不计入错误数、与本次改动无关（终态输出仍含该行）。
+-- **T0.5 基线 commit：`5d0380f`**（lyquid/Cargo.toml features+注释、Cargo.lock、build.rs 平台模板文件入库；`git status` 随后干净）。
+-- **devnet 探活**（T0 实测）：`/api` 空 body → `-32700 Parse error`；`eth_chainId` → `0x7a69`；compose ps = ldk-node-1 + ldk-tools-1 (healthy)。
+-- **壳**：`verify_core` 39/39（32+5+2），T0/T1-T3 窗口/终态共 4 轮全绿。
+-
+-## ⑦ 未跑/偏离项（如实登记）
+-
+-1. **`shaker test`（guest 单测）已跑、全绿（0 tests 空转：guest 单测面仅跑 lib 单测、当前为 0；断言覆盖由宿主壳 39/39 承担）**。修订轮 R1 在容器 `/tmp/tb-lyquid`（src/*.rs + Cargo.toml + Cargo.lock 与 HEAD 逐文件 md5 一致，对照存档 `_container-md5.txt`）复跑：`shaker test Cargo.toml` → `running 0 tests` / `test result: ok. 0 passed; 0 failed` / **EXIT:0**（成功输出存档 `w1a-t3-shaker-test.txt`）。更正：T6 稿 §⑦-1 曾据 `w1a-t3-shaker-test-blocked.txt` 记为"未跑/被阻断"——经仲裁指出并复核，该文件实为一次**成功**的 shaker test（v0.7.3 时点，Finished test profile 23.69s → 0 tests ok），系本人当时仅看头部模板噪声行即误判，该文件已删除。补充：S5 当轮确有两次真实的 sysroot 下载失败尝试（github 不可达），其逐字实录另档 `w1a-t3-shaker-test-sysroot-download-failed.txt`（修订轮尝试复现失败时下载已成功、EXIT:0，系当时 transient 网络状况，故以会话实录形式归档并明示非本次实跑）。
+-2. **deal_info 字面输出通道替换**：节点读路径限制（§④-3），字面 `"state":"Funded"` 由 fund 控制台输出承载（内容 = deal_info body 的同一序列化）。deal_info 自身编译、部署、ABI 注册均在案（wasm 导出节含 `maindeal_info`）。**修订轮 R1 补记**：已按仲裁指令尝试 http 读路径（export=http 于 network 方法）——平台 proc 宏在方法类别面硬性拒绝（http 仅限 instance 方法），存档 `w1a-deal-info-evidence.txt`。**R2 补记**：第三通道（cast send）复跑失败（execution reverted），三通道全闭（§④-3 第 5 条）。**R3 结案**：偏离已经仲裁裁准（§⑧.4 引豁免原文）；**W1-B 遗留验证项：读路由修复后补跑 deal_info 实调并存档**。部署产物核验（可复现）：`docker exec ldk-tools-1 strings /tmp/tb-lyquid/lyquid_tools_target/wasm32-unknown-unknown/release/trustbridge.wasm | grep deal_info` → 命中 `maindeal_info`（多次）与 `__lyquid_method_network_3oANTF_deal_info`。
+-3. **committee.rs 意外修法**（§5.3 赋权范围内）：`CommitteeCertWire` 补 `#[derive(serde::Serialize, serde::Deserialize)]`——method 宏入参解码要求；纯 serde（trustbridge 与壳同款依赖），**零 `lyquid::` 路径**，领域逻辑零改动；壳 39/39 持续全绿为证。
+-4. **lib.rs 三项通道形态适配**（超出 §5.1 预设、由 T4.5 实测强制，逐条已内注释）：`export = eth` 五方法属性面；faucet/create_deal `amount: U128`（边界转换）；fund Ok 路径 `lyquid::println!` 输出 DealView。三者的 native 语义/方法清单/矩阵均未变。
+-5. **hashbrown/std 桥**（S5 新形态发现，登记）：v0.7.3/0.8.1 network state `HashMap` = hashbrown+ahash（prelude 别名），领域 `MisconductLog` = std HashMap（types.rs:181，冻结）——`apply_committee_verdict` 经 std 镜像传入/Ok 写回桥接（lib.rs 平台层，计数单点仍在 core::apply_verdict）。
+-6. **超范围交付**：容器 `docker cp` 已把 `_lyquor-node-bin`（节点二进制副本，二进制分析用）与 `_wsprobe.py` 留在 `workflow-out/`——诊断中间产物，未入库（.gitignore 外的手工管理，可删）。
+-
+-## ⑧ 验收口径对照（§2 六条）
+-
+-1. **S5 编译清零（通道限定）**：✅ 选定通道 0 错（`w1a-t3-cargo-check-final.txt`，D7 后终态）；shaker test 已跑全绿（0 tests）（§⑦-1，存档 `w1a-t3-shaker-test.txt`，EXIT:0）。
+-2. **壳不回退**：✅ 39/39 × 4 轮。
+-3. **escrow 部署**：✅ `Lyquid-rkkfz4d3…` @ `0x4A67…5319`（Platform 0.8，hosted；`w1a-deploy-output.txt`）。
+-4. **走到 Funded**：✅（经仲裁豁免结案，偏离登记如下）——deal_info 未实际执行（三通道全闭，`w1a-deal-info-evidence.txt`）；字面 `"state":"Funded"` 由 fund Ok 路径控制台输出承载，与 deal_info 输出同源同构（同一共识状态 + 同一 DealView::from + serde_json::to_string，lib.rs:292-298 / :473-487）；deal_info 自身已编译、部署、ABI 注册在案（release wasm 导出节含 maindeal_info）。仲裁豁免原文：'【仲裁豁免（W1-A 独立仲裁人 GLM-5.3，第 3 轮，2026-10-24）】完成定义第 4 条中 deal_info 实际执行之子要求，在本 devnet 构建（node main-latest 0.8.x）经三通道实测不可达（eth_call 拒绝非-bartender 读路由 / export=http 被 proc 宏类别面禁止 / cast send 交易 revert），属节点侧限制非实现缺陷；据此按已裁准偏离结案。条件：(a) 偏离登记永续保留，任何处不得表述为 deal_info 已实际执行；(b) W1-B 或节点读路由修复后补跑 deal_info 实调并存档（遗留验证项）；(c) 本豁免仅覆盖第 4 条 deal_info 子要求，不及其余验收条目。
+-5. **deploy.sh 校正**：✅ 按 D8 实测通道重写并复跑通过（复跑产出 ss7x5ed 实例，见部署档案尾注）。
+-6. **implementation.md**：✅ 本文件（SPIKE 23 行双向勾稽 + talc/ahash F12 + 裁定登记——**三条裁定原文逐字誊录及出处/效力精度注记见 §①**（主控会话任务文本，R2 经仲裁人取证取回），逐条映射：裁定 1→§② F12、裁定 2→§⑤ D7、裁定 3→§③ 表结构）。**修订轮 R1 行号复验证据**：命令 `grep -n "SPIKE(" src/*.rs`（@740e810）输出 23 行 = lib.rs 8/57/65/220/276/412/573/586/591/599 + timeout.rs 13/30/37/43/47/56/75 + assessor.rs 14/63/90 + committee.rs 53/77 + types.rs 18，与 §③ 表现列逐一对应、无孤儿（正反双向，摘录见 §③"行号双向复验"）。
+-
+----
+-
+-# W1-B1 实现说明（平台机制探针：多节点拓扑 + S1 timer 语义 + S2 认证回合）
+-
+-执行基线：`workflow-out/plan.md`（独立终裁官定稿）。代码基线 f83ab52（W1-A 完成态）。**本节 journal 与全部实验证据分档**：S1 → `w1b1-s1-timer.md`，S2 → `w1b1-s2-oracle.md`，拓扑/环境 → `w1b1-topology.md`，证据存档 `w1b1-t0-baseline.txt` / `w1b1-t2-gate.txt` / `w1b1-t2-cargo-check-final.txt` / `w1b1-t2-deploy.txt` / `w1b1-t5-gate.txt`（未入库伴档：`_w1b1-r1-submodule-state-check.txt`、`_w1b1-setupdevnet-bootstrap.log`、`_w1b1-deploy-zz2jue.txt`）。
+-
+-## B-① Journal（T0→T5，2026-10-24）
+-
+-| T | 内容 | 结果 | 断点产物 |
+-|---|---|---|---|
+-| T0 | git 基线（HEAD=f83ab52）、verify_core 39/39、docker ps（单节点在跑）、`ldk_cargo-cache` 卷在册 | 全过 | `w1b1-t0-baseline.txt` |
+-| T1 | 停单节点（`-p ldk down`，保卷）→ 起 multi 4 节点 v0.8.1 → bootstrap 三步完成（bartender `Lyquid-f7vljmg2…`→0x9fE4…a6e0，availability 4 节点 threshold 1）→ GetNodeInfo/GetPeers/GetLyquidInfo ×4 + availability status 全过 | 拓扑可用 | `w1b1-topology.md`、`_w1b1-setupdevnet-bootstrap.log` |
+-| T2 | R1 先验（state! 子模块）→ probe 三文件 + lib.rs 挂载 → 容器 cargo check 0 实错 → 39/39 → multi-tools 部署（4 实例迭代，最终 #4 rkkfz4d3） | 部署成功 | `w1b1-t2-cargo-check-final.txt`、`w1b1-t2-deploy.txt`、`_w1b1-r1-submodule-state-check.txt` |
+-| T3 | 通道先行证明 → 实验 a（reset→baseline→arm×2→delta）/ b（kill 节点服务→链连续性→双组计数）/ c（三组 delay + Recurrent 对照） | 全实录 | `w1b1-s1-timer.md` |
+-| T4 | 成员换算 → configure → 两阶段激活（cast call 通道）→ run_round 认证回合（on_certified 全链路 console 留痕）→ bump_threshold true/false | 认证回合跑通 | `w1b1-s2-oracle.md` |
+-| T5 | timeout.rs timer SPIKE 落地（仅注释，cargo check 复验）→ 三份 w1b1 文档 → 终跑测试门 → 提交 → 环境处置 | 本节 | `w1b1-t5-gate.txt` |
+-
+-中断恢复说明：本轮未发生配额中断；各 T 产物文件即断点粒度（与方案 R8 约定一致）。
+-
+-## B-② 受影响文件清单勾稽（10 项）
+-
+-| # | 文件 | 实际改动 |
+-|---|---|---|
+-| 1 | `lyquid/src/probe/mod.rs` | 新建（模块文档 + `pub mod s1_timer/s2_oracle`；R1 记录在案） |
+-| 2 | `lyquid/src/probe/s1_timer.rs` | 新建（arm/arm_recurrent/on_timer/mark_fire/reset_net/get_report/**net_report（新增，通道适配）**） |
+-| 3 | `lyquid/src/probe/s2_oracle.rs` | 新建（configure/propose/aggregate/on_certified/run_round/bump_threshold/config + **net_config（新增）**；propose/aggregate 命名见 B-③-2） |
+-| 4 | `lyquid/src/lib.rs` | 3 处：`pub mod probe;`、文件头 W1-B1 注记、state! 块末尾 probe 字段（S1 instance×4 + S1 network×2 + S2 network×4 含 `network oracle cert_probe;` + S2 instance×1，主 escrow 字段零改动） |
+-| 5 | `lyquid/Cargo.toml` | **零改动**（方案预期兑现；无新增依赖、无 feature 变更） |
+-| 6 | `lyquid/src/timeout.rs` | 仅注释/SPIKE 标记三列落地（timeout.rs:2-19 模块头、:28-35 wire note、:65-84 SPIKE_1 段；`cargo check` 复验 Finished 0 实错），逻辑/签名/断言零改动 |
+-| 7 | `workflow-out/implementation.md` | 本节 |
+-| 8-10 | `w1b1-topology.md` / `w1b1-s1-timer.md` / `w1b1-s2-oracle.md` | 新建（含各自人工复现命令清单） |
+-
+-伴档入库（超出 10 项清单的纯增量证据文件，随本提交一并入库以便文档引用不断链）：`w1b1-t0-baseline.txt`、`w1b1-t2-gate.txt`、`w1b1-t2-cargo-check-final.txt`、`w1b1-t2-deploy.txt`、`w1b1-t5-gate.txt`。`_` 前缀诊断伴档按 W1-A §⑦-6 惯例不入库。
+-
+-## B-③ 偏离与发现登记（逐条，全部 SPIKE 或正文标注）
+-
+-1. **R1 判定（state! 单例）——实证不可行，走方案既定回退**。先验读宏：`state!` 展开为调用点 `pub mod __lyquid`（ldk lyquid/src/runtime/syntax.rs:105-127），而一切方法包装宏硬编码 `crate::__lyquid::*` 上下文（syntax.rs:257 等）。cargo check 实证（子模块 state! + 探针字段，完整输出 `_w1b1-r1-submodule-state-check.txt`）：E0609 `no field probe_r1_canary on &mut __lyquid::NetworkState`（方法面解析到 crate 根 escrow state）+ E0616 `__internal ... is private`（子模块重复生成面冲突）。→ 探针字段并入 lib.rs state! 块末尾（probe_ 前缀 + 注释行，方案 §④-4 原案）。
+-2. **two_phase 方法命名偏离方案 §④**：宏臂字面匹配 `fn aggregate` / `fn propose`（syntax.rs:447/470），方案的 `probe_propose/probe_aggregate` 拼写无法进入 oracle 机制——落地为 `propose`/`aggregate`（group 前缀 `oracle::two_phase::cert_probe` 区分）。certified 回调名自由（`probe_on_certified`）。
+-3. **serde 字段名契约 + 官方 demo 潜在缺陷**：encode/decode_by_fields 按 serde 字段名严格对应（primitives/src/lib.rs:461-486；本地 serde 最小复现：`_avg_num` 无法解码 `avg_num` 编码 → `missing field`）。price-feed（rev fd575e8）propose 声明 `_avg_num/_target` 与其 run_round 编码 `avg_num/target` 不匹配，属上游 demo 潜在 bug；探针统一正确拼写（`avg_num`/`target`/`round` 三处编解码同名），s2_oracle.rs 模块头注明。
+-4. **`__internal` 不可达 → 方案既定回退**：`ctx.network.__internal.oracle_dest_epoch_info` 的字段无 pub（proc lib.rs:1521；cargo check E0616）——dest epoch 观测改走 host API `lyquor_api::fetch_oracle_info`（runtime/mod.rs:322；平台 `validate_finalize_epoch` 同款，source.rs:461-472），probe_config/probe_net_config 双份落档。
+-5. **SPIKE-1（console 可见性）**：v0.8.1 节点 console 转发按**执行通道**区分——cast send（链序）仅 network 方法 println 可见；cast call（节点本地）instance+network 均可见。适配：新增 network 观测原语 `probe_net_report`/`probe_net_config`，`probe_bump_threshold` network 化（方案 §④ 写 instance——通道适配偏离，s2_oracle.rs:224 SPIKE 标注），arm 成功分母 = cast send 回执 status。
+-6. **SPIKE-2（cast call 可用，方案前提修正）**："eth_call 不可用"是 W1-A 单节点 0.8.2-dev 实测；本 multi v0.8.1 读+执行均可用（`__lyquor_oracle_dest_epoch_info` 结构化读、`() `返回仍不可读调与 W1-A 一致）。激活与 run_round 改走官方 demo 的 cast call 形态（demo.sh:319-362/257-259）——cast send 通道下内层跨节点提交静默丢失（advance ×2 与 run_round 各一次实录；机制在节点侧未深挖），cast call 首试即 true。**激活等待仍按方案"观测驱动"**：dest epoch cast call 轮询（0→1 实录），无"返回 true 门"依赖。
+-7. **SPIKE-3（S1 结论）**：native instance trigger（Once/Recurrent）注册成功（arm status 1、无节点侧报错）但**在 multi v0.8.1 devnet 从不触发**——a：delta 0/2；b：重启 0→0 无重放（链连续 42→46）；c：三组 delay + Recurrent 产块 60s 全零。**native trigger 判定 = 不可用 → 主方案 keeper 模式（不算失败）**；timeout.rs 三处 SPIKE 标记按三列纪律落地。
+-8. **部署语义**：`shaker deploy` 每次创建新实例（4 个实例沿革见 w1b1-topology.md §5b；W1-A R8 已警示）， Lyquid ID 由部署者+内容确定性派生（#4 与 W1-A 主实例同 ID，异链无冲突）。
+-9. **单节点交叉验证未完成（S1 判定的版本维度未标定）**：切回单节点后 shaker deploy 被 rust-std sysroot 下载阻断（github 不可达：容器 TLS 掐断/拒连/挂起三种形态 ×4 次尝试；宿主直连亦不通；sysroot 缓存不随 `ldk_cargo-cache` 卷持久化，随容器层丢失——w1b1-topology.md §5 边界登记）。**"不触发"结论严格限定 multi v0.8.1 环境**；0.8.2-dev 是否同病留 W1-B2 网络可达时补测。
+-
+-## B-④ SPIKE 新增标记勾稽（grep `SPIKE(W1-B1)` = 6 处，双向无孤儿）
+-
+-| 位点 | 内容 | 处置 |
+-|---|---|---|
+-| s1_timer.rs:36 | trigger 目标形态（默认组 instance 方法 + `= expr` 注册期冻结） | 结论（编译+部署佐证） |
+-| s1_timer.rs:105 | console 通道按执行域区分（SPIKE-1 摘要） | 登记观察结论 |
+-| s2_oracle.rs:109 | CertifiedCallParams 构造形态镜像 price-feed | 结论（S2 回合实跑验证） |
+-| s2_oracle.rs:224 | bump_threshold instance→network 化（方案偏离） | 登记（通道适配） |
+-| s2_oracle.rs:247 | `__internal` 私有 → fetch_oracle_info 回退 | 结论（E0616 实证） |
+-| s2_oracle.rs:284 | 同 247（probe_config 侧注记） | 同上 |
+-
+-timeout.rs 的 SPIKE(W1-1)（原保留行 timeout.rs:13/75）在本轮**结案改写**（三列假设→验证→结论，:2-19/:28-35/:65-84），W1-A §③"保留 8 行"表相应减 2（余 6 行属 S2/S3 域不动）。types.rs:18（slot 参数）未动——本轮未测 slot 时长语义。
+-
+-## B-⑤ 验收口径对照（plan §⑥ 七条）
+-
+-1. 测试门 ✅：`cd workflow-out/verify_core && cargo test --lib --tests` = 39/39（T0/T2/T5 三档存档 w1b1-t0-baseline / w1b1-t2-gate / w1b1-t5-gate）；部署产物编译核验 = 容器内 `cargo check --target wasm32-unknown-unknown`（w1b1-t2-cargo-check-final.txt，0 实错；`{{project-name}}` 行为 W1-A §⑥ 已登记通道噪声）。
+-2. 多节点 ✅：4 节点 GetNodeInfo + GetPeers≥3×4（并集=4 ID 与 toml 预置一致）+ GetLyquidInfo 同 contract×4 + ldk_cargo-cache 卷复用实测登记，全在 w1b1-topology.md §2-§5。
+-3. S1 ✅（多节点环境）：通道先行证明在前（w1b1-s1-timer.md §0，含通道不可见的如实登记与适配）；a/b/c 命令+原始输出齐全；a 判定域=共识 network 计数 delta（0 ≠ 2）；b 只杀节点服务、链连续性证据（42→46）+ 双组计数逐项；结论表注明判定域并对齐 timeout.rs:75-77 口径；native trigger 判定=**不可用**（附 keeper 衔接）。
+-4. S2 ✅：成员来源 GetNodeInfo×4 + 并集交叉核对 + 编码表/示例数组；configure（bytes32[] + creator 守卫 + 同钥）；两阶段激活 advance→dest epoch 推进→finalize→激活确认（dest epoch=1 + full config 4 成员 threshold1 + node2/3 可见）；run_round 认证回合 + on_certified println + ctx.cert.signers 原始形态（Vec<SignerID>=[0]）与映射（→Node-ve3tav…）+ set_threshold true/false——全部真实输出在 w1b1-s2-oracle.md。**通道偏离（cast send→cast call）已 SPIKE-2 登记**。
+-5. timeout.rs ✅：三处标记三列落地，diff 仅注释，`cargo check` 复验通过。
+-6. 依赖 ✅：`lyquid/Cargo.toml` 零改动（git diff 空即证）。
+-7. implementation.md ✅：本节含 journal 与断点说明。
+-
+-## B-⑥ W1-B2 边界条件（后续输入）
+-
+-1. keeper.py（W1-B2 范围）：watcher 的驱动端；S1 结论已锁"native trigger 不可依赖"。
+-2. S1 单节点复测（0.8.2-dev）：网络可达时补部署（w1b1-s1-timer.md §5-1）。
+-3. cast-send 通道下内层跨节点提交丢失（advance/run_round 同症）与 instance println console 丢失（SPIKE-1）：节点侧机制，可在 W1-B2 向平台求证或升级节点版本复测。
+-4. threshold=2 双签聚合（S2 加分项）未执行；bump 已入 staging，二轮 advance/finalize 即可激活。
+-5. 读路径补验（W1-A R3 豁免遗留项）：本环境 eth_call 可用——**deal_info 实调补跑仍未做**（本轮未部署 escrow 主合约实例，不留混探针实例；W1-B2 在干净部署上补）。
+-6. 环境现场：multi 栈保留运行（W1-B2 可复用；实例 #3/#4 的探针状态在卷内）；单节点切回命令见 w1b1-topology.md §7/§10。
+diff --git a/workflow-out/plan.md b/workflow-out/plan.md
+index 4963c4c..85c417b 100644
+--- a/workflow-out/plan.md
++++ b/workflow-out/plan.md
+@@ -1,213 +1,221 @@
+-# W1-B1 开发计划与变更方案：平台机制探针（多节点拓扑 + S1 timer 语义 + S2 委员会认证回合）
++# W1-B2 收尾方案：claim_timeout 空 revert 根因闭环（探针佐证 + keeper 写通道改造 + Refunded 实测）
+ 
+-执行基线：代码 `275cd94`（W1-A 已完成，工作树另有文档提交 `f83ab52`；W1-A 旧计划见 git 历史 `f83ab52:workflow-out/plan.md`）。本计划为运行/验证类任务：**一切结论以实际执行的命令与真实输出为交付**，严禁编造运行结果。
++> 规划人：规划师（2026-10-28）。执行基线 = 当前工作树（含 W1-B2 未提交成果 lib.rs / assessor.rs / Cargo.toml / agents/common/rpc.py，**严禁回退**）。
++> 编排者一手诊断 D1–D4 已实证，本方案全部采信为前提，不重新验证、不复活已被推翻的『wasm panic』假设（w1b2-claim-revert-finding.md 原假设作废）。
+ 
+ ---
+ 
+-## 受影响文件清单（供审查员核对，共 10 项）
++## 0. 受影响文件清单（供审查员核对，共 8 项）
+ 
+-| # | 文件 | 动作 |
+-|---|---|---|
+-| 1 | `lyquid/src/probe/mod.rs` | **新建**：探针模块挂载 + 模块说明（SPIKE 登记锚点） |
+-| 2 | `lyquid/src/probe/s1_timer.rs` | **新建**：S1 timer 探针合约（arm/on_timer/probe_mark_fire/probe_reset_net/get_report；instance+network 双观测域，exactly-once 以共识 network 计数 delta 判定） |
+-| 3 | `lyquid/src/probe/s2_oracle.rs` | **新建**：S2 认证探针（configure/propose/aggregate/on_certified/run_round/bump_threshold/config 含 dest epoch 观测；`eth_guard = creator` 守卫，无 constructor/initializer——冷读仲裁修订） |
+-| 4 | `lyquid/src/lib.rs` | **改**：仅 2 处——①`pub mod probe;` 挂载一行；②若 state! 宏限定 crate 级单例（R1 风险），在既有 state! 块末尾追加探针 state 字段（含 S1 network 域 probe_net_fires/probe_net_last_fire_ms，主 escrow 字段零改动） |
+-| 5 | `lyquid/Cargo.toml` | **预期零改动**；仅当 oracle 类型需要平台 feature 传递时动 feature 行（裁定 1 豁免路径，逐行登记），**不新增任何直接依赖** |
+-| 6 | `lyquid/src/timeout.rs` | **改（仅注释/SPIKE 标记）**：S1 实验结论落地后按"假设→验证方式→结论"纪律改写 timer 相关标记（W1-A §③ 同款），逻辑零改动 |
+-| 7 | `workflow-out/implementation.md` | **改**：追加 W1-B1 节（journal + SPIKE 勾稽 + 实验结论表链接） |
+-| 8 | `workflow-out/w1b1-topology.md` | **新建**：多节点拓扑文档（实际起法 + 验证输出 + 信任模型差异 + ldk_cargo-cache 卷复用登记 + 人工验证命令清单） |
+-| 9 | `workflow-out/w1b1-s1-timer.md` | **新建**：S1 结论表（三项实验 a/b/c + native trigger 可用性判定 + 原始输出存档） |
+-| 10 | `workflow-out/w1b1-s2-oracle.md` | **新建**：S2 认证回合完整证据（命令 + 输出 + 委员会成员编码表/示例数组 + epoch 两阶段激活全程 + ctx.cert.signers 形态与 W1-A ctx 事实交叉核对） |
+-
+-不动：`types.rs`、`core.rs`（语义冻结）、`committee.rs`、`assessor.rs`、`lyquid/tests/*`（断言不变；39 测试门在工作区根 verify_core 壳执行，见 §②）、`scripts/deploy.sh`（单节点通道保持原样）、ldk 官方克隆（`../ldk`，只运行不落盘）。
+-
+----
+-
+-## ① 目标
+-
+-1. **T1 多节点拓扑发现**：找到官方多节点 devnet 方案并实际起 ≥2 节点、验证节点间通信，产出可复用的起法文档；若官方方案不可用则如实记录并给出替代方案与信任模型差异。
+-2. **T2 S1 timer 语义（最高优先）**：部署含 trigger 注册的最小探针，实验 `TriggerMode::Once(ms)`：a) 触发次数（恰一次？——**判定域 = 共识 network 计数 delta：(net_fires − baseline) == 本轮成功 arm 节点数**，每轮 reset→baseline→arm）b) kill/重启全部节点服务后是否重复触发（anvil/registry 保持运行；重启前后读 instance+network 两组计数，如实登记 instance 状态是否复位，节点卷持久不作前提）c) 触发延迟与设定周期比；产出结论表（注明判定域，与 timeout.rs:75-77 SPIKE_1 验收口径对齐）并判定 native trigger 可用/不可用（不可用则记录后转 keeper 模式，不算失败——主方案 keeper+链上守卫已实现）。
+-3. **T3 S2 委员会认证回合**：移植 price-feed oracle 骨架为探针（去外网依赖），跑通一次 `propose_and_certify` 认证调用 + `set_threshold`，验证 `ctx.cert.signers` 真实形态并与 W1-A ctx 事实交叉核对，产出完整证据（命令+输出）。
+-
+-**越界防护**：不做 S3 llm、S4 RPC/deal_info 补验、keeper.py（W1-B2 另行调用）。
+-
+----
+-
+-## ② 勘察事实基线（本轮实读，编码员直接引用，不重复发现）
+-
+-### 官方多节点方案已存在（T1 主通道确认）
+-
+-- `../ldk/docker/multi/docker-compose.yaml`：**4 节点**（node1-4，全 mesh UPC 内网 `:10080`）+ 共享 `anvil` sequencer（`ws://anvil:8545`，state 持久化卷）+ 本地 OCI `registry:3`（host `:8000`）+ `setup-devnet` bootstrap。host 端口映射 **10087/11087/12087/13087**（compose :48/:57/:66/:75）——与任务预期完全一致。
+-- 起法（`../ldk/docker/multi/README.md:30-38`）：`docker compose -f docker/multi/docker-compose.yaml up -d`（从 ldk 仓库根执行）。
+-- bootstrap 幂等序列（compose :11-18）：等 node1 GetNodeInfo → GetLyquidInfo 无 contract 则 `shaker deploy --is-bartender --reference ghcr.io/lyquor-labs/lyquids:bartender-v0.8.1` → 等 GetPeers ≥3 → `shaker availability activate --committee auto --threshold 1`。
+-- 节点配置（`node1.toml`）：`base="devnet"`、`sequencer="ws://anvil:8545"`、确定性 node_key seed（peer ID 稳定：`Node-j3fcdy…` 等）、`[[peers]]` 指向 node2-4:10080、image fallback repos = 本地 registry 优先。
+-- **版本对齐利好**：multi 默认全套 **v0.8.1** 镜像（node/tools/bartender reference，compose :2/:16/:44），与 SDK 锁 `rev=fd575e8`（v0.8.1，W1-A D7）完全对齐；比单节点 main-latest（0.8.2-dev）更干净，W1-A 的 `IncompatibleLdk` 风险在此环境不存在同款问题。
+-- **端口冲突**：单节点 compose（`../ldk/docker-compose.yaml:6`）也绑 host 10087。两 compose 项目目录不同（ldk 根 vs `docker/multi`），compose v2 默认项目名不同（`ldk` vs `multi`），但 host 端口绑定互斥 → **起 multi 前必须先 `docker compose down`（ldk 根项目，保留卷）**，单节点用 `scripts/devnet-up.sh` 随时可恢复。
+-- **multi 无常驻 tools 服务**（compose 只有 one-shot setup-devnet）→ 探针部署通道见 §③ T2 第 6 步。
+-- 多节点下 shaker 部署需带 registry reference 与 endpoint（README:103-110 例：`shaker deploy -r 'http://127.0.0.1:8000/lyquids' --endpoint 'ws://127.0.0.1:10087/ws' <Cargo.toml>`）——与单节点 `scripts/deploy.sh` 的差异点，写入拓扑文档。
+-
+-### S1 timer 平台面（T2 依据）
+-
+-- `TriggerMode` 枚举：`../ldk/primitives/src/lib.rs:159-168` —— `Recurrent(u64)` / `Once(u64)`（"Trigger once, delayed by the specified milliseconds (0 for immediate)"）/ `Commit`（仅 network functions，slot commit 后）/ `Stop`。
+-- `trigger!` 宏：`../ldk/lyquid/src/runtime/mod.rs:405-424`，落 host API `lyquor_api::trigger(group, method, input, mode)`（:323）。price-feed 实际用法参照 `trigger!(update_history(), TriggerMode::Commit)`（price-feed/src/lib.rs:412，目标为 instance 方法）。
+-- **调用与观测通道（修订指令 2 口径，端点基准行）**：W1-A 已证 eth_call 对非-bartender lyquid 回 `Invalid contract address`、view 导出不可 tx 发送（implementation.md:119 实测限制 3，三通道全闭）→ 探针可调用方法一律声明为**非 view 的 `export = eth`**，调用通道 = **容器内**（multi-tools）`cast send <探针> "fn(...)" <args> --rpc-url http://nodeX:10087/api`（fund 先例：`LyquidResult<()>` cast send 实测成功，implementation.md:118 实测限制 2）——**服务名+容器端口：容器内 node2 也是 `node2:10087`，11087/12087/13087 仅宿主侧映射有效**（compose :57/:66/:75）；宿主侧命令（如 T1 curl 探活）用 `127.0.0.1:10087/11087/…` 并标注『宿主』。println 观测一律经 **shaker console 取回**（带端点 `--endpoint ws://nodeX:10087/ws`，或依赖容器 `LYQUOR_ENDPOINT` env，README:85 形态）+ `lyquor_api::systime()`（runtime/mod.rs:311）做时间戳。
+-- **跨调用 A 档已证**：instance 方法内经 `call!((self_id).方法(命名参数) -> (返回解包))` 调用同 lyquid 的 network 方法（timeout.rs:52-59 实录，basicswap 形态，`ctx.lyquid_id` 为目标）——S1 探针的共识观测面（on_timer → probe_mark_fire）按此落地。
+-- `timeout.rs` 现存 7 处 SPIKE 标记中 timer 相关项即 S1 验证对象（W1-A §③ 表遗留），实验结论落地后逐处登记改写。
+-- **SPIKE_1 验收口径**（timeout.rs:75-77）：4 节点 + 过期 deal 下 (a) exactly one refund lands（guard 去重）(b) killing/restarting nodes never double-refunds (c) firing latency < 2x the trigger period——S1 三项实验与之逐条对齐，结论表注明判定域。
+-
+-### S2 认证平台面（T3 依据，price-feed 骨架逐点对应）
+-
+-- **state 声明形态**：`network oracle price_feed;`（`../ldk/lyquid-examples/price-feed/src/lib.rs:167`）——oracle 变量在 state! 块内单行声明。
+-- **initialize**：`Oracle::initialize(&self, ctx, target: OracleTarget, committee: Vec<NodeID>, threshold: u16) -> bool`（`../ldk/lyquid/src/runtime/oracle/source.rs:540`）；epoch=0 才有效。**仅写入 staging（source.rs:536-539）**——configure 后不直接生效，需 advance/finalize epoch 两阶段激活（见 T4 第 3 步）。
+-- **set_threshold**：`set_threshold(&self, ctx, target, new_thres: u16) -> bool`（source.rs:591）；**epoch=0 恒 false（source.rs:268-271）**、与 staging 相同亦 false——`probe_bump_threshold` 探针直接包它，且必须在激活（epoch>0）之后调用。
+-- **两阶段组方法**：propose/aggregate 挂 `#[method::instance(group = oracle::two_phase::<state_var>)]`（price-feed:258/:299），认证回调挂 `#[method::network(group = oracle::certified::<state_var>::two_phase)]`（price-feed:399）。
+-- **认证调用**：`o.propose_and_certify(&mut ctx, target, init_params: Bytes, None, None) -> LyquidResult<Option<CertifiedCallParams>>` + `submit_certified_call!(call)`（price-feed:458-468）。
+-- **ctx.cert.signers 形态**：`ctx.cert.signers.clone()` → 逐个 `ctx.signer_node_id(signer_id as u64)` 映射为 `Vec<NodeID>`（price-feed:401-406）——**signers 原始形态是数字 signer id 列表（u64 域），需映射**。这与 W1-A 实测的 `CallContext`（仅 origin/caller/input/lyquid_id/node_id 字段，`$V7/lyquid/src/lib.rs:162`）交叉核对：`cert` 是 network 方法 ctx 上认证回调特有的附加字段，W1-B1 实测其真实类型与内容并登记。
+-- **委员会配置**：`configure_committee`（price-feed:207-236）——官方版 initializer 专属守卫 + `threshold = len/2+1`（**探针版显式传 threshold，守卫改平台内建 `eth_guard = creator`——冷读仲裁修订，见 §④；平台仅自动执行名为 `constructor` 的函数（ldk lib.rs:59-66 文档 + proc lib.rs:355-370 特判），probe_constructor 不会部署期执行，initializer state 恒 ZERO 会使镜像守卫拒绝一切 caller，故一并删除**）；multi bootstrap 的 `availability activate --committee auto --threshold 1` 已把 4 节点注册为 **availability 委员会**（README:76-77），oracle 委员会是 lyquid 内独立配置。**成员来源与编码（修订指令 1）**：主通道 = **GetNodeInfo×4**（宿主 `127.0.0.1:10087|11087|12087|13087` 或容器内 `node1-4:10087`，取 `.node_id.value`，官方 demo.sh:186-198 同款）；GetPeers 仅作交叉核对，且必须**四节点 GetPeers 结果取并集**（单次调用自排除只得 3 个）。**编码转换**（镜像官方 demo.sh:190-215 Python 段）：`.node_id.value` 去 `"Node-"` 前缀 → base32 解码（补 `=` padding，长度须 35 字节）→ 取前 32 字节 → `"0x" + hex`；ABI 面形态 = `bytes32[]`（官方 run.sh:256 `configure_committee(bytes32[])` 实证）。
+-- **oracle 激活两阶段（host 内建方法，官方 demo_activate_oracle = demo.sh:307-362；冷读仲裁修订：全程 cast send 提交＋观测驱动，无"返回 true"门）**：configure 仅入 staging；激活 = `__lyquor_oracle_advance_epoch(string,address,bool)`（topic = oracle state 变量名，address = `shaker to-hex <LyquidID>`，demo.sh:183 同款）**cast send 提交——回执仅证已提交（cast send 不承载函数 bool 返回；官方 demo 的 advance/finalize 走 cast call 读 bool——demo.sh demo_call_at——本环境 eth_call 已证不可用故不采用）** → **等 destination epoch 推进**（`__lyquor_oracle_dest_epoch_info` 面 = runtime/oracle/mod.rs:91-102 + internal.rs:196；advance 前记 dest epoch 为 old，轮询至 new>old，官方 demo_oracle_epoch 同款语义，60s deadline；**等待条件不得用 get_epoch——StateVar::get_epoch 读 current.epoch（source.rs:583-588→:289-291），current 仅 finalize_epoch 写入（source.rs:409），finalize 前恒 0 = 死等**；观测实现 = probe_config 的 dest epoch 打印（§④），不可达则 probe_dest_epoch 包装方法 cast send＋console println，SPIKE 登记最终形态）→ `__lyquor_oracle_finalize_epoch(string,address,bool)` 同为 cast send 提交＋观测确认 → finalize 后 probe_config 确认 **get_epoch>0 且 current 生效**（get_epoch 的正确用法仅在 finalize 后；官方 demo_wait_for_committee 语义，run.sh:258）。**重发一律由"观测不满足"驱动，禁止以任何"返回 true"为门**。
+-- **threshold=1 语义**（README:76）："preserves single-endpoint pushes while still exercising registry-backed cross-node certification and Pending → Live transition"——S2 主回合用 threshold 1 单端点跑通；threshold 2 双节点聚合列为可选加分项（时间允许才做）。
+-
+-### 现有代码挂载点
+-
+-- crate 根 = `trustbridge/lyquid/`（`Cargo.toml` name="trustbridge"，cdylib+rlib）。`lib.rs:18-22` 五个 `pub mod`；state! 块 lib.rs:35-50（network 7 字段 + instance 2 字段）。W1-A 方法面：faucet/create_deal/fund/notarize/submit_deliverable/complete/claim_timeout/cancel/open_dispute/apply_committee_verdict/committee_config/deal_info（lib.rs:188-473 等）。
+-- 测试门（修订指令 3 口径）：**lyquid crate 本体在宿主不可跑 `cargo test`**（实测 4 错 NativeGuestAbi，指令给定）。39 断言经**工作区根 verify_core 壳**执行：`../workflow-out/verify_core`（相对 trustbridge；独立临时 crate，以 `#[path]` 直编仓库内 types.rs/core.rs、零平台依赖、包名 trustbridge 使 `use trustbridge::core` 原样解析——其 Cargo.toml 头注释实读），命令 `cd workflow-out/verify_core && cargo test --lib --tests`（工作区根起算），仲裁人实跑 = 39/39（指令给定）。探针纯增量不触 types/core，壳测试不受影响；部署产物编译核验维持容器内 `cargo check --target wasm32-unknown-unknown`。
+-- 部署通道（W1-A 固化）：宿主无 shaker；docker cp 源码入 `ldk-tools-1` 容器 + 容器内 shaker deploy（`scripts/deploy.sh`）。multi 环境无该容器，见 §③ T2 第 6 步。
++| # | 文件 | 动作 | 持久性 |
++|---|---|---|---|
++| 1 | `lyquid/src/lib.rs` | 新增探针 `probe_claim_sim` + ACCESS_MATRIX 一行（带移除标记）；T7 移除 | 临时（进→出，终态相对 T0 快照零净变化） |
++| 2 | `scripts/keeper.py` | 写通道从 `cast send` 改为 NodeClient（eth_sendTransaction + 回执轮询） | **持久保留** |
++| 3 | `workflow-out/w1b2-claim-probe-evidence.txt` | 新建：新实例上探针 A~H 输出（cast call 返回）+ node1 容器控制台 probe 阶段行截取（trap 唯一证据通道，附可验证性注记） | 交付物 |
++| 4 | `workflow-out/w1b2-refunded-evidence.md` | 新建：tx hash + `state=="Refunded"` 字面 + balance_of 前后 + keeper 日志 | 交付物 |
++| 5 | `workflow-out/w1b2-claim-revert-finding.md` | 头部追加 superseded 注记（指向 #3/#4 与 D1/D2 根因），**不改正文** | 交付物 |
++| 6 | `../workflow-out/verify_core/`（**parent 级**，非 trustbridge 仓库内） | 路线①：Cargo.toml 增存根 path 依赖；路线②：assessor `#[path]` 改指 HEAD 落盘件 | 持久（壳自身修复） |
++| 6a | `../workflow-out/verify_core/stubs/lyquid-llm/`（Cargo.toml + src/lib.rs） | **路线①新增**：lyquid_llm 最小签名存根 crate（测试纯逻辑不执行，call_model 返回 Err 即可） | 持久（路线①时） |
++| 7 | `workflow-out/w1b2-shell-rebaseline.txt` | 新建：壳重定基线证据（修复前后 cargo test 输出） | 交付物 |
++| 8 | `workflow-out/_pre-task-snapshot.patch` | 新建：T0 工作树快照（事故恢复用） | 自保 artifact |
++
++不改：`lyquid/src/types.rs`、`lyquid/src/core.rs`（core 语义冻结，T7 以 `git diff` 空输出勾稽）；`agents/common/rpc.py`（基线，只复用不改）；`lyquid/Cargo.toml`（基线）。
+ 
+ ---
+ 
+-## ③ 子任务拆分与执行顺序
+-
+-> 每个 T 完成即写 `workflow-out/implementation.md` journal（GLM 5 小时窗口中断恢复点）；中断即停，续跑从 journal 恢复，不压缩验证步骤。
+-
+-### T0 基线核对（不写代码）
+-1. `cd trustbridge && git status`（确认干净、HEAD=f83ab52）+ `git log --oneline -3`。
+-2. `cd workflow-out/verify_core && cargo test --lib --tests 2>&1 | tail -5`（工作区根起算；壳以 #[path] 直编 types/core，不触探针）—— 39/39 全绿基线存档 `trustbridge/workflow-out/w1b1-t0-baseline.txt`。
+-3. `docker ps` 记录单节点 devnet 现状（ldk-node-1 / ldk-tools-1 healthy）。
+-
+-### T1 多节点拓扑发现与实测（交付 w1b1-topology.md）
+-1. `docker compose -p ldk -f ../ldk/docker-compose.yaml down`（停单节点，保留卷）。
+-2. `docker compose -f ../ldk/docker/multi/docker-compose.yaml up -d`；`logs -f setup-devnet` 观察 bootstrap 三步（bartender 幂等部署 → GetPeers≥3 → availability activate）。
+-3. 节点间通信验证（四节点逐一 + mesh）：
+-   - 【宿主】`curl -s --data '{}' -H 'content-type: application/json' http://127.0.0.1:10087|11087|12087|13087/lyquor.node.v1.NodeService/GetNodeInfo` ×4；
+-   - `GetPeers` ×4（每节点应见 ≥3 peers，Node-ID 与 node1-4.toml 预置 peer ID 比对）；
+-   - `GetLyquidInfo` ×4（同一 bartender contract 全网可见 = 跨节点状态同步证据）；
+-   - `shaker availability status --endpoint ws://node1:10087/ws`（经 setup-devnet 容器跑，README:68-70）。
+-4. 全部原始输出存档进 `w1b1-topology.md`（含起停/回退命令、与单节点通道差异表、**ldk_cargo-cache 卷复用登记**——`docker volume ls` 本轮实测存在该命名卷；fd575e8 git db 在卷内、down 不清卷（指令给定），multi-tools 与 setup-devnet 退路共用它免重拉依赖，无需"down 前拷贝 db"步骤、信任模型：anvil 单 sequencer 排序 + registry 分发 + availability gate 委员会 ≠ 生产拜占庭假设，如实登记为 W1-B 后续边界条件）。
+-5. **失败降级路径**（如实记录，不编造）：若镜像拉取失败/起不来 → 记录失败输出，降级为"单节点 + 如实标注"跑 S1/S2（b 实验"重启全部节点"=重启单节点，标注降级），并在拓扑文档给出多容器互联替代方案讨论及信任模型差异。
+-
+-### T2 探针代码（S1+S2 一次成型，一次部署）
+-1. **先验 R1**（state! 单例性）：读 `state!` 宏定义（`grep -rn "macro_rules! state" ../ldk/lyquid/src/`），确认可否在子模块二次调用。可行 → probe 模块自带 state!；不可行 → 探针字段并入 lib.rs state! 块末尾（追加 `probe_*` 前缀字段，主 escrow 9 字段零改动）。**判定以 `cargo check` 实际编译结果为准**。
+-2. 写 `probe/s1_timer.rs`（§④ 详设）。
+-3. 写 `probe/s2_oracle.rs`（§④ 详设，propose 返回内生成值，**零外网 HTTP**——规避容器出网不确定性，price-feed 的 Binance/Coinbase fetch 全部剔除）。
+-4. `lyquid/src/lib.rs` 挂载（清单 #4 的 1-2 处最小改动）。
+-5. 测试门 + 编译核验：`cd workflow-out/verify_core && cargo test --lib --tests`（39/39 保持，工作区根起算）→ 存档输出；部署产物编译核验 = **容器内** `cargo check --target wasm32-unknown-unknown`（W1-A T3 惯例；探针代码进 wasm cdylib 面，lyquid 本体宿主 cargo test 不跑——NativeGuestAbi 4 错实测，修订指令 3）。
+-6. **部署到 multi node1**：起临时工具容器并**复用单节点项目的 cargo 命名卷**（`ldk_cargo-cache`，`docker volume ls` 本轮实测存在；fd575e8 git db 在卷内、down 不清卷——免重拉依赖，无需"down 前拷贝 db"步骤，修订指令 4）：`docker run -d --name multi-tools --network multi_default -e LYQUOR_ENDPOINT=ws://node1:10087/ws -v ldk_cargo-cache:/usr/local/cargo <lyquor-tools:v0.8.1 镜像> sleep infinity`（替代单节点 ldk-tools-1 角色；`LYQUOR_ENDPOINT` env 使容器内 shaker console 默认指向 node1——单节点 compose tools 同款 env 机制）→ `docker cp lyquid multi-tools:/tmp/tb` → 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key <anvil#0> Cargo.toml`（reference+endpoint+private-key 三参数，README:103-110 + demo.sh:166-167 官方先例——**deploy signer 与后续 cast send 同用 anvil#0 钥，S2 的 eth_guard=creator 守卫才匹配（冷读仲裁修订）**）。若临时容器方案受阻，退路 = `docker compose -f docker/multi/docker-compose.yaml run --rm -v ldk_cargo-cache:/usr/local/cargo setup-devnet bash`（同镜像同网络同卷）。部署输出存档；卷复用事实登记进拓扑文档。
+-
+-### T3 S1 timer 实验（最高优先，交付 w1b1-s1-timer.md）
+-实验环境 = T1 multi（4 节点）；T1 失败则单节点降级并标注。
+-- **0) 通道先行证明（前置硬门，修订指令 2）**：首个实验前，于 node1 完成一次真实 `probe_arm` 调用——**容器内（multi-tools）** `cast send <探针地址> "probe_arm(uint64)" 5000 --private-key <anvil#0> --rpc-url http://node1:10087/api`（服务名+容器端口；fund 先例 implementation.md:118）——并以 `shaker console --endpoint ws://node1:10087/ws <探针>` 取回 arm 登记 println（容器 env `LYQUOR_ENDPOINT` 已设则可省 `--endpoint`，**存档实际生效命令**）；**命令与输出存档进 w1b1-s1-timer.md，未存档不得进入实验 a/b/c**。若当轮实测证明 shaker console 可带参调用并存档，方可将后文"cast send 调用"措辞改为 console 通道（默认不走此径）。
+-- **a) 触发次数（判定域 = 共识 network 计数，delta 口径——冷读仲裁修订）**：先等步骤 0 的 5000ms 触发落地（观测其 NET FIRE println 或等 ≥5s）→ cast send `probe_reset_net` 清零 network 计数 → `probe_get_report()` 记 **baseline** → 于指定节点集逐节点 arm（**至少 node1+node2**；均在容器内执行，通道分别为 `--rpc-url http://node1:10087/api` 与 `--rpc-url http://node2:10087/api`——**容器内 node2 端口是 10087 不是 11087**，11087 仅宿主侧映射；delay=5000；**分母 = 各节点 arm println 实际成功登记数，非计划 armed 数**）→ 周期轮询 `probe_get_report()`（cast send 触发 + shaker console `--endpoint ws://nodeX:10087/ws` 取回 println，报告打包 instance+network 两组计数）至触发后再观察 ≥3 个周期 → **exactly-once 判定 = (probe_net_fires − baseline) == 本轮成功 arm 节点数**（instance probe_fires 仅作节点本地对照，如实登记）。
+-- **b) kill/重启节点服务（anvil/registry 保持运行，修订指令 2）**：`docker compose -f docker/multi/docker-compose.yaml kill node1 node2 node3 node4 && docker compose -f docker/multi/docker-compose.yaml up -d`——**只杀节点服务**，规避 SIGKILL 丢 anvil `--state`（anvil 仅退出时落盘、无 --state-interval）导致链回退、network 计数比对失效；该口径与 SPIKE_1 验收"killing/restarting nodes"（timeout.rs:76）域一致，结论表注明。up 后：bootstrap 重跑行为如实存档 → **读数比对前先记链连续性证据**（`cast block-number --rpc-url http://node1:10087/api`（容器内）与 GetLyquidInfo 输出各一次，与重启前比对）→ node1/node2 两条容器内通道分别再调 `probe_get_report()` → **重启前后两组计数逐项登记**：network 计数是否增加（重复触发判定，判定域）；instance 计数是否复位（**"节点数据卷持久"不作前提，降级为待观测项，以实测为准**）。
+-- **b+) 链重置观测（可选独立小节，不作判定依据）**：如需另测全栈 kill（含 anvil，链状态可能回退/重置），单列小节标注『链重置观测』，仅登记现象，**不得作为重复触发判定依据**（判定只认实验 b 的节点服务重启域）。
+-- **c) 触发延迟与周期比**：对 delay ∈ {2000, 5000, 10000}（至少 3 组）**每组重复同一 reset→baseline→arm→delta 序列（冷读仲裁修订）**，记录每组 (last_fire_at − registered_at, 设定 ms) 比值（对照 SPIKE_1 验收 (c)：latency < 2x period，timeout.rs:77）；Recurrent(2000) 补一组对照（周期性佐证，可选）。
+-- 每步命令+原始输出存档；**结论表（注明判定域 = 共识 network 计数，与 timeout.rs:75-77 SPIKE_1 验收逐条对齐）**：实验/观测/结论/对主方案影响（native trigger 可用 → keeper 之外多一路径；不可靠 → 登记 + 主方案转 keeper 模式，不算失败）。
+-- 结论落地：改写 `timeout.rs` timer 相关 SPIKE 标记（假设→验证方式→结论三列登记，逻辑不动）。
+-
+-### T4 S2 认证回合（交付 w1b1-s2-oracle.md）
+-1. **成员获取与编码（修订指令 1）**：GetNodeInfo×4 取 `.node_id.value`（宿主 `127.0.0.1:10087|11087|12087|13087`，容器内 `node1-4:10087`）；GetPeers×4 结果**取并集**作交叉核对（单次调用自排除只得 3 个）。按 demo.sh:190-215 转换：去 `"Node-"` 前缀 → base32 解码 35 字节 → 前 32 字节 → `"0x"+hex`；4 个预解码值（node1-4.toml 预置 peer ID 可预先离线换算）作为**示例数组写入 w1b1-s2-oracle.md**（实跑值以 GetNodeInfo 实测为准）。
+-2. **configure**：容器内 `cast send <探针> "probe_configure(bytes32[],uint16)" "[0x…,0x…,0x…,0x…]" 1 --private-key <anvil#0> --rpc-url http://node1:10087/api`（数组 = 第 1 步 4 个 hex；`Vec<NodeID>` 的 ABI 面即 bytes32[]，threshold=1；**守卫 = 平台内建 `eth_guard = creator`（冷读仲裁修订）——cast send 与 shaker deploy 用同一 anvil#0 钥即匹配**；内部 `cert_probe.initialize(...)` **仅入 staging**），`shaker console --endpoint ws://node1:10087/ws <探针>` 取回 println。
+-3. **激活两阶段（插在 configure 与 run_round 之间；镜像 demo.sh:307-362 + run.sh:255-259；冷读仲裁修订：cast send 提交＋观测驱动）**：
+-   a. `cast send <探针> "__lyquor_oracle_advance_epoch(string,address,bool)" "cert_probe" "$(shaker to-hex <探针LyquidID>)" false --rpc-url http://node1:10087/api`——topic = oracle state 变量名 `cert_probe`，address = shaker to-hex 的 lyquid ID（demo.sh:183 同款）；**cast send 回执仅证已提交（不承载 bool 返回；官方 demo 的 advance/finalize 走 cast call 读 bool——demo.sh demo_call_at——本环境 eth_call 已证不可用，不采用"轮询至返回 true"口径）**，提交后按 b 观测。
+-   b. **等 destination epoch 推进**：advance 前记 dest epoch 为 old（`probe_config()` 的 dest epoch 打印，见 §④；底层 = `ctx.network.__internal.oracle_dest_epoch_info`——internal.rs:196 / oracle/mod.rs:91-102 面，可达性以编译/实测为准，不可达则另设 `probe_dest_epoch` 包装方法 cast send＋console println，SPIKE 登记最终形态）→ 轮询至 new>old（60s deadline，官方 demo_oracle_epoch 同款语义）；**观测不满足才重发 a 的 cast send——重发由观测驱动，禁止以任何"返回 true"为门**。**不得以 get_epoch 作等待条件**：StateVar::get_epoch 读 current.epoch（source.rs:583-588→:289-291），current 仅 finalize_epoch 写入（source.rs:409），finalize 前恒 0 = 死等。
+-   c. `cast send <探针> "__lyquor_oracle_finalize_epoch(string,address,bool)" "cert_probe" "$(shaker to-hex <探针LyquidID>)" false --rpc-url http://node1:10087/api`（**同为 cast send 提交＋观测确认**）→ `probe_config()` 确认 **get_epoch>0 且 current 阈值/委员会生效**（get_epoch 的正确用法仅在 finalize 后；对照官方 demo_wait_for_committee 4 语义）。
+-   d. **epoch 转变全程记入 w1b1-s2-oracle.md**：旧/新 **dest** epoch、finalize 后 current epoch、current/staging 阈值变化、各节点可见性（node2 通道 probe_config 对照）。
+-4. 激活确认后才 `probe_run_round()`（容器内 cast send + console 取回；内部 `propose_and_certify` + `submit_certified_call!`）→ console 观察触发序列：propose println → aggregate println → certified 回调 `probe_on_certified` println（**打印 ctx.cert.signers 原始值、逐元素类型、映射后 NodeID**）。
+-5. `probe_bump_threshold(2)`（**必须 epoch>0，否则 source.rs:268-271 恒 false**）→ console 取回 set_threshold 返回值 println；`probe_config()` 同法读 current/staging 配置回显（epoch/threshold 变化）。
+-6. （可选加分，时间允许）node2 上同法 run_round，验证 threshold=2 双签聚合后 signers 长度=2。
+-7. 证据整编：完整命令+输出 + 委员会成员编码表（含示例数组）+ epoch 激活全程 + **ctx.cert.signers 形态结论**（原始域/映射关系/与 W1-A CallContext 事实的交叉核对表）。
+-
+-### T5 收尾与提交
+-1. `implementation.md` 追加 W1-B1 节（journal、SPIKE 勾稽更新——新增探针标记逐处登记、S1/S2 结论指针、遗留 W1-B2 边界条件）。
+-2. 三份 w1b1-*.md 补人工验证命令清单（拓扑文档尾部汇总版：从零复现全部实验的命令序列）。
+-3. 测试门终跑：`cd workflow-out/verify_core && cargo test --lib --tests` 39/39 存档（T0/T5 双端存档，工作区根起算）；`git add` 上述 10 文件，单提交（信息：W1-B1 platform probes: multi-node topology + S1 timer semantics + S2 certification round）。
+-4. 环境处置：`multi-tools` 临时容器 `docker rm -f`；multi 栈保留运行（W1-B2 可能复用）并在文档注明恢复/切换单节点命令。
++## 1. 已采信前提（编排者 2026-10-28 一手诊断，规划不重证）
++
++- **D1 根因**：链上实例 `0x1c85638e118b37167e9298c2268758e058DdfDA0` 是 D3 增补前旧镜像（三方 md5 互不相同）；`balance_of`/`due_deals` 一律 `Barrel(FuncNotFound)`、`deal_info` 正常；`claim_timeout` 不在其 eth 导出面 → **空 revert = 旧镜像未导出方法的执行错误**，非 wasm panic、非 core 语义 bug。
++- **D2 写通道决策**：`cast send`（gas estimation）对 lyquid 合约不可依赖；写通道 = `eth_sendTransaction` 不带 gas 字段 + `eth_getTransactionReceipt` 轮询 `status=="0x1"`（w1b2-s4-rpc.md §B-⑤ 决策门）。
++- **D3 环境现状**：容器全 Up（**属待 G-init 预检前提**，见 §5 T-init——规划期晚些时候宿主 cargo 已实测损坏，环境不可再默认假定）；部署通道 = 宿主 `docker cp` → `multi-tools:/tmp/tb-lyquid` → 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key <anvil#0> Cargo.toml`；每次 deploy 全新实例（新地址），需重放 faucet/create_deal/fund（序列见 w1a-funded-evidence.txt）。anvil#0 私钥 `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`。
++- **D4 代码事实**：`lib.rs:414-425` claim_timeout 无守卫（Anyone by design）；`core.rs:170-178` 纯函数零 panic（Funded 且 now≥deadline → full_refund）；`lib.rs:709-713` current_slot()；ACCESS_MATRIX 每 network fn 一行，探针须同步加行（Anyone + probe-removable 注记）；`Deal: Clone` 已 derive（types.rs:93），探针克隆模拟、core 不动。
++
++## 2. 本轮规划期新实证（规划师实跑，编码员须知晓）
++
++1. **验证壳当前编译失败**（关键新事实）：实跑 `cd "F:\canvus auto\downloads\202609CS5298\workflow-out\verify_core" && cargo test --lib --tests` → **error[E0432]/[E0433]**：`assessor.rs:37-38` 的 `use lyquid_llm::...` 无法解析（壳 Cargo.toml 仅有 serde/serde_json）。即未提交的 W1-B2 S3 改动已打破壳的"零平台依赖"前提，**硬约束"39/39"当前不可能原样达成**，须先修壳。
++1a. **『壳补 lyquid-llm git pin』路线已被容器实证否决（冷读仲裁 2026-10-28 实测，勿再尝试）**：multi-tools 容器内（cargo 1.99.0，x86_64）以最小 crate 依赖 `lyquid-llm rev=fd575e8 features=["ldk"]` 跑 `cargo check --offline` → `error[E0425]: cannot find type NativeGuestAbi`（ldk `lyquid/src/runtime/mod.rs:38/40/42`）。该错误出在 ldk 自身源码，**宿主与容器双不可达**；parent 级 ldk clone 的 path 依赖是同一 crate 同一代码，同因失败（备选A 作废）。命令与错误尾部随 T0 一并记入 `w1b2-shell-rebaseline.txt`。
++2. **测试计数漂移**：HEAD（1c0e45f）assessor 5 个 `#[test]`（`git show HEAD:lyquid/src/assessor.rs | grep -c "#\[test\]"` = 5，壳基线 32+5+2=39 出处 w1b2-t0-baseline.txt）；工作树 assessor 6 个 → 修复编译后计数视路线而定：**①存根=33+5+2=40 / ②HEAD 挂载=32+5+2=39**（见 §5 T0-2）。"39/39"按意图执行 = 壳全绿，数字以 T0 重定基线（注明路线）为准并如实登记。
++3. **宿主 cargo 可执行文件已坏，git/path 依赖路线亦不可达**：宿主 cargo git 缓存已含 ldk rev `fd575e8`（`~/.cargo/git/checkouts/ldk-b72281d44a8ce511/` 下有 `fd575e8` 目录），parent 级 `ldk/` 本地 clone 恰在 `fd575e88a920…`（`git -C ldk rev-parse HEAD`）——但以它们为 lyquid-llm 依赖来源的路线已被 §2-1a 实证否决（E0425），ldk clone 此后仅作 T-init 起栈的 compose 文件出处。**2026-10-28 晚（22:39–22:44，目录 mtime）宿主工具链遭外力破坏，规划师复核实证**：`~/.cargo/bin/cargo.exe` 为指向缺失 `rustup.exe` 的断裂符号链接；toolchain `1.99.0` 与 `stable` 两个 bin 目录均仅余 `cargo.pdb` 无 `cargo.exe`（本会话早前实跑 `cargo test` 尚成功，破坏发生在其后）。故宿主侧壳路径以 T-init ③ 通过或修复为前提，否则走容器路线（R1，含 #[path] 改写）。
++4. **宿主 python 通道可用**：`python 3.14.5 + requests 2.34.2` 实测在机；`NodeClient`（agents/common/rpc.py:197-381）已实现 §B-⑤ 全部决策：`_send` = eth_sendTransaction 无 gas 字段 + 回执轮询 status=="0x1"（rpc.py:241-262），且已含 `claim_timeout/deal_info/balance_of/due_deals/faucet/create_deal/fund` 封装与 selector 表（`claim_timeout(string)=0x786cfc8f`，rpc.py:76）；`DEFAULT_NODE=http://127.0.0.1:10087`、URL 拼 `/api`（rpc.py:220）、`DEFAULT_SENDER=0xf39F…92266`（rpc.py:57，=anvil#0=BROKER）。宿主直连 node1 API 通道在 §B/C 已实证（w1b2-s4-rpc.md:13、:153-160）。
++5. **timeout_slots 换算**：`timeout_slots = est_ms×2/400`（types.rs:195-197，SLOT_MS=400、TIMEOUT_SAFETY_FACTOR=2）→ **est_duration_ms=200 ⇒ timeout_slots=1**（与 D3 所述旧实例 deal 参数自洽）。
++6. **只读 getter 形态先例**：`deal_info(ctx: &_, …) -> LyquidResult<String>`（lib.rs:532，共享引用 + JSON 串返回）——探针照此形态方能 cast call 可读；eth_call 对可变方法不开放（w1b2-claim-revert-finding.md 排除项记载 fund 之 call 为 FuncNotFound）。
++
++## 3. 目标 / 非目标
++
++**目标**（= 交付闭环四件套）：
++1. 新实例上 `probe_claim_sim` 各阶段 A~H 输出留存（证明 core 路径在新镜像上全程无 panic 点）；
++2. keeper 实测 `claim_timeout` 退款成功；
++3. workflow-out 留存 Refunded 证据文件（tx hash + `deal_info` `state=="Refunded"` 字面 + `balance_of` 前后对比 + keeper 日志）；
++4. 探针移除后壳全绿复验 + types/core 零改动勾稽。
++
++**非目标**：不修 core 语义（D4 证明无 bug）；不改 ACCESS_MATRIX 既有行；不动 W1-B2 未提交基线（assessor/llm 接线等）；不清理旧实例 `0x1c85…`（仅留 D1 诊断已存档）；不做 anvil#0 之外的账户矩阵。
++
++## 4. 总体策略
++
++D1 已定根因 = 旧镜像，故本任务**不是"修 panic"而是"闭证据环"**：新镜像部署（自带 D3 导出面）+ 探针在 eth_call 读通道逐阶段自证 core 路径干净 + keeper 写通道按 §B-⑤ 决策改造后在真实链上走完 Funded→Refunded。探针按 W1-B1 探针纪律（probe/mod.rs:14-19 additive-only）以显式标记进、显式标记出。另须先修复验证壳编译（§2-1 新事实），否则硬约束无处落地。
++
++## 5. 子任务与执行顺序
++
++### T-init 预检门（G-init，先于一切任务）
++三项检查**全部通过**才进 T0：
++- ① `docker ps` 守护进程可达，且 multi 栈容器（multi-node1-4 / anvil / registry / tools）Up；
++- ② 宿主节点 API 探活：`curl -s -X POST http://127.0.0.1:10087/api -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'` 返回含 `result`；
++- ③ 宿主 `cargo --version` 可执行。
++
++失败处置：
++- ①② 失败 → `docker compose -f docker/multi/docker-compose.yaml up -d`（w1b1-topology.md:14；compose 文件在 parent 级 ldk clone 的 `docker/multi/` 下），或等价 `bash scripts/devnet-up.sh`（README.md:62），随后复检；
++- ③ 失败 → 宿主 cargo 已坏（2026-10-28 仲裁实测 + 规划师独立复核一致：`.cargo/bin` 无 rustup.exe（cargo.exe 为断链）、`1.99.0` 与 `stable` 两个 toolchain bin 目录均只有 cargo.pdb 无 cargo.exe）→ **首选修复 rustup 工具链**（重装 rustup / `rustup toolchain install`）；不可行时走 R1 **容器路线**（改写壳内 `#[path]` 后 docker cp 进容器 cargo test，不依赖宿主 cargo；git pin/path 依赖路线已实证不可达，§2-1a）；备选C 仍须升级编排者确认；
++- 任一处置后**复检仍不过 → escalate，不得带病执行 T0 及之后任务**。
++
++### T0 基线快照 + 壳修复与重定基线（门 G0）
++1. `git -C trustbridge diff > workflow-out/_pre-task-snapshot.patch`（含未提交 W1-B2 全部改动；仅作恢复凭据，**不 stash、不 checkout**）。
++2. 修壳（**二选一，首选①**；git pin / ldk path 依赖路线已实证不可达，§2-1a，勿再尝试）：
++   - **① 存根路线（首选）**：壳内新增本地存根 crate（建议 `../workflow-out/verify_core/stubs/lyquid-llm/`，包名必须是 `lyquid_llm`），壳 Cargo.toml 以 path 依赖引入。签名面按 assessor.rs 实际用量给**最小实现**（全部消费点已核实：assessor.rs:37-38（use）、:116-142（LyquidLlmModel），别无他处）：
++     - `backend::openai_compat::OpenAiCompatBackend`：`openai(&str) -> Result<Self, E>`（E: Display，assessor.rs:124 以 `{e}` 格式化）、`chat_completions(&str, &str) -> Self`、`bearer_auth(self, &str) -> Self`、`output_format(self, OutputFormat) -> Self`（builder 链，assessor.rs:124-129）；
++     - 顶层 `call_model(&OpenAiCompatBackend, &ModelRequest) -> Result<ModelResponse, E>`——**测试纯逻辑不执行此路径，返回 Err 即可**（assessor 的 6 个测试均不触 LLM 路径，已核实：tests 模块内对 LyquidLlmModel/call_model 零引用）；
++     - `ModelRequest::new(&str, &str) -> Self` + `.timeout_ms(..) -> Self` + `.max_output_tokens(..) -> Self`（assessor.rs:136-138）；
++     - `OutputFormat::json_schema(&str, serde_json::Value) -> Self`（assessor.rs:129）、`ModelResponse { text: Option<String> }`（assessor.rs:140-141 的 `.text` 消费）。
++     编码员以编译迭代对齐精确签名（整数宽度等细节以编译器报错为准）。壳仍挂**工作树** assessor → 计数维持 **33+5+2=40**。
++   - **② HEAD 挂载路线**：`git show HEAD:lyquid/src/assessor.rs > 壳内落盘文件`，壳 src/lib.rs 的 assessor `#[path]` 改指它（该版无 lyquid_llm 引用、5 测）→ 回到 **32+5+2=39 字面**；**须登记偏差：壳不再覆盖工作树第 6 测（R2#1 wire-shape pin 的测试面）**。
++3. 复跑 `cargo test --lib --tests`（cwd=壳目录），预期三段 ok：路线① = 33/5/2（=40）、路线② = 32/5/2（=39）。原始输出存 `workflow-out/w1b2-shell-rebaseline.txt`，**注明所选路线与最终计数**及漂移原因（①：W1-B2 未提交 assessor 新增 1 测；②：挂 HEAD 版）；§2-1a 的容器实证（命令+错误尾部）一并录入该文件。
++4. **G0 门**：壳全绿（**注明所选路线与最终计数**，39 或 40）。不过 → 回退 R1（§9）。
++5. **容器路线前置说明（宿主 cargo 未修复时）**：壳进容器跑测试**必须先改写壳内全部 `#[path="F:/…"]` 为容器内路径**——src/lib.rs:4-13（types/core/committee/assessor 四处）、tests/escrow_lifecycle.rs:4、tests/modelcheck_refund.rs:4（两测试文件均已排查确认含 path 属性）——再 docker cp 壳与 lyquid 源进容器（依赖缓存实测可离线解析）。原『直接 cp 运行』不可行，照此改写。
++
++### T1 探针落地（lyquid/src/lib.rs，门 G1）
++按 §6-1 与 §7 设计新增 `probe_claim_sim` + ACCESS_MATRIX 行 + 标记注释。容器内编译检查：
++`docker exec multi-tools-1 sh -c "cd /tmp/tb-lyquid && cargo check"`（在 T2 的 docker cp 之后执行亦可，合并为一次 cp）。
++**G1 门**：cargo check 零 error；`git diff lyquid/src/types.rs lyquid/src/core.rs` 输出为空。
++
++### T2 新实例部署（门 G2）
++1. `docker cp` 宿主 `trustbridge/lyquid/.` → `multi-tools-1:/tmp/tb-lyquid`（覆盖；随后容器内 `md5sum /tmp/tb-lyquid/src/lib.rs` 与宿主比对，杜绝 D1 复发）。
++2. 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key 0xac09…ff80 Cargo.toml`（cwd=/tmp/tb-lyquid），记录新实例地址。
++3. **G2 门（镜像自证）**：对新地址 `cast call … "probe_claim_sim(string,uint64) returns (string)" deal-x <now>` 或 `balance_of` 任一调用可路由（不再 FuncNotFound）即证明新镜像生效。
++
++### T3 重放造快过期 deal（门 G3）
++宿主 python + NodeClient（`TB_CONTRACT=<新地址>` 或构造参数），全部走 eth_sendTransaction 通道：
++`faucet("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", 1_000_000)` →
++`create_deal(buyer="0xf39F…92266", seller="agent-bob", amount=1000, fee_bps=200, terms_d, acceptance_d, est_duration_ms=200, est_confidence=90)`（§2-5 ⇒ timeout_slots=1；caller=DEFAULT_SENDER=anvil#0=BROKER 过 Broker 守卫）→
++`fund("deal-1")`（Buyer 守卫：caller==buyer 同为 anvil#0）。
++**每笔 send 后读回复核**（§A-1 笔 3 教训：status=1 ≠ 方法 Ok）：`deal_info`/`balance_of` 确认 Qualified→Funded。等 `eth_blockNumber > deadline_slot`（轮询；automine 不推进时补一笔 benign `faucet` 造块）。
++**G3 门**：`deal_info(deal-1)` 返回 `state:"Funded"` 且块高 > deadline_slot。
++
++### T4 探针佐证取证
++取证前先实读块高作 advisory 入参：宿主 `curl -s -X POST http://127.0.0.1:10087/api … eth_blockNumber`（透传已证，§B-④d）或 `NodeClient.block_number()`（rpc.py:229）。随后容器内 `cast call --rpc-url http://node1:10087/api <新地址> "probe_claim_sim(string,uint64) returns (string)" deal-1 <块高实读值>`，完整原始输出（A~H 各阶段、**chain_now/caller_now 双值**、块高、实例地址、命令行）存 `workflow-out/w1b2-claim-probe-evidence.txt`。
++**同步截取 node1 容器控制台/日志中的 probe 阶段行**（`docker logs <node1 容器名>`，如 multi-node1-1）一并存入同一证据文件——trap 情形下这是唯一证据通道（§7 定位口径）；并如实注明：**trap 时 println 能否落入节点日志未经本仓可验证**（ldk 仅证实 println 为逐次 host console_output 调用），属尽力定位。若 trap 后节点日志亦无阶段行，按 R4 停止并升级，定位降级为『排除法』。
++**eth_call 读上下文口径（B2）**：D 阶段显示 `chain_now=0` 或 current_slot() 异常**不是停止事件**——按『eth_call 读上下文 chain_pos 失效』登记为新事实后**继续完成 A~H 取证**（caller_now 判定链完整即证据有效）。tx 上下文的 chain_pos 已有实证（finding.md:15：funded_slot=94==fund 块号），T6 退款走 tx 上下文不受 eth_call 读通道影响。
++预期：F 阶段 `Ok` + `Payout{refund_to_buyer:1000,…}`（now 来源=caller 标注）、G 勾稽 `total==1000`、H verdict=PASS-full-refund。**R4 停止条件（仅三类）**：panic、caller_now≥deadline 而 F=Err、G 勾稽失配——触发即停止后续任务并升级（回退 R4）。
++
++### T5 keeper v2 改造（scripts/keeper.py，持久）
++按 §8 改造写通道。门：宿主 `python -c "import ast; ast.parse(open('scripts/keeper.py').read())"` 通过（语法级；运行面由 T6 实测覆盖）。
++
++### T6 keeper 实测退款 + 证据（门 G6）
++1. 记录前值：`balance_of("0xf39F…92266")`（=faucet 后 − 1000 托管）。
++2. 受控运行：`python scripts/keeper.py --node http://127.0.0.1:10087 --contract <新地址> --deals deal-1 --interval 5 --once`（`--once` 跑一轮退出，便于取证；输出含 tx hash——来源 `_send` 回执，见 §6-2/§8）。
++3. 读回复核：`deal_info(deal-1)` 字面 `"state":"Refunded"`；`balance_of` 后值 = 前值 + 1000。
++4. 全部要素写入 `workflow-out/w1b2-refunded-evidence.md`（tx hash、deal_info 原始字面、balance_of 前后、keeper 日志摘录、所用命令）。
++**G6 门**：`state=="Refunded"` 字面 + 余额勾稽 + keeper 日志在档。任一不成立 → 回退 R4/R6 排查后重试（claim_timeout 幂等：Refunded 后重复提交被守卫拒绝，重试安全）。
++
++### T7 探针移除 + 终验（门 G7）
++1. 删除 lib.rs 探针 fn、ACCESS_MATRIX 行、全部 `W1-B2-claim-debug probe` 标记注释；`grep -rn "probe_claim_sim" lyquid/` 零残留。
++2. 勾稽 core 冻结：`git diff --stat lyquid/src/types.rs lyquid/src/core.rs` 为空。
++3. 勾稽净变化：`git diff lyquid/src/lib.rs` 相对 T0 快照无探针残留（lib.rs 终态 = T0 快照态）。
++4. 复跑壳 `cargo test --lib --tests`（cwd=壳目录）全绿，输出追加进 w1b2-shell-rebaseline.txt（T0 前后对照，**注明所选路线与最终计数**——路线①=40 / 路线②=39）。
++5. w1b2-claim-revert-finding.md 头部插入 superseded 注记块（根因=D1 旧镜像 + D2 写通道限制；指向两份新证据文件；原 wasm-panic 假设作废），正文不动。
++**G7 门**：上述 5 项全部成立。
++
++## 6. 逐文件改动点
++
++### 6-1 `lyquid/src/lib.rs`（T1 加 / T7 删，改动全部带标记）
++- **新增探针函数**（置于 claim_timeout 之后、cancel 之前，或只读 getter 区 deal_info 附近——编码员择一，保持与只读形态同区）：
++  ```rust
++  // W1-B2-claim-debug probe BEGIN（probe-removable：T7 整块删除）
++  /// Staged simulation probe for the claim_timeout empty-revert debug
++  /// (D1/D2: old image + write-channel limitation — NOT a core bug).
++  /// Read-only: clones the deal and runs core::claim_timeout on the clone;
++  /// never mutates consensus state, never applies payouts. Over export=eth
++  /// it is eth_call/cast-call readable (deal_info-shaped JSON string).
++  /// Advisory `now` param — precedent due_deals (lib.rs:565-574): the
++  /// parameter cannot move funds; the only money-movement guard is
++  /// claim_timeout itself, which re-derives time via current_slot().
++  #[method::network(export = eth)]
++  pub fn probe_claim_sim(ctx: &_, deal_id: DealId, now: u64) -> LyquidResult<String> {
++      // A~H 阶段见方案 §7；每阶段 push 之后、执行风险操作之前，立即
++      // lyquid::println! 外发该阶段行（deal_info 先例 lib.rs:545，非共识
++      // 输出、语义零影响）——trap 时定位口径 = 节点控制台最后一条
++      // probe 阶段行（返回值与结尾 println 在 trap 时均不可达）。
++      // D 阶段双记 chain_now=current_slot() 与 caller_now=入参 now；
++      // E/F/H 判定一律用 caller_now（零写模拟，不动链上资金语义）。
++      …
++  }
++  // W1-B2-claim-debug probe END
++  ```
++  形态依据：`deal_info(ctx: &_, …) -> LyquidResult<String>`（lib.rs:532）；只读借用 `let state = &*ctx.network;`（getter 先例）；JSON 序列化错误映射 `lyquid_error(&format!(...))`（deal_info 同款，lib.rs:535-536）。
++- **ACCESS_MATRIX 增一行**（lib.rs:180 矩阵内、只读 getter 行之前）：
++  `("probe_claim_sim", Access::Anyone), // W1-B2-claim-debug probe-removable（只读模拟，无守卫面）`
++- **不改**：既有方法体、state! 块、require、current_slot。
++
++### 6-2 `scripts/keeper.py`（T5，持久；全量约 90–110 行的重写幅度）
++- docstring 传输层叙述更新：写通道 = NodeClient（eth_sendTransaction 无 gas 字段 + `eth_getTransactionReceipt` 轮询 `status=="0x1"`，w1b2-s4-rpc.md §B-⑤ / D2）；删除 `cast send --json` 及 gas estimation 相关叙述；"Stdlib only" 改为"依赖 agents/common（requests）"。
++- 顶部 `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` + `from agents.common.rpc import NodeClient, DEFAULT_NODE`（demo.py:17-18 同款先例）。
++- 删除 `cast()`/`decode_abi_string()`/`deal_state()`/`claim_timeout()` 四个 docker-exec/cast 函数；`poll_once` 改为：
++  `info = node.deal_info(deal_id)`（NodeClient.deal_info，rpc.py:358）→ 状态机同旧逻辑（Settled/Refunded→terminal；非 Funded→skip）→ `receipt = node._send("claim_timeout(string)", (deal_id,))`（**不走** rpc.py:330 的 `claim_timeout` 公开封装——该封装丢弃回执并固定 `return True`（rpc.py:330-337），对返回值直接下标取 tx hash 会 TypeError；`_send`（rpc.py:241-262）返回回执 dict 且已含 `status=="0x1"` 断言）→ **读回复核** `after = node.deal_info(deal_id)`，仅当 `after["state"]=="Refunded"` 记 `action=claimed` 并附 `tx=receipt["transactionHash"]`（字段在档：§B-② 回执含 transactionHash；§A-1 笔 3 口径：status=1 ≠ 方法 Ok）。rpc.py 本身不改（§0 约束维持）。
++- CLI 参数改为 `--node`（默认 DEFAULT_NODE）、`--contract`、`--deals`、`--interval`、`--once`（单轮退出，实测取证用）；保留时间戳日志格式 `[keeper HH:MM:SS] deal: {json}`。
++- NodeError（守卫拒绝/not-due）捕获后按 `action=not-due-or-reverted` 记日志（沿用旧语义）。
++
++### 6-3 `../workflow-out/verify_core/`（T0-2，按所选路线）
++- **路线①（首选）**：`Cargo.toml` 的 `[dependencies]` 增本地存根 `lyquid-llm = { path = "stubs/lyquid-llm" }`；新建 `stubs/lyquid-llm/`（Cargo.toml 包名 `lyquid_llm` + `src/lib.rs` 最小签名面，明细见 §5 T0-2①，编码员以编译迭代对齐）。壳自述"临时 crate 不属于 trustbridge 仓库"，改它不触仓库冻结面。
++- **路线②**：`git show HEAD:lyquid/src/assessor.rs` 落盘为壳内文件（如 `src/assessor_head.rs`），`src/lib.rs` 的 assessor `#[path]` 改指它；登记『壳不再覆盖工作树第 6 测（R2#1 wire-shape pin）』。
++- **容器路线前置**（宿主 cargo 未修复时）：改写壳内全部 `#[path="F:/…"]` 为容器内路径（src/lib.rs:4-13、tests/escrow_lifecycle.rs:4、tests/modelcheck_refund.rs:4）后再 docker cp（§5 T0-5）。
++
++### 6-4 证据文件（新建，格式要点）
++- `w1b2-claim-probe-evidence.txt`：实例地址、部署输出摘录、md5 自证、命令行原文（含 advisory now 实读块高）、A~H 原始返回（hex + 解码 JSON）、**chain_now/caller_now 双值**、node1 控制台阶段行截取、当时块高。
++- `w1b2-refunded-evidence.md`：① claim tx hash（keeper 日志/receipt）② `deal_info(deal-1)` 原始字面（含 `"state":"Refunded"`）③ `balance_of` 前值/后值及 +1000 勾稽 ④ keeper 日志摘录 ⑤ 复现命令清单。
++- `w1b2-shell-rebaseline.txt`：T0 修复前失败输出（E0432/E0433）+ 修复后 40/40 + T7 复验输出；39→40 漂移说明。
++- `w1b2-claim-revert-finding.md`：仅头部插入注记块（superseded by D1/D2 + 两份新证据路径）。
++
++## 7. 探针 A~H 阶段语义（定案）
++
++`stages: Vec<(char, String)>`，每阶段按「push 标记与输入 → **立即 `lyquid::println!("probe_claim_sim: {stage} {detail}")` 外发该阶段行** → 执行风险操作 → 成功后 push 结果」的顺序（println 先例 deal_info，lib.rs:545；控制台输出非共识状态、语义零影响）。**定位口径 = 节点控制台最后一条 probe 阶段行**——trap 时返回值与结尾 println 均不可达，逐阶段外发是唯一实时定位通道；正常路径仍返回 `serde_json::to_string(&stages)` 供 cast call 取证（lyquor 的方法级 Err 在 eth_call 下带消息返回，§A-3 实证），结尾的整包 JSON println 可保留作正常通道输出。入参 `now: u64` 为 **advisory**（先例 due_deals，lib.rs:565-574：参数不动资金）；cast 签名 `"probe_claim_sim(string,uint64) returns (string)"`，`now` 取取证前 `eth_blockNumber` 实读值（透传已证，§B-④d）。**D 阶段双记 chain_now 与 caller_now**（正面回答 w1b2-claim-revert-finding.md:19a 待查项 a）；**E/F/H 判定一律用 caller_now**；H verdict 标注 now 来源。
++
++| 阶段 | 记录内容 | 风险操作（println 外发后执行） |
++|---|---|---|
++| A enter | `"A:enter caller=<ctx.caller>"` | —（进入即记录） |
++| B found | `"B:found id=<deal_id>"` | `state.deals.get(&deal_id)`（miss → 记 `B:miss` 并提前返回报告） |
++| C state | `"C:state=<format!("{:?}", deal.state)>"` | — |
++| D now | `"D:now chain_now=<current_slot()> caller_now=<入参 now> chain_now>0=<bool>"`（**双值并记**，正面回答 finding.md:19a：chain_pos 在调用上下文的真实返回） | `current_slot()`（lib.rs:709 单点） |
++| E deadline | `"E:deadline=<deal.deadline_slot()?> caller_now>=dl=<bool>"` | `deal.deadline_slot()`（types.rs:122） |
++| F payout | `"F:payout=Ok(Payout{…})"` 或 `"F:payout=Err(<TransitionError 变体>)"` | **核心被测点**：`let mut sim = deal.clone(); core::claim_timeout(&mut sim, caller_now)`（core.rs:170-178；克隆体上模拟，共识状态零写） |
++| G conservation | `"G:total=<p.total()>==amount=<deal.amount> <bool>"` + 四字段明细 | `p.total()` 勾稽（apply_payout 的 debug_assert 同式，lib.rs:678，此处以数据形式外显） |
++| H verdict | `"H:verdict=PASS-full-refund <amount>-><buyer> (now=caller:<入参>)"` 或 `"H:verdict=BLOCKED <原因> (now=caller:<入参>)"` ——**标注 now 来源** | 汇总 |
+ 
+----
++补充：结尾整包 `lyquid::println!("probe_claim_sim: {}", json)`（正常通道）与逐阶段行并存；探针**不得**调用 `apply_payout`、不得任何 `insert/get_mut` 写路径——**不得**以『把最后阶段持久化进实例状态』替代逐阶段外发（违反 §7 零写纪律，且 eth_call 写不落盘）。
+ 
+-## ④ 逐文件改动点详设
+-
+-### 1. `lyquid/src/probe/mod.rs`（新建）
+-- 模块文档注释：用途（W1-B1 平台探针）、纪律（SPIKE 登记、实验后标记处置）、不进 escrow 主路径的边界声明。
+-- `pub mod s1_timer;` + `pub mod s2_oracle;`。
+-- SPIKE(W1-B1) 起始标记清单锚点（登记于 implementation.md）。
+-
+-### 2. `lyquid/src/probe/s1_timer.rs`（新建，最小 trigger 面，instance+network 双观测域）
+-- state（并入或模块内，随 R1 判定）：
+-  - instance 域：`probe_fires: u64 = 0;`、`probe_registered_at_ms: u64 = 0;`、`probe_last_fire_at_ms: u64 = 0;`、`probe_arm_delay_ms: u64 = 0;`
+-  - **network 域（共识观测面，修订指令 1）**：`probe_net_fires: u64 = 0;`、`probe_net_last_fire_ms: u64 = 0;`
+-- `#[method::instance(export = eth)] pub fn probe_arm(ctx: &mut _, delay_ms: u64)`（**非 view**，cast send 通道）：清零 instance 计数、`systime()` 记 registered_at、存 delay、`trigger!(probe_on_timer(...), TriggerMode::Once(delay_ms))`、println 登记（含节点标识，配合多节点 arm 对照）。
+-- `#[method::instance] fn probe_on_timer(...)`（trigger 目标，无 export）：instance `probe_fires += 1`、`systime()` 记 last_fire_at、println "FIRE #n at t=…"，随后**经 `call!` 调 network 方法 `probe_mark_fire` 落共识计数**（形态镜像 timeout.rs:52-59 已证 A 档：`call!((self_id).probe_mark_fire(fired_at_ms: u64 = t) -> (ok: LyquidResult<bool>)).ok?`）。**SPIKE(W1-B1)**：目标方法签名/参数编码形态以 trigger! 宏展开（runtime/mod.rs:405-424 encode_by_fields!）与 price-feed update_history 同款为准，编译不过即按 rustc 报错修正并登记。
+-- `#[method::network(export = eth)] pub fn probe_mark_fire(ctx: &mut _, fired_at_ms: u64) -> LyquidResult<bool>`（**非 view**，cast send 亦可达）：network `probe_net_fires += 1`、`*probe_net_last_fire_ms = fired_at_ms`、println "NET FIRE #n"——**exactly-once 判定域**。
+-- `#[method::network(export = eth)] pub fn probe_reset_net(ctx: &mut _)`（**非 view**，cast send 可达，形态同 probe_mark_fire；冷读仲裁修订）：清零 `probe_net_fires`/`probe_net_last_fire_ms` + println 确认——实验 a/c 每轮 **baseline 前置步骤**。
+-- `#[method::instance(export = eth)] pub fn probe_get_report(ctx: &mut _)`（**非 view**，返回 `LyquidResult<()>`——`()` 返回 cast send 不受影响，fund 先例 implementation.md:118；观测走 println）：println JSON 串一次打包 **instance 域（fires/registered_at/last_fire_at/delay）+ network 域（net_fires/net_last_fire_ms）两组计数**——console 单次调用取全量观测。
+-- 对照组 `probe_arm_recurrent(interval_ms)`（Recurrent，实验 c 可选）。
+-
+-### 3. `lyquid/src/probe/s2_oracle.rs`（新建，price-feed 骨架去外网移植）
+-- **通道纪律（修订指令 2；端点口径同 §② 基准行）**：本文件全部可调用方法（configure/run_round/bump_threshold/config，及如需的 dest_epoch 包装）一律**非 view 的 `export = eth`**（constructor 已删，见下——冷读仲裁修订）；调用 = **容器内** cast send `--rpc-url http://nodeX:10087/api`（服务名+容器端口，node2 容器内亦为 10087；11087/12087/13087 仅宿主侧），println 观测 = `shaker console --endpoint ws://nodeX:10087/ws` 取回（T4 措辞同此）。
+-- state：`network oracle cert_probe;`（对齐 price-feed:167 oracle 声明形态；**initializer state 字段删除——冷读仲裁修订：平台仅自动执行名为 `constructor` 的函数（ldk lib.rs:59-66 + proc lib.rs:355-370 特判），probe_constructor 不部署期执行，initializer 恒 ZERO 只会让镜像 price-feed:209-213 的守卫拒绝一切 caller**）、`network probe_rounds: u64 = 0;`、`network probe_last_signers_raw: Vec<u64> = Vec::new();`、`network probe_last_signers_nodes: Vec<String> = Vec::new();`、`instance probe_propose_count: u64 = 0;`。
+-- **probe_constructor 删除（冷读仲裁修订）**：平台只自动执行名为 `constructor` 的函数（proc lib.rs:356-370 仅对 `func.sig.ident == "constructor"` 特判；ldk lib.rs:59-66：必须命名 constructor、network、无返回），probe_constructor 不会部署期执行——探针不设 constructor，configure 守卫改走平台内建 `eth_guard = creator`；**不得给共享 escrow crate 加真 constructor**（现无 constructor，加了改变主合约部署行为，另案分析）。
+-- `#[method::network(export = eth, eth_guard = creator)] pub fn probe_configure(ctx: &mut _, node_ids: Vec<NodeID>, threshold: u16) -> LyquidResult<bool>`（cast send ABI 面 = `probe_configure(bytes32[],uint16)`，成员编码见 §② 委员会配置条）：**守卫 = 平台内建 `eth_guard = creator`（官方 `__lyquor_oracle_initialize` 同款，runtime/oracle/mod.rs:147；合法域 = mutable network eth 导出 main/node group，proc lib.rs:950-961——默认 main group 满足，编译报域错按此调整并 SPIKE 登记；无 initializer 守卫分支，冷读仲裁修订）** + 非空校验 + `OracleTarget{seq_id: sequence_backend_id()?, target: LVM(ctx.lyquid_id)}` + `cert_probe.initialize(...)`（price-feed:207-236 逐点镜像；**仅入 staging，激活两阶段见 T4 第 3 步**）。
+-- `#[method::instance(group = oracle::two_phase::cert_probe)] fn probe_propose(ctx: &mut _, avg_num: u16, target: OracleTarget) -> LyquidResult<ProbeProposal>`：返回内生成提案（round 序号 + 本节点标识 + systime），**零 HTTP**；println 观测。
+-- `#[method::instance(group = oracle::two_phase::cert_probe)] fn probe_aggregate(ctx: &_) -> LyquidResult<Option<CertifiedCallParams>>`：镜像 price-feed:299-360（inputs 数 ≥ avg_num → 聚合 → 构造 CertifiedCallParams）；SPIKE(W1-B1) 标记聚合返回构造细节，以编译+实跑为准。
+-- `#[method::network(group = oracle::certified::cert_probe::two_phase)] fn probe_on_certified(ctx: &mut _, payload: ProbeRound)`：**核心观测点**——println `cert.signers` 原始值（含类型形态）、逐个 `ctx.signer_node_id(id as u64)` 映射结果（price-feed:400-406 镜像）、写 network 记录、`probe_rounds += 1`。
+-- `#[method::instance(export = eth)] pub fn probe_run_round(ctx: &mut _) -> LyquidResult<bool>`：`propose_and_certify(&mut ctx, target, encode(avg_num=1, target), None, None)` + `submit_certified_call!`（price-feed:447-472 镜像）+ println 各阶段。
+-- `#[method::instance(export = eth)] pub fn probe_bump_threshold(ctx: &mut _, new_thres: u16) -> LyquidResult<bool>`：包 `cert_probe.set_threshold(target, new_thres)`（source.rs:591 面；**epoch=0 恒 false——须在激活后调用**）+ println 返回值。
+-- `#[method::instance(export = eth)] pub fn probe_config(ctx: &_)`：println `config_current/config_staging/get_epoch`（source.rs:562-589 面）**+ dest epoch（冷读仲裁修订：读 `ctx.network.__internal.oracle_dest_epoch_info(topic, full_config)`——internal.rs:196 / runtime/oracle/mod.rs:91-102 面；可达性以编译/实测为准，不可达则另设 `probe_dest_epoch` 包装方法 cast send＋console println，SPIKE 登记最终形态）——T4-3b 的等待观测源**。
+-
+-### 4. `lyquid/src/lib.rs`（最小挂载）
+-- `pub mod probe;`（`pub mod assessor;` 之后一行）。
+-- 文件头 W1 注释块补一行：W1-B1 探针已挂载、指向 probe/mod.rs 与 w1b1-*.md。
+-- （仅 R1 判定需要时）state! 块末尾追加探针字段（S1 network 域 probe_net_fires/probe_net_last_fire_ms + S1 instance 域 + S2 域，均 probe_ 前缀），块内加注释行"probe state (W1-B1)，主 escrow 字段零改动"。
+-
+-### 5. `lyquid/Cargo.toml`
+-- 预期零改动。`OracleTarget/CertifiedCallParams` 等类型若不在默认导出面而需 feature，仅改 lyquid 依赖行的 features 数组（裁定 1 传递 crate 豁免路径），逐行注释登记；**任何情形不新增 crate**。
+-
+-### 6. `lyquid/src/timeout.rs`（仅 T3 结论落地）
+-- 编码员先读全文，列出 timer 相关 SPIKE 标记清单 → T3 结论表逐处对应改写（假设→验证方式→结论，W1-A §③ 三列纪律）；不改任何逻辑/签名/断言。
+-
+-### 7-10. 文档四件
+-- `w1b1-topology.md`：§③-T1 的全部内容（起法/验证输出/差异表/**ldk_cargo-cache 卷复用事实**/信任模型/降级记录）+ 人工验证命令清单汇总。
+-- `w1b1-s1-timer.md`：实验 a/b/c 命令与原始输出 + 结论表 + native trigger 判定 + keeper 模式衔接说明。
+-- `w1b1-s2-oracle.md`：T4 全部命令与输出 + ctx.cert.signers 形态结论 + W1-A CallContext 交叉核对表。
+-- `implementation.md`：W1-B1 节（T0-T5 journal、SPIKE 新增/处置勾稽、结论指针、W1-B2 边界）。
++## 8. keeper v2 写通道设计要点
+ 
+----
++- 复用而非重造：NodeClient 已按 §B-⑤ 实现 `_send`（rpc.py:241-262）并带 `claim_timeout` 封装（rpc.py:330-337）与 selector `0x786cfc8f`（rpc.py:76）——keeper 只做轮询编排与读回复核。**注意：`claim_timeout` 公开封装仅返回 bool（丢弃回执），keeper 直用 `_send` 取回执以附 tx hash**（理由见 §6-2）。
++- sender：claim_timeout 为 Anyone（ACCESS_MATRIX），`DEFAULT_SENDER`（anvil#0）即可，无需私钥进 keeper（节点侧 dev 签名账户，§B-① 实证 from 即生效）。
++- 幂等安全：Refunded 后重复 claim 被守卫拒（core.rs:171 require_states），重试无害（keeper 原教义保留）。
+ 
+-## ⑤ 风险与回退
++## 9. 风险与回退
+ 
+-| # | 风险 | 缓解 | 回退 |
++| # | 风险 | 概率 | 缓解/回退 |
+ |---|---|---|---|
+-| R1 | `state!` 宏 crate 级单例，probe 模块内二次调用编译失败 | T2 第 1 步先读宏定义 + cargo check 实判 | 探针字段并入 lib.rs state! 块末尾（追加不改旧），硬约束"不污染主路径"仍满足（方法/逻辑独立成文件） |
+-| R2 | multi 镜像（ghcr v0.8.1 全家桶 + bartender reference + registry:3 + anvil foundry）拉取失败 | 逐服务 `docker compose up <svc>` 分步定位；失败输出如实存档 | 降级单节点跑 S1/S2（b 实验降级语义如实标注），拓扑文档记录 + 替代方案讨论；不算任务失败 |
+-| R3 | 10087 端口互斥导致单节点/多节点切换踩坑 | §③-T1 显式 `-p ldk down` 先停单节点 | 单节点 `scripts/devnet-up.sh` 恢复；multi `down`（保留卷）/`down -v`（重置） |
+-| R4 | multi 无常驻 tools 容器，部署通道形态变化 | 临时容器 `multi-tools` **复用 `ldk_cargo-cache` 命名卷**（`docker volume ls` 本轮实测存在；fd575e8 git db 在卷内、down 不清卷，免重拉依赖——§③-T2 第 6 步双通道同挂该卷，修订指令 4） | setup-devnet `run --rm -v ldk_cargo-cache:/usr/local/cargo` 通道；再不行退单节点部署（S1/S2 语义仍在，跨节点项标注降级） |
+-| R5 | native trigger 不可靠（Once 不触发/重启重放/延迟漂移） | 三项实验即为其探测；探针 println 全程留痕 | 主方案不依赖 native trigger（keeper + 链上守卫已实现）：记录后转 keeper 模式，登记 implementation.md，**不算失败** |
+-| R6 | S2 认证回合卡在 aggregate/两阶段组细节（宏 group 命名、CertifiedCallParams 构造） | price-feed 逐行镜像 + rustc 报错驱动修正 + SPIKE 登记 | threshold=1 + 单节点 propose 已足够验证 ctx.cert.signers 形态（README:76 语义）；跨节点双签列为可选加分不阻塞 |
+-| R7 | `shaker deploy --update` 状态重置（deploy.sh 头注释已警示） | 探针实验幂等：arm 清零 instance 计数、**每轮实验前 cast send `probe_reset_net` 清零 network 计数（冷读仲裁修订）**，reset→baseline→arm→delta 序列自洽 | 需要状态延续时重新 arm/reset 并在结论表标注轮次 |
+-| R12 | `eth_guard = creator` 实跑校验不过（creator 记录与 cast send 签名者不一致） | deploy 与 cast send 同用 anvil#0 钥（T2 第 6 步 `--private-key`，demo.sh:166-167 先例）；合法域条件（proc lib.rs:950-961）编译期即暴露 | 退路 = 恢复 `export = eth` 的 `probe_set_initializer`（T4 步骤 2 前显式 cast send 钉 caller）并如实存档（冷读仲裁修订备选）；**不得给共享 escrow crate 加真 constructor**（现无 constructor，加了改变主合约部署行为，另案分析） |
+-| R8 | GLM 配额 5 小时窗口中断 | 每个 T 收尾即写 implementation.md journal；中断即停不压缩验证 | 续跑从 journal 恢复（T 序号即断点粒度） |
+-| R9 | 误碰 W1-B2 范围（S3/S4/keeper.py） | 本计划无对应文件；代码审查对照受影响文件清单 | — |
+-| R11 | cast send 通道对探针方法不可达（参数编码/返回型被节点拒） | §③-T3 第 0 步前置硬门先行证明，未存档不进实验；方法签名按 fund 先例收敛（基础类型参数 + `LyquidResult<()>`/bool 返回） | 实测失败输出存档；必要时收敛签名形态（如 Vec<NodeID> 改逐个 add）重编译重部署，SPIKE 登记 |
+-| R10 | verify_core 壳 39/39 或类型冻结被破坏 | T0 基线存档 + T2/T5 两端 `cd workflow-out/verify_core && cargo test --lib --tests` 对照（工作区根起算）；探针纯增量不触 types/core | git 单提交整体回退（探针全新增文件，checkout 即净） |
+-
+----
+-
+-## ⑥ 验收口径（编码员自检 + 审查员核对）
+-
+-1. 测试门：`cd workflow-out/verify_core && cargo test --lib --tests` = 39/39（工作区根起算；T0 与 T5 双端存档输出）；部署产物编译核验 = 容器内 `cargo check --target wasm32-unknown-unknown`；全文不以 lyquid 本体宿主 cargo test 为门（NativeGuestAbi 4 错实测）。
+-2. 多节点：4 节点 GetNodeInfo + GetPeers≥3×4 + GetLyquidInfo 同 contract×4 真实输出 + ldk_cargo-cache 卷复用登记，均在 `w1b1-topology.md`。
+-3. S1：**通道先行证明在前**（probe_arm 容器内 cast send + console 带端点取回，命令与输出存档，未存档不进实验）；a/b/c 三实验各有命令+原始输出；a 判定域 = 共识 network 计数 **delta 口径：(probe_net_fires − baseline) == 本轮成功 arm 节点数**（每轮 reset→baseline→arm，至少 node1+node2，容器内服务名端点 nodeX:10087，分母 = arm println 实际成功数；冷读仲裁修订）；b 只杀节点服务（anvil/registry 保持运行），读数前有链连续性证据（block-number/GetLyquidInfo 前后比对），重启前后 instance+network 双组计数逐项登记（"节点数据卷持久"不作前提）；全栈 kill 仅在『链重置观测』独立小节且不作判定依据；结论表含 native trigger 判定（可用/不可用二选一，不可用附 keeper 衔接说明），判定域与 timeout.rs:75-77 SPIKE_1 验收对齐。
+-4. S2：成员来源 GetNodeInfo×4（GetPeers 并集交叉核对）+ 编码转换表（含示例数组）；configure（`probe_configure(bytes32[],uint16)`，`eth_guard = creator` + deploy/cast 同钥 anvil#0）→ **两阶段激活：advance 提交 → dest epoch 推进（probe_config dest epoch 观测，观测不满足驱动重发）→ finalize 提交 → get_epoch>0 且 current 生效确认（冷读仲裁修订，无"返回 true"门）** → run_round → on_certified println（cast send + console 取回）+ set_threshold 返回值（epoch>0 后）+ ctx.cert.signers 原始形态与映射后 NodeID + epoch 转变全程，全部真实输出在 `w1b1-s2-oracle.md`。
+-5. `timeout.rs` timer SPIKE 标记按三列纪律登记处置，逻辑零改动（diff 仅注释）。
+-6. 无新增直接依赖；`Cargo.toml` 若动仅 feature 行且带登记注释。
+-7. implementation.md W1-B1 节完整，含 journal 与断点恢复说明。
++| G-init | 预检门未过（docker / 节点 API / 宿主 cargo 任一失败；**③ 现状实测已失败**，见 §2-3） | — | 按 T-init 失败处置（起栈 / 修 rustup / R1 备选路由）；复检仍不过 → escalate，不得带病执行 T0 及之后任务 |
++| R1 | 壳修复受挫（存根签名对不齐 / 宿主 cargo 未修复） | 中 | git pin 与 ldk path 依赖路线**已实证不可达**（E0425 NativeGuestAbi，§2-1a），勿再尝试；宿主 cargo 未修复时走**容器路线**：先改写壳内全部 `#[path="F:/…"]` 为容器内路径（src/lib.rs:4-13 四处 + tests/escrow_lifecycle.rs:4 + tests/modelcheck_refund.rs:4）再 docker cp 壳与 lyquid 源进 multi-tools 跑 cargo test（依赖缓存实测可离线解析；原『直接 cp 运行』不可行，照此改写）；备选C：壳卸载 assessor 挂载（gate 变 27+5+2=34）——**属硬约束字面变更，须升级编排者确认后方可采用** |
++| R2 | 新实例仍 FuncNotFound（cp 未覆盖/registry 缓存旧码） | 低 | T2 的 md5 三方比对（宿主/容器/部署输出）+ G2 门早失败早暴露；重 cp 重 deploy（每次新地址，旧实例自然废弃） |
++| R3 | 块不推进、deadline 不到 | 低 | 轮询 `eth_blockNumber`，停滞则补 benign `faucet` 造块（automine） |
++| R4 | 新镜像上异常（D1 之外的新根因） | 低 | **停止并升级的仅三类**：① panic（定位=控制台最后一条 probe 阶段行）；② caller_now≥deadline 而 F=Err；③ G 勾稽失配。**eth_call 下 chain_now=0/Err 不属停止事件**——按『eth_call 读上下文 chain_pos 失效』登记新事实后继续取证（tx 上下文 chain_pos 已实证：funded_slot=94==fund 块号，finding.md:15；T6 退款走 tx 上下文不受影响）。触发时携探针报告升级（escalate），不得擅自改 core |
++| R5 | 误伤 W1-B2 未提交基线 | 低 | T0 快照 patch 兜底 `git apply -R`；全程禁 `git stash/checkout/reset`；lib.rs 只做标记块增删 |
++| R6 | 宿主 127.0.0.1:10087 端口不通（keeper v2 通道失效） | 低 | 回退容器通道：`docker exec multi-tools-1 cast rpc --rpc-url http://node1:10087/api eth_sendTransaction '[{"from":"0xf39F…","to":"<addr>","data":"0x786cfc8f<abi(deal-1)>"}]'` + `cast rpc eth_getTransactionReceipt`（§B-①⑤ 实证形态），keeper 以 subprocess 驱动之（此为文档化备选，非首选） |
++| R7 | keeper v2 引入 requests 依赖与"stdlib only"教义冲突 | — | 已裁决：D2/§B-⑤ 决策门优先于旧教义，docstring 如实改写（属登记性偏离，写入证据文件） |
++
++**总回退闸**：所有文件级改动均有 T0 快照 + git 可恢复；链上新实例为临时造物无需回滚；旧实例 `0x1c85…` 保持原样（D1 证据存档）。
++
++## 10. 验收清单（硬约束映射）
++
++- [ ] 壳全绿：`cd ../workflow-out/verify_core && cargo test --lib --tests` 三段 ok——**注明所选路线与最终计数**（路线①=33+5+2=40，路线②=32+5+2=39；路线②另登记『不覆盖工作树第 6 测』偏差），漂移原因在 w1b2-shell-rebaseline.txt 留痕——原"39/39"约束之意图（壳全绿）满足，字面数字偏差如实登记
++- [ ] core 语义冻结：`git diff lyquid/src/types.rs lyquid/src/core.rs` 输出为空（T1 与 T7 双时点勾稽）
++- [ ] 探针独立可移除：`grep -rn "probe_claim_sim\|W1-B2-claim-debug" lyquid/ scripts/ agents/` 零残留；lib.rs 终态 == T0 快照态
++- [ ] 探针佐证：w1b2-claim-probe-evidence.txt 含新实例 A~H 完整输出（**F=Ok full_refund（标注 now 来源）+ G 勾稽 + H=PASS**；含 chain_now/caller_now 双值与控制台阶段行截取）
++- [ ] 退款实测：w1b2-refunded-evidence.md 含 tx hash + `state=="Refunded"` 字面 + balance_of 前后 +1000 + keeper 日志
++- [ ] 旧 finding 已注记 superseded（wasm-panic 假设作废声明）

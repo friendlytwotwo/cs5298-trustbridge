@@ -1,5 +1,20 @@
 # W1-B2 R0 发现：claim_timeout 空 data revert（未解，调试记录）
 
+> **SUPERSEDED（2026-10-28，W1-B2 收尾闭环）** —— 本文的『wasm panic』假设**作废**：
+> 根因 = **D1 旧镜像**（部署实例为 D3 增补前构建：`balance_of`/`due_deals` 一律
+> `Barrel(FuncNotFound)`，`claim_timeout` 不在其 eth 导出面 → 空 revert = 未导出方法的
+> 执行错误）+ **D2 写通道限制**（`cast send` 的 gas estimation 对 lyquid 合约不可依赖）。
+> 新证据（本轮实跑）：
+> - 新镜像只读探针 `probe_claim_sim` A~H 全程干净，`F:payout=Ok(Payout{…refund_to_buyer:1000…})`、
+>   `G:total=1000 ==amount=1000 true`、`H:verdict=PASS-full-refund`；
+>   且 `chain_now=103`（eth_call 上下文有效，≠0）→ 排除本文「待查 a) now=0」假设：
+>   `workflow-out/w1b2-claim-probe-evidence.txt`
+> - keeper v2（NodeClient `eth_sendTransaction` 无 gas + 回执轮询）实测退款成功
+>   （tx `0x85e4e39b…ae0838`，`state:"Refunded"`，余额 +1000）：
+>   `workflow-out/w1b2-refunded-evidence.md`
+>
+> 下文正文保留原样（当时的调试记录），不再作为结论依据。
+
 时间：2026-10-27 23:0x | 实例：`Lyquid-ss7x5edzcxjszfykf3edlyl44etxn256htzqa` @ `0x1c85638e118b37167e9298c2268758e058DdfDA0`（multi 4 节点 v0.8.1，Platform 0.8）
 
 ## 已验证成功（R0 达成部分）

@@ -5,24 +5,37 @@
 //! the result is then committed to network state via a separate network call
 //! (the documented two-step pattern). Nothing here ever touches consensus
 //! replay. `shopping-assistant` is the official precedent for the lyquid-llm
-//! call shape; refinement loops exist in lyquid-flow if needed later.
+//! call shape (lyquid-examples/shopping-assistant/src/lib.rs:113-131);
+//! refinement loops exist in lyquid-flow if needed later.
 //!
 //! B1 reproducibility: prompts request JsonSchema output; the agent-side
 //! ScriptedMock (agents/common/llm.py) can replay identical responses for
 //! tests; real backends only for the recorded demo.
-
-// Verified API surface (docs/source, v0.7.3) — exact import paths SPIKE(W1):
-//   lyquid_llm::call_model::<B>(&backend, &ModelRequest) -> LlmResult<ModelResponse>
-//   lyquid_llm::backend::openai_compat::OpenAiCompatBackend::openai(...)
-//   lyquid_llm::backend::gemini::GeminiBackend::google_ai(...)
-//   ModelRequest::new(...).system(...).timeout_ms(..).max_output_tokens(..)
-//   OutputFormat::Json / JsonSchema
-//
-// The functions below are written against that surface with a mock seam so the
-// logic is testable before the spike lands.
+//!
+//! W1-B2 S3 wiring (was SPIKE(W1) items at :14/:63/:90 — all resolved and
+//! rewritten as conclusions below; ledger in workflow-out/implementation.md):
+//!   - import/API face pinned against ldk v0.8.1 (rev fd575e8, read this
+//!     round): `lyquid_llm::call_model` (lyquid-llm/src/lib.rs:459,
+//!     feature "ldk" — the shopping-assistant Cargo.toml:11 form), backend
+//!     construction per plan R1#4: custom endpoint =
+//!     `OpenAiCompatBackend::chat_completions(provider, base_url)
+//!     .bearer_auth(api_key)` (backend/openai_compat.rs:114-132); default
+//!     OpenAI endpoint only = `openai(api_key)` (:94-98, hardcoded
+//!     api.openai.com/v1/responses); `.output_format(OutputFormat::json_schema(..))`
+//!     (:146-155); `ModelRequest::new(model, prompt).system(..).timeout_ms(..)
+//!     .max_output_tokens(..)` (lib.rs:390-431); `OutputFormat::JsonSchema
+//!     {name, schema}` (lib.rs:40-47).
+//!   - HeuristicModel is now the shipped "TB_LLM replay mode" component (not
+//!     a placeholder): with empty api_key/base_url params the chain runs it
+//!     so demos/tests behave identically to the recorded scripts.
+//!   - serde_json is the explicit json-crate choice (already the locked
+//!     transitive dep of the git-pinned ldk crates; declaration comment in
+//!     lyquid/Cargo.toml — no crates.io addition).
 
 use crate::types::AssessmentReport;
 use serde::Deserialize;
+use lyquid_llm::backend::openai_compat::OpenAiCompatBackend;
+use lyquid_llm::{call_model, ModelRequest, OutputFormat};
 
 pub struct DealBrief {
     pub buyer_profile_digest: String,
@@ -55,20 +68,76 @@ pub fn build_request(brief: &DealBrief) -> String {
     )
 }
 
-/// Backend seam: production = lyquid-llm `call_model`; tests = mock.
+/// Backend seam: production = lyquid-llm `call_model` (LyquidLlmModel below);
+/// replay/tests = HeuristicModel; unit tests = any local mock.
 pub trait AssessmentModel {
     fn complete_json(&self, prompt: &str) -> Result<String, String>;
 }
 
-/// Deterministic fallback used until SPIKE(W1) wires the real backend.
+/// TB_LLM 回放模式（W1-B2 转正，非占位）：确定性固定输出，与
+/// agents/common/llm.py DEFAULT_ASSESSMENT_SCRIPT 保持 lockstep（同 75 /
+/// heuristic-mode / 60000ms / 40 四元组）。assess_brief 在 api_key/base_url
+/// 参数任一为空时走本模型（R1#4 模式契约），离线演示与回归测试由此不依赖
+/// 外网——真实后端走 LyquidLlmModel。
 pub struct HeuristicModel;
 
 impl AssessmentModel for HeuristicModel {
     fn complete_json(&self, prompt: &str) -> Result<String, String> {
         let _ = prompt;
         // Conservative fixed estimate: 60s p90 x safety handled by
-        // timeout_slots_from_estimate. Replaced by the real backend in W2.
+        // timeout_slots_from_estimate.
         Ok(r#"{"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}"#.to_string())
+    }
+}
+
+/// JsonSchema constraint sent to the provider — mirrors the four-field
+/// RawAssessment contract below exactly (the parse is the local backstop;
+/// schema-constrained output minimizes the parse-failure surface).
+fn assessment_schema() -> serde_json::Value {
+    serde_json::json!({
+        "type": "object",
+        "properties": {
+            "qualification_score": {"type": "integer", "minimum": 0, "maximum": 100},
+            "risks": {"type": "array", "items": {"type": "string"}},
+            "est_duration_ms": {"type": "integer", "minimum": 0},
+            "est_confidence": {"type": "integer", "minimum": 0, "maximum": 100}
+        },
+        "required": ["qualification_score", "risks", "est_duration_ms", "est_confidence"],
+        "additionalProperties": false
+    })
+}
+
+/// Real backend (W1-B2 S3): OpenAI-compatible chat-completions endpoint via
+/// lyquid-llm. Constructed per plan R1#4 — a non-empty `base_url` selects
+/// `chat_completions(provider, base_url).bearer_auth(api_key)`; an EMPTY
+/// base_url (with non-empty key) means the stock OpenAI endpoint, whose only
+/// legal constructor is `openai(api_key)` (hardcoded
+/// https://api.openai.com/v1/responses, openai_compat.rs:94-98).
+pub struct LyquidLlmModel {
+    backend: OpenAiCompatBackend,
+    model: String,
+}
+
+impl LyquidLlmModel {
+    pub fn new(base_url: &str, api_key: &str, model: &str) -> Result<Self, String> {
+        let backend = if base_url.is_empty() {
+            OpenAiCompatBackend::openai(api_key).map_err(|e| format!("llm backend: {e}"))?
+        } else {
+            OpenAiCompatBackend::chat_completions("openai-compat", base_url)
+                .bearer_auth(api_key)
+        }
+        .output_format(OutputFormat::json_schema("trustbridge_assessment", assessment_schema()));
+        Ok(Self { backend, model: model.to_string() })
+    }
+}
+
+impl AssessmentModel for LyquidLlmModel {
+    fn complete_json(&self, prompt: &str) -> Result<String, String> {
+        let req = ModelRequest::new(&self.model, prompt)
+            .timeout_ms(30_000)
+            .max_output_tokens(1_024);
+        let resp = call_model(&self.backend, &req).map_err(|e| format!("llm call: {e}"))?;
+        resp.text.ok_or_else(|| "llm call: empty response text".to_string())
     }
 }
 
@@ -85,11 +154,32 @@ struct RawAssessment {
     est_confidence: u8,
 }
 
+/// Serialization single point (R2#1): the ONLY place the report's JSON wire
+/// shape is produced. types.rs is frozen and `AssessmentReport` has no
+/// Serialize derive (types.rs:186-192), so this local view borrows the four
+/// fields; lib.rs's `assess_brief` returns exactly this string over the
+/// export=eth face, keeping the wire shape defined in one file.
+pub(crate) fn report_json(r: &AssessmentReport) -> Result<String, String> {
+    #[derive(serde::Serialize)]
+    struct ReportView<'a> {
+        qualification_score: u8,
+        risks: &'a [String],
+        est_duration_ms: u64,
+        est_confidence: u8,
+    }
+    serde_json::to_string(&ReportView {
+        qualification_score: r.qualification_score,
+        risks: &r.risks,
+        est_duration_ms: r.est_duration_ms,
+        est_confidence: r.est_confidence,
+    })
+    .map_err(|e| format!("assessment serialize: {e}"))
+}
+
 pub fn parse_report(raw: &str) -> Result<AssessmentReport, String> {
     // serde_json contract parse replaces the hand split-scan (its E0277×4 and
-    // delimiter fragility) — until SPIKE(W1) decides the json crate story
-    // inside Lyquids, serde_json is now the explicit contract choice (same dep
-    // as the lib.rs getters).
+    // delimiter fragility) — serde_json is the explicit contract choice, same
+    // dep as the lib.rs getters (declaration comment in lyquid/Cargo.toml).
     // TODO(W2): real JsonSchema-validated parse — serde 字段集校验 ≠ schema
     // 校验（区间/语义约束仍缺）。
     let r: RawAssessment = serde_json::from_str(raw)
@@ -166,5 +256,13 @@ mod tests {
         assert_eq!(r.qualification_score, 80);
         assert_eq!(r.est_duration_ms, 1000);
         assert_eq!(r.est_confidence, 50);
+    }
+
+    #[test]
+    fn report_json_roundtrip_is_the_wire_shape() {
+        // R2#1 pin: report_json emits exactly the four-field contract string.
+        let r = parse_report(r#"{"qualification_score":80,"risks":["a","b"],"est_duration_ms":1000,"est_confidence":50}"#).unwrap();
+        let j = report_json(&r).unwrap();
+        assert_eq!(j, r#"{"qualification_score":80,"risks":["a","b"],"est_duration_ms":1000,"est_confidence":50}"#);
     }
 }

@@ -20,6 +20,24 @@
 //! plus the `cert_probe` oracle topic). See probe/mod.rs and
 //! workflow-out/w1b1-*.md for the experiment record. Escrow surface
 //! untouched.
+//!
+//! W1-B2: S3 LLM wiring + S4 RPC alignment landed (plan/evidence:
+//! workflow-out/w1b2-*.md). (a) `assess_brief` — instance-side assessment
+//! with the real lyquid-llm backend (mode contract R1#4: empty api_key OR
+//! base_url => HeuristicModel replay; else LyquidLlmModel), report cached in
+//! instance `assessment_cache` keyed by the brief summary and returned as the
+//! JSON string over the export=eth face (R2#1 wire shape, single
+//! serialization point in assessor::report_json). (b) export=eth attribute
+//! additions ONLY (method list / ACCESS_MATRIX / bodies untouched), precedent
+//! = the W1-A five methods: submit_deliverable, complete, claim_timeout,
+//! cancel, committee_config, evidence_entries_json, balance_of, due_deals —
+//! the keeper/demo write path (w1b2-s4-rpc.md §B-④h proved un-exported
+//! methods are `FuncNotFound` over the ETH API). open_dispute and
+//! apply_committee_verdict deliberately stay non-eth (adversarial flow is
+//! sim-only, R2#2/R3). The single signature exception (registered deviation):
+//! `balance_of` now returns wire `U128` — bare `u128` has no EthAbiType in
+//! v0.8.1 (ethabi.rs:218-281); same edge-conversion pattern as the
+//! faucet/create_deal amount params (R1#1).
 
 pub mod types;
 pub mod core;
@@ -50,7 +68,10 @@ state! {
     network deal_counter: u64 = 0;
 
     // --- node-local (instance) state ---
-    instance assessment_cache: HashMap<DealId, AssessmentReport> = new_hashmap();
+    // W1-B2：键型由 DealId 改为 brief 摘要串——「先评估后建 deal」时序下
+    // deal 尚不存在，键 = buyer|seller|terms|scope 摘要（assess_brief 写入）。
+    // 只动 instance 域，types.rs 冻结不触。
+    instance assessment_cache: HashMap<String, AssessmentReport> = new_hashmap();
     instance watcher_last_slot: u64 = 0;
 
     // probe state (W1-B1) — 主 escrow 字段零改动。R1 已证子模块不能自带
@@ -201,6 +222,12 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
 // http 包装方法。故 Funded 路径 + 探针五方法（faucet/create_deal/fund/
 // notarize/deal_info）按 D8b 备选加 `export = eth`，经容器内 cast 以 ETH ABI
 // 调用；属性面变化而已，方法清单/矩阵零增删。其余方法维持 native 形态。
+// W1-B2 属性面增补（D3）：正常流/keeper 所需的 network 方法补 `export = eth`
+//（submit_deliverable/complete/claim_timeout/cancel/committee_config/
+// evidence_entries_json/balance_of/due_deals），先例 = W1-A 五方法；仅属性行
+// + 行内注释，方法清单/ACCESS_MATRIX/函数体零改动。未列入者：
+// open_dispute / apply_committee_verdict —— 对抗流组件，刻意不 eth 化
+//（R2#2 注记 / R3 结构体参数无 EthAbiType），消除清单歧义。
 // 借用纪律（S5 实证，D3-2）：每个方法开头单点 reborrow
 // `let state = &mut *ctx.network;`（只读 getter 用 `&*`），体内一律
 // `state.<field>`；不逐处 `ctx.network.` 前缀——多字段并存时逐处前缀触发
@@ -349,7 +376,7 @@ pub fn notarize(ctx: &mut _, deal_id: DealId, from: AgentId, to: AgentId, payloa
     Ok(seq)
 }
 
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
 pub fn submit_deliverable(ctx: &mut _, deal_id: DealId, deliverable_digest: Digest) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     {
@@ -363,7 +390,7 @@ pub fn submit_deliverable(ctx: &mut _, deal_id: DealId, deliverable_digest: Dige
 }
 
 /// Buyer-consented settlement of a submitted deal.
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
 pub fn complete(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     {
@@ -384,7 +411,7 @@ pub fn complete(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
 
 /// Permissionless timeout claim — the on-chain guard half of the
 /// "off-chain trigger; on-chain guard" pattern (watcher: timeout.rs).
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3）：keeper.py 写通道
 pub fn claim_timeout(ctx: &mut _, deal_id: DealId) -> LyquidResult<bool> {
     let state = &mut *ctx.network;
     let now = current_slot();
@@ -398,7 +425,7 @@ pub fn claim_timeout(ctx: &mut _, deal_id: DealId) -> LyquidResult<bool> {
 }
 
 /// Buyer cancels a deal that has no submitted evidence yet.
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
 pub fn cancel(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     {
@@ -414,6 +441,8 @@ pub fn cancel(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     Ok(())
 }
 
+// W1-B2 注记（R2#2）：open_dispute 刻意不 eth 化——对抗流组件，与
+// apply_committee_verdict 同留 sim（消除「未列亦未说明」的清单歧义）。
 #[method::network]
 pub fn open_dispute(ctx: &mut _, deal_id: DealId, reason_digest: Digest) -> LyquidResult<()> {
     let state = &mut *ctx.network;
@@ -479,8 +508,11 @@ pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, cert: committee::Co
 }
 
 // --- committee config (demo: broker-managed; trust assumption documented) ---
+// W1-B2（D3）：参数面 Vec<AgentId> 的 EthAbiType 有实现（impl<T: EthAbiType>
+// EthAbiType for Vec<T>，ethabi.rs:395 实读），故可加 export=eth；demo 正常/
+// 超时流不前置委员会配置（R2#2），本导出仅备查。
 
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3）：Vec 参数 ABI 兼容（R3）
 pub fn committee_config(ctx: &mut _, members: Vec<AgentId>, threshold: u32) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     require(Access::Broker, &ctx.caller, state, None)?;
@@ -513,17 +545,21 @@ pub fn deal_info(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
     Ok(json)
 }
 
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3），先例 W1-A 五方法
 pub fn evidence_entries_json(ctx: &_, deal_id: DealId) -> LyquidResult<String> {
     let state = &*ctx.network;
     Ok(serde_json::to_string(&state.evidence_log.get(&deal_id).cloned().unwrap_or_default())
         .map_err(|e| lyquid_error(&format!("json serialize: {e}")))?)
 }
 
-#[method::network]
-pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<u128> {
+/// W1-B2（R1#1 明文豁免，唯一一处签名微调）：返回面 `u128` -> `U128`——裸
+/// u128 无 EthAbiType（ethabi.rs:218-281，仅 U8..U64 + U64/U128/U256 包装），
+/// 先例 = faucet/create_deal 的 amount 边界转换（本文件上方同款注释）。
+/// rpc.py 按 uint128 解码，keeper/demo 断言口径不变。
+#[method::network(export = eth)] // W1-B2 属性面增补（D3）+ 返回面 U128（R1#1）
+pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<U128> {
     let state = &*ctx.network;
-    Ok(state.balances.get(&agent).copied().unwrap_or(0))
+    Ok(U128::from(state.balances.get(&agent).copied().unwrap_or(0)))
 }
 
 /// Advisory-only listing of deals past their timeout at the CALLER-supplied
@@ -531,10 +567,86 @@ pub fn balance_of(ctx: &_, agent: AgentId) -> LyquidResult<u128> {
 /// is `claim_timeout`, which re-derives time via `current_slot` — a forged
 /// `now` at most perturbs this informational list. Signature kept identical
 /// to the FakeNode mirror (rpc.py `due_deals(now)`); stage-four alignment.
-#[method::network]
+#[method::network(export = eth)] // W1-B2 属性面增补（D3）：keeper 读通道；Vec 返回 ABI 兼容（R3）
 pub fn due_deals(ctx: &_, now: u64) -> LyquidResult<Vec<DealId>> {
     let state = &*ctx.network;
     Ok(core::due_for_timeout(state.deals.iter(), now))
+}
+
+// ---------------------------------------------------------------------------
+// Instance functions (node-local; LLM egress lives ONLY here)
+// ---------------------------------------------------------------------------
+
+/// Instance-side assessment (W1-B2 S3 wiring, R2#1 wire shape): assess a
+/// buyer brief with the LLM and return the report JSON STRING (native face;
+/// the former export=eth face is withdrawn — see the platform-limit note at
+/// the attribute below). The caller (broker) then submits `create_deal` with
+/// the returned estimate values — the documented two-step commit; nothing here
+/// touches consensus state (instance `assessment_cache` only).
+///
+/// Mode contract (R1#4): `api_key` OR `base_url` empty => HeuristicModel
+/// (TB_LLM replay, offline-deterministic); both non-empty => LyquidLlmModel
+/// (custom endpoint via chat_completions+bearer_auth, R1#4; empty base_url
+/// with a key would mean stock OpenAI). The println line tags the mode so
+/// console output doubles as mode evidence.
+///
+/// Backend params travel as METHOD PARAMETERS by design (devnet semantics):
+/// the eth wire call includes them in calldata, so the "key" is visible to
+/// whoever can read the chain anyway — a documented demo trust hole, to be
+/// moved behind instance config in W2'. Do NOT log the key.
+///
+/// W1-B2 收尾偏离登记（2026-10-28，实测）：`export = eth` 已撤下——7 个动态
+/// 参数（全 string）的 instance 桩在 shaker 生成的 SequenceBackend.sol 里触发
+/// solc「Stack too deep」（`dataEnd`/`headStart` 深 2 槽；0.8.24/0.8.30/0.8.37
+/// 三版 solc 均复现；删掉该桩即编译通过，6 参数版本亦通过）。证据：
+/// workflow-out/w1b2-claim-probe-evidence.txt §2（部署阻塞与处置）与
+/// w1b2-shell-rebaseline.txt。
+/// 方法体/签名/assess 语义零改动，仅失去 eth 远程调用面（仓内无任何调用方；
+/// 平台侧栈上限放宽或签名改造后可恢复）。本行属**持久保留**的登记性偏离。
+#[method::instance]
+pub fn assess_brief(
+    ctx: &mut _,
+    buyer_profile_digest: String,
+    seller_profile_digest: String,
+    terms_digest: String,
+    license_scope: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+) -> LyquidResult<String> {
+    let brief = assessor::DealBrief {
+        buyer_profile_digest,
+        seller_profile_digest,
+        terms_digest,
+        license_scope,
+    };
+    // 模式契约（R1#4）：api_key/base_url 任一为空 => HeuristicModel（TB_LLM
+    // 回放，离线确定）；双非空 => LyquidLlmModel（R1#4 后端构造）。
+    let (mode, report) = if api_key.is_empty() || base_url.is_empty() {
+        let r = assessor::assess(&assessor::HeuristicModel, &brief)
+            .map_err(|e| lyquid_error(&format!("assess(replay): {e}")))?;
+        ("heuristic", r)
+    } else {
+        let lm = assessor::LyquidLlmModel::new(&base_url, &api_key, &model)
+            .map_err(|e| lyquid_error(&e))?;
+        let r = assessor::assess(&lm, &brief)
+            .map_err(|e| lyquid_error(&format!("assess(llm): {e}")))?;
+        ("llm", r)
+    };
+    // R2#1 序列化单点：返回面 = assessor::report_json 产出的报告 JSON 串。
+    // W1-B2 编译修复（与本轮探针无关，登记 implementation.md）：report_json 的
+    // Err 类型是 String，而 lyquid_error 收 &str——原直接 map_err(lyquid_error)
+    // 在 wasm 目标下 E0631，改为闭包转接（语义零变化）。
+    let json = assessor::report_json(&report).map_err(|e| lyquid_error(&e))?;
+    // instance 缓存按 brief 摘要串键（「先评估后建 deal」时序下 deal 尚不
+    // 存在，DealId 键不可用；本方法唯一 instance 写点）。
+    let key = format!(
+        "{}|{}|{}|{}",
+        brief.buyer_profile_digest, brief.seller_profile_digest, brief.terms_digest, brief.license_scope
+    );
+    ctx.instance.assessment_cache.write().insert(key, report);
+    lyquid::println!("assess_brief: mode={mode} report={json}");
+    Ok(json)
 }
 
 // ---------------------------------------------------------------------------

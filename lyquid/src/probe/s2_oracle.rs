@@ -101,7 +101,10 @@ fn propose(ctx: &mut _, avg_num: u16, target: OracleTarget) -> LyquidResult<Prob
         "probe_propose: node={} round={} ts_ms={} (avg_num={} target.seq_id={:?})",
         ctx.node_id, count, ts, avg_num, target.seq_id
     );
-    Ok(proposal)
+    // W1-B2 编译修复（与本轮 claim 探针无关，登记 implementation.md）：wasm
+    // 目标下 rustc 1.99.0 无法从 `Ok(proposal)` 推出 Err 型参（E0282），
+    // 显式标注为平台错误型（语义零变化）。
+    Ok::<ProbeProposal, LyquidError>(proposal)
 }
 
 // Two-phase aggregation: mirror price-feed:300-366. `avg_num` proposals are

@@ -4,78 +4,77 @@ triggers never fire on multi v0.8.1, so a watcher MUST submit claims).
 
 Doctrine (matches lib.rs guards): keeper only SUBMITS `claim_timeout`;
 the chain-side guard re-derives eligibility (Funded-only, deadline passed),
-so polling early/often/duplicately is harmless — rejections are free.
+so polling early/often/duplicately is harmless — rejections are free, and a
+second claim on a Refunded deal is rejected by the state guard (core.rs:171
+require_states).
 
-Transport: `docker exec <tools-container> cast call/send --rpc-url <node-api>`
-(the tools container has cast + intra-network reach to every node; this is the
-channel proven in W1-A/W1-B1). Stdlib only.
+Transport (W1-B2 D2 decision gate, w1b2-s4-rpc.md §B-⑤): NodeClient over the
+node's ETH JSON-RPC API —
+  reads  = eth_call;
+  writes = eth_sendTransaction with NO gas field (eth_estimateGas is unusable
+           on lyquid contracts, §B-③④b, and unnecessary: the node auto-gasses),
+           then eth_getTransactionReceipt polling until `status == "0x1"`.
+The keeper calls `NodeClient._send` directly instead of the public
+`claim_timeout` wrapper: the wrapper drops the receipt and always returns True
+(rpc.py:330-337), while keeper needs the receipt's `transactionHash` for the
+refunded evidence file. `_send` (rpc.py:241-262) already asserts status=="0x1".
+
+Measured caveat carried over from rpc.py: status=="0x1" means SEQUENCED, not
+method-Ok (a lyquid Err is swallowed by the platform, §A-1 note 3). Hence the
+read-back check below: only `deal_info(deal_id).state == "Refunded"` counts as
+a claim.
+
+Dependency note (registered deviation): this script imports `agents/common`
+(requests) instead of being stdlib-only. Decision D2 / §B-⑤ outranks the old
+"cast inside docker exec" doctrine; the cast fallback stays documented in the
+plan (R6) but is not the primary channel.
 
 Usage:
-  python scripts/keeper.py --container multi-tools-1 \
-      --rpc http://node1:10087/api --deals deal-1,deal-2 [--interval 20]
+  python scripts/keeper.py --node http://127.0.0.1:10087 \
+      --contract 0x... --deals deal-1,deal-2 [--interval 20] [--once]
 
-Exit: runs forever until Ctrl-C; every action is logged with timestamp.
+Exit: runs forever until Ctrl-C (every action logged with a timestamp);
+`--once` runs a single round and exits — the evidence-run mode.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from agents.common.rpc import DEFAULT_NODE, NodeClient, NodeError, TxError  # noqa: E402
+
+# Read-after-write retry budget: the read path can lag one block behind the
+# receipt (measured on the W1-B2 instance — the first deal_info read back after
+# `fund` still said Qualified; w1b2-claim-probe-evidence.txt §4). NodeClient's
+# own _poll_deal uses the same "consensus finality retry" idea (rpc.py:301-311).
+READ_BACK_ATTEMPTS = 5
+READ_BACK_DELAY_S = 0.4
 
 
-def cast(container: str, rpc: str, mode: str, contract: str, sig: str, *args: str, pk: str | None = None) -> str:
-    """Run cast call/send inside the tools container; return raw stdout."""
-    cmd = ["docker", "exec", container, "cast", mode, "--rpc-url", rpc]
-    if pk and mode == "send":
-        cmd += ["--private-key", pk]
-    cmd += [contract, sig, *args]
-    if mode == "send":
-        cmd += "--json"  # structured receipt; guard reverts return non-zero exit
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    out = (p.stdout or "") + (p.stderr or "")
-    if p.returncode != 0 and mode == "call":
-        raise RuntimeError(f"cast call failed ({p.returncode}): {out.strip()[:200]}")
-    return out.strip()
+def _read_back(node: NodeClient, deal_id: str) -> dict:
+    """deal_info with a short finality-window retry (terminal state preferred)."""
+    info = node.deal_info(deal_id)
+    for _ in range(READ_BACK_ATTEMPTS - 1):
+        if info.get("state") in ("Refunded", "Settled"):
+            break
+        time.sleep(READ_BACK_DELAY_S)
+        info = node.deal_info(deal_id)
+    return info
 
 
-def decode_abi_string(hexdata: str) -> str:
-    """Decode a single dynamic `string` return value from cast call hex output."""
-    h = hexdata.strip()
-    if h.startswith("0x"):
-        h = h[2:]
-    if not h:
-        return ""
-    data = bytes.fromhex(h)
-    if len(data) >= 64:  # offset(32) + length(32) + bytes
-        ln = int.from_bytes(data[32:64], "big")
-        return data[64:64 + ln].decode("utf-8", "replace")
-    return data.decode("utf-8", "replace")
-
-
-def deal_state(container: str, rpc: str, contract: str, deal_id: str):
-    """deal_info(string) -> DealView JSON string (single string return)."""
-    raw = cast(container, rpc, "call", contract, "deal_info(string)", deal_id)
-    text = decode_abi_string(raw)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return {"raw": text}
-
-
-def claim_timeout(container: str, rpc: str, contract: str, deal_id: str, pk: str):
-    """claim_timeout(string) — guard-side idempotent; revert = not eligible."""
-    return cast(container, rpc, "send", contract, "claim_timeout(string)", deal_id, pk=pk)
-
-
-def poll_once(container: str, rpc: str, contract: str, deals: list[str], pk: str) -> dict:
+def poll_once(node: NodeClient, deals: list[str]) -> dict:
+    """One polling round over `deals`; returns the per-deal report dict."""
     report = {}
     for deal_id in deals:
         try:
-            info = deal_state(container, rpc, contract, deal_id)
-        except RuntimeError as e:
+            info = node.deal_info(deal_id)
+        except NodeError as e:
             report[deal_id] = {"error": str(e)}
             continue
         state = info.get("state", "?")
@@ -86,33 +85,49 @@ def poll_once(container: str, rpc: str, contract: str, deals: list[str], pk: str
             report[deal_id] = {"state": state, "action": "skip"}
             continue
         # Funded: attempt the claim every poll. The guard rejects until the
-        # deadline; one success flips to Refunded and further sends revert.
+        # deadline; one success flips the deal to Refunded and further sends
+        # are rejected by the terminal-state guard.
         try:
-            claim_timeout(container, rpc, contract, deal_id, pk)
-            after = deal_state(container, rpc, contract, deal_id)
-            report[deal_id] = {"state": after.get("state", "?"), "action": "claimed"}
-        except RuntimeError as e:
-            report[deal_id] = {"state": state, "action": "not-due-or-reverted"}
+            receipt = node._send("claim_timeout(string)", (deal_id,))
+        except (NodeError, TxError) as e:
+            # Guard rejection (not due / not Funded) or transport failure.
+            # Old keeper semantics kept for the common case: guard rejects are
+            # free, the next poll retries.
+            report[deal_id] = {"state": state, "action": "not-due-or-reverted", "error": str(e)}
+            continue
+        tx = receipt.get("transactionHash") if isinstance(receipt, dict) else None
+        after = _read_back(node, deal_id)
+        if after.get("state") == "Refunded":
+            report[deal_id] = {"state": "Refunded", "action": "claimed", "tx": tx}
+        else:
+            # Receipt landed (status 0x1) but the state did not flip: the
+            # platform swallowed a method Err (not due yet, or already
+            # terminal on a re-read). Kept as the documented old action name.
+            report[deal_id] = {"state": after.get("state", "?"), "action": "not-due-or-reverted", "tx": tx}
     return report
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--container", default="multi-tools-1", help="tools container for docker exec")
-    p.add_argument("--rpc", default="http://node1:10087/api", help="node API from the container's view")
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--node", default=DEFAULT_NODE, help="node ETH JSON-RPC base URL (host view)")
     p.add_argument("--contract", required=True, help="escrow Lyquid contract address (0x...)")
     p.add_argument("--deals", required=True, help="comma-separated deal ids to watch")
     p.add_argument("--interval", type=int, default=20, help="poll interval seconds")
+    p.add_argument("--once", action="store_true", help="run a single round and exit (evidence runs)")
     args = p.parse_args()
 
     deals = [d.strip() for d in args.deals.split(",") if d.strip()]
-    print(f"[keeper] container={args.container} rpc={args.rpc} contract={args.contract}")
+    node = NodeClient(args.node, contract=args.contract)
+    print(f"[keeper] node={args.node} contract={args.contract} sender={node.sender}")
     print(f"[keeper] watching {deals} every {args.interval}s (guard decides; submissions are free)")
     try:
         while True:
             ts = time.strftime("%H:%M:%S")
-            for deal_id, r in poll_once(args.container, args.rpc, args.contract, deals).items():
-                print(f"[keeper {ts}] {deal_id}: {json.dumps(r, ensure_ascii=False)}")
+            for deal_id, r in poll_once(node, deals).items():
+                print(f"[keeper {ts}] {deal_id}: {json.dumps(r, ensure_ascii=False)}", flush=True)
+            if args.once:
+                print("[keeper] --once: single round done")
+                break
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("[keeper] stopped")

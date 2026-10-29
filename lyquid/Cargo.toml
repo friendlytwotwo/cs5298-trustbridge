@@ -21,7 +21,12 @@ description = "Committee-attested fulfillment trust layer for A2A deals on Lyquo
 # 目标 = 本地 ldk 克隆 v0.8.1（rev=fd575e8，F15；与 0.7.3 所用面逐字一致，
 # implementation.md 登记对照）。语义仍是平台 pin，不是依赖浮动。
 lyquid = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
-lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c" }
+# W1-B2（S3 接线）：追加 features = ["ldk"] —— call_model 是 lyquid-llm 的
+# #[cfg(feature = "ldk")] 项（lyquid-llm/src/lib.rs:458，default=[] 不含之），
+# 官方 shopping-assistant 依赖行同款形态（shopping-assistant/Cargo.toml:11）。
+# 同一 git pin、零新增 crates.io 依赖（方案"明示不动 Cargo.toml"理由为"零新
+# 增依赖"，本行不新增依赖仅开官方 feature 门——偏离登记见 implementation.md）。
+lyquid-llm = { git = "https://github.com/lyquor-labs/ldk", rev = "fd575e88a920448e646f23968775e52982c5201c", features = ["ldk"] }
 # Re-export declaration, not a new third-party dep: serde_json 1.0.154 is
 # already the locked transitive dependency of the git-pinned ldk crates
 # (Cargo.lock). Version strategy: caret "1" only — never bump past what the

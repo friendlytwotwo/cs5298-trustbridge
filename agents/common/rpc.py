@@ -2,11 +2,31 @@
 
 Two transports, one interface:
 
-  NodeClient — talks to the Lyquor devnet node (default http://127.0.0.1:10087,
-               JSON-RPC at /lyquor/api per the docs). The exact call envelope
-               (method naming, arg encoding for Vec/struct params) is
-               SPIKE(W1-4): until then `call()` posts the obvious shape and the
-               demo runs on FakeNode.
+  NodeClient — talks to the Lyquor devnet node over the ETH JSON-RPC 2.0 API
+               (W1-B2 S4: envelope verified against the multi v0.8.1 devnet,
+               evidence + probe matrix archived in workflow-out/w1b2-s4-rpc.md).
+               Envelope, verified by probes, not assumptions:
+                 POST  {base}/api  with {"jsonrpc":"2.0","id",...}
+                 reads  = eth_call   [{to, data}, "latest"]
+                 writes = eth_sendTransaction [{from, to, data}] — the node
+                          signs with its dev backend for the `from` account
+                          (dual-sender decision gate passed: anvil #0 AND #1;
+                          §B-①), so per-call sender selection is just the
+                          `from` field. eth_estimateGas is NOT usable on
+                          lyquid contracts (§B-③④b) and not needed: the node
+                          auto-gasses sends without a gas field.
+                 receipt = eth_getTransactionReceipt, `status == "0x1"`.
+               Method names on the wire are the BARE Ethereum-ABI function
+               names of the lyquid's exported fns (e.g. "deal_info(string)"),
+               routed by 4-byte selectors pinned in _SELECTORS below (frozen
+               from `cast sig` output; cross-checked against the LyteLog
+               selector bytes of the T1 receipts, w1b2-s4-rpc.md §B-⓪).
+               CAVEAT (measured, T1 A-1 note 3): `status == "0x1"` means the
+               transaction was sequenced, NOT that the lyquid method returned
+               Ok — a method Err is swallowed by the platform and the tx still
+               lands (non-revert semantics, implementation.md §③). Callers
+               that need success must read back state (create_deal does;
+               keeper.py re-checks deal_info/balance_of).
 
   FakeNode   — in-process mirror of the Lyquid's semantics for orchestration
                smoke tests (dev velocity before the devnet is wired). The
@@ -19,62 +39,341 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import dataclass, field
 
 from agents.common.protocol import evidence_root
 
 DEFAULT_NODE = os.environ.get("TB_NODE", "http://127.0.0.1:10087")
 
+# ---------------------------------------------------------------------------
+# ETH-side constants (all values measured on the multi v0.8.1 devnet; sources
+# cited per line — reproducible via the commands in workflow-out/w1b2-s4-rpc.md)
+# ---------------------------------------------------------------------------
+
+# anvil deterministic dev account #0 (BROKER on-chain). Address verified two
+# ways: `eth_accounts` listing (w1b2-s4-rpc.md §A-0) and the `from` field of
+# receipts for txs signed by the #0 dev key (§B-②).
+DEFAULT_SENDER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
+
+# Selector + wire-type table. Source: `cast sig "<sig>"` in the multi-tools
+# container, 2026-10-25 (w1b2-s4-rpc.md §B-⓪); faucet/fund/create_deal bytes
+# additionally cross-checked against the LyteLog data of the T1 receipts.
+# Types are exactly what the export=eth wire面 accepts (u128 domain values
+# travel as uint128/uint64 per lib.rs edge conversions — R1#1).
+_ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
+    # sig: (selector, param types, return type)
+    "faucet(string,uint128)": ("b540def8", ("string", "uint128"), None),
+    "create_deal(string,string,uint128,uint16,string,string,uint64,uint8)": (
+        "bd827024",
+        ("string", "string", "uint128", "uint16", "string", "string", "uint64", "uint8"),
+        None,
+    ),
+    "fund(string)": ("73451f65", ("string",), None),
+    "notarize(string,string,string,string)": ("b1fecd5a", ("string",) * 4, None),
+    "submit_deliverable(string,string)": ("7ecc9d46", ("string", "string"), None),
+    "complete(string)": ("ad932b5c", ("string",), None),
+    "claim_timeout(string)": ("786cfc8f", ("string",), "bool"),
+    "cancel(string)": ("0b4f3f3d", ("string",), None),
+    "open_dispute(string,string)": ("a48ab911", ("string", "string"), None),
+    "committee_config(string[],uint32)": ("15df3c73", ("string[]", "uint32"), None),
+    "deal_info(string)": ("ec78f86e", ("string",), "string"),
+    "evidence_entries_json(string)": ("16417010", ("string",), "string"),
+    "balance_of(string)": ("3e6b4459", ("string",), "uint128"),
+    "due_deals(uint64)": ("4704839a", ("uint64",), "string[]"),
+}
+
+# apply_committee_verdict is deliberately NOT in this table: its wire param is
+# the CommitteeCertWire struct, which has no EthAbiType in ldk v0.8.1 (plan R3)
+# — it stays un-exported and the adversarial flow is sim-only (R2#2).
+
+
+class NodeError(RuntimeError):
+    """A JSON-RPC error object came back (transport accepted, call failed).
+
+    Carries the raw error verbatim — no collapsing into a generic message
+    (the error text is the only on-chain diagnostic: e.g.
+    `Execution error: Barrel(Lyquid(LyquidRuntime("no such deal"))).`)."""
+
+    def __init__(self, method: str, error: dict):
+        self.method = method
+        self.code = error.get("code")
+        self.message = error.get("message")
+        self.data = error.get("data")
+        extra = f" data={self.data!r}" if self.data is not None else ""
+        super().__init__(f"{method}: rpc error {self.code}: {self.message}{extra}")
+
+
+class TxError(RuntimeError):
+    """Receipt came back with status != 0x1 (transport-level failure)."""
+
+
+# ---------------------------------------------------------------------------
+# Minimal Ethereum-ABI codec (pure stdlib; covers exactly the _ABI type set:
+# string / uint8..uint128 / bool / string[] — no tuples, no nested arrays).
+# ---------------------------------------------------------------------------
+
+
+def _word(v: int) -> bytes:
+    return int(v).to_bytes(32, "big")
+
+
+def _pad32(b: bytes) -> bytes:
+    return b + b"\x00" * ((32 - len(b) % 32) % 32)
+
+
+def _enc_value(t: str, v) -> bytes:
+    if t == "string":
+        b = str(v).encode()
+        return _word(len(b)) + _pad32(b)  # length word + padded payload
+    if t == "string[]":
+        items = list(v)
+        head_size = 32 * (len(items) + 1)  # length word + one offset per item
+        out = _word(len(items))
+        tails = []
+        off = head_size
+        for it in items:
+            out += _word(off)
+            tb = _enc_value("string", it)
+            tails.append(tb)
+            off += len(tb)
+        return out + b"".join(tails)
+    if t.startswith("uint"):
+        return _word(int(v))
+    if t == "bool":
+        return _word(1 if v else 0)
+    raise ValueError(f"unsupported ABI type: {t}")
+
+
+def _is_dynamic(t: str) -> bool:
+    return t in ("string", "string[]")
+
+
+def _encode_args(types: tuple[str, ...], values: tuple) -> bytes:
+    if len(types) != len(values):
+        raise ValueError(f"arity mismatch: {types} vs {values}")
+    head, tail, head_size = b"", b"", 32 * len(types)
+    for t, v in zip(types, values):
+        if _is_dynamic(t):
+            head += _word(head_size + len(tail))  # offset to this value's tail
+            tail += _enc_value(t, v)
+        else:
+            head += _enc_value(t, v)
+    return head + tail
+
+
+def _decode_ret(t: str, hexdata: str):
+    data = bytes.fromhex(hexdata[2:] if hexdata.startswith("0x") else hexdata)
+    if t == "string":
+        off = int.from_bytes(data[0:32], "big")
+        ln = int.from_bytes(data[off:off + 32], "big")
+        return data[off + 32:off + 32 + ln].decode()
+    if t == "string[]":
+        base = int.from_bytes(data[0:32], "big")
+        n = int.from_bytes(data[base:base + 32], "big")
+        out = []
+        for i in range(n):
+            eo = int.from_bytes(data[base + 32 * (i + 1):base + 32 * (i + 2)], "big")
+            ln = int.from_bytes(data[base + eo:base + eo + 32], "big")
+            out.append(data[base + eo + 32:base + eo + 32 + ln].decode())
+        return out
+    if t == "bool":
+        return int.from_bytes(data[0:32], "big") == 1
+    if t.startswith("uint"):
+        return int.from_bytes(data[0:32], "big")
+    raise ValueError(f"unsupported return type: {t}")
+
+
+def _sig_types(sig: str) -> tuple[str, ...]:
+    inner = sig[sig.index("(") + 1:sig.index(")")]
+    return tuple(t for t in inner.split(",") if t)
+
+
+# ---------------------------------------------------------------------------
+# NodeClient
+# ---------------------------------------------------------------------------
+
 
 class NodeClient:
-    def __init__(self, base_url: str = DEFAULT_NODE):
-        self.base_url = base_url.rstrip("/")
+    """ETH JSON-RPC transport with the same method face as FakeNode.
 
-    def call(self, method: str, *args):
+    `sender` is the default EIP-55 address used for guarded writes; every
+    mutating wrapper also accepts keyword-only `sender=` for per-call role
+    selection (demo maps ALICE/BOB to dev accounts #1/#2 — the on-chain
+    Buyer/Seller guards compare `ctx.caller.to_string()` exactly, lib.rs:624).
+    """
+
+    def __init__(self, base_url: str = DEFAULT_NODE, contract: str | None = None,
+                 sender: str | None = None):
+        self.base_url = base_url.rstrip("/")
+        contract = contract or os.environ.get("TB_CONTRACT")
+        if not contract:
+            raise ValueError(
+                "contract address required: pass --contract <addr> or set TB_CONTRACT")
+        self.contract = contract
+        self.sender = sender or DEFAULT_SENDER
+
+    # -- transport core ----------------------------------------------------
+
+    def _rpc(self, method: str, params: list):
         import requests  # imported lazily so sim mode needs no deps
 
-        # SPIKE(W1-4): confirm envelope — method name mangling for #[method] fns,
-        # arg serialization, error shape. Placeholder uses the obvious form.
-        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": list(args)}
-        r = requests.post(f"{self.base_url}/lyquor/api", json=payload, timeout=10)
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+        r = requests.post(f"{self.base_url}/api", json=payload, timeout=30)
         r.raise_for_status()
         body = r.json()
         if "error" in body:
-            raise RuntimeError(f"node error: {body['error']}")
+            raise NodeError(method, body["error"])
         return body.get("result")
 
-    # -- convenience wrappers mirroring the Lyquid surface --
-    def faucet(self, agent: str, amount: int): return self.call("faucet", agent, amount)
-    def create_deal(self, buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf):
-        return self.call("create_deal", buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf)
-    def fund(self, deal_id): return self.call("fund", deal_id)
-    def notarize(self, deal_id, frm, to, payload_digest): return self.call("notarize", deal_id, frm, to, payload_digest)
-    def submit_deliverable(self, deal_id, d): return self.call("submit_deliverable", deal_id, d)
-    def complete(self, deal_id): return self.call("complete", deal_id)
-    def claim_timeout(self, deal_id): return self.call("claim_timeout", deal_id)
-    def cancel(self, deal_id): return self.call("cancel", deal_id)
-    def open_dispute(self, deal_id, reason_digest): return self.call("open_dispute", deal_id, reason_digest)
-    def apply_committee_verdict(self, deal_id, cert, caller=None):
-        """cert is the DOMAIN-level triple (verdict_code, evidence_root, signers)
-        (types.rs CommitteeCert shape, shared with FakeNode — two transports,
-        one interface).
+    def block_number(self) -> int:
+        return int(self._rpc("eth_blockNumber", []), 16)
 
-        SPIKE(W1-4): the Rust wire carries only 2 fields
-        (CommitteeCertWire { verdict_code, signers }); the chain derives the
-        root itself from its own evidence log (committee.rs into_domain). The
-        root travels in the domain-level cert only until the real envelope
-        lands. `caller` is carried by the connection identity on a real
-        transport (lib.rs `caller_agent`); it is a placeholder here and is
-        deliberately NOT sent.
-        """
-        return self.call("apply_committee_verdict", deal_id, cert)
-    def committee_config(self, members, threshold): return self.call("committee_config", members, threshold)
-    def deal_info(self, deal_id): return json.loads(self.call("deal_info", deal_id))
-    def evidence_entries(self, deal_id):
+    def _view(self, sig: str, args: tuple, frm: str | None = None):
+        sel, types, ret = _ABI[sig]
+        data = "0x" + sel + _encode_args(types, args).hex()
+        call = {"to": self.contract, "data": data}
+        if frm:
+            call["from"] = frm
+        raw = self._rpc("eth_call", [call, "latest"])
+        return _decode_ret(ret, raw) if ret else None
+
+    def _send(self, sig: str, args: tuple, sender: str | None = None):
+        """Write path: eth_sendTransaction + receipt wait.
+
+        Returns when receipt.status == "0x1". NOTE the measured caveat in the
+        module docstring: 0x1 = sequenced, not necessarily method-Ok. Methods
+        that must prove effect read back afterwards (create_deal / keeper)."""
+        sel, types, _ret = _ABI[sig]
+        data = "0x" + sel + _encode_args(types, args).hex()
+        txh = self._rpc("eth_sendTransaction",
+                        [{"from": sender or self.sender, "to": self.contract, "data": data}])
+        deadline = time.time() + 60
+        receipt = None
+        while time.time() < deadline:
+            receipt = self._rpc("eth_getTransactionReceipt", [txh])
+            if receipt is not None:
+                break
+            time.sleep(0.5)
+        if receipt is None:
+            raise TxError(f"{sig}: no receipt within 60s (tx {txh})")
+        if receipt.get("status") != "0x1":
+            raise TxError(f"{sig}: tx {txh} status={receipt.get('status')} receipt={receipt}")
+        return receipt
+
+    def _addr(self, sender: str | None) -> str:
+        return sender or self.sender
+
+    # -- convenience wrappers mirroring the Lyquid surface ------------------
+
+    def faucet(self, agent: str, amount: int, *, sender: str | None = None):
+        self._send("faucet(string,uint128)", (agent, amount), sender)
+
+    def create_deal(self, buyer, seller, amount, fee_bps, terms_d, acceptance_d,
+                    est_ms, est_conf, *, sender: str | None = None) -> str:
+        # deal_id discovery (plan R1#3 fallback algorithm): eth_sendTransaction
+        # cannot return the lyquid's return value, so probe existing ids from
+        # deal-1 upward for the pre-call max, then verify the expected successor
+        # appeared and belongs to the buyer we passed (read-back = the success
+        # proof, per the status!=Ok caveat).
+        n = 1
+        while n <= 10_000 and self._deal_exists(f"deal-{n}"):
+            n += 1
+        if n > 10_000:
+            raise RuntimeError("deal id probe overflow (>10k deals)")
+        expected = f"deal-{n}"
+        self._send("create_deal(string,string,uint128,uint16,string,string,uint64,uint8)",
+                   (buyer, seller, amount, fee_bps, terms_d, acceptance_d, est_ms, est_conf),
+                   sender)
+        info = self._poll_deal(expected)
+        if info.get("buyer") != buyer:
+            raise RuntimeError(
+                f"{expected} exists but buyer={info.get('buyer')!r} != {buyer!r}; refusing to guess")
+        return expected
+
+    def _deal_exists(self, deal_id: str) -> bool:
+        try:
+            self.deal_info(deal_id)
+            return True
+        except NodeError:
+            return False
+
+    def _poll_deal(self, deal_id: str, attempts: int = 10) -> dict:
+        # consensus finality retry: the write is sequenced before we get here,
+        # but give the read path a few ticks (automine: usually first try).
+        last: Exception | None = None
+        for _ in range(attempts):
+            try:
+                return self.deal_info(deal_id)
+            except NodeError as e:  # pragma: no cover - finality window
+                last = e
+                time.sleep(0.4)
+        raise last  # type: ignore[misc]
+
+    def fund(self, deal_id, *, sender: str | None = None):
+        self._send("fund(string)", (deal_id,), sender)
+
+    def notarize(self, deal_id, frm, to, payload_digest, *, sender: str | None = None):
+        # FakeNode returns the entry seq; the ETH write path has no return
+        # value (receipt-only), and no flow consumes the seq — documented
+        # asymmetry, same as claim_timeout's bool below.
+        self._send("notarize(string,string,string,string)", (deal_id, frm, to, payload_digest),
+                   sender)
+        return True
+
+    def submit_deliverable(self, deal_id, d, *, sender: str | None = None):
+        self._send("submit_deliverable(string,string)", (deal_id, d), sender)
+
+    def complete(self, deal_id, *, sender: str | None = None):
+        self._send("complete(string)", (deal_id,), sender)
+
+    def claim_timeout(self, deal_id, *, sender: str | None = None) -> bool:
+        # Permissionless (Access::Anyone) — the on-chain guard re-derives
+        # eligibility; a non-due/terminal deal errors on-chain ( swallowed by
+        # the platform: status stays 0x1). keeper.py therefore re-checks
+        # deal_info after sending; see its idempotency note.
+        self._send("claim_timeout(string)", (deal_id,), sender)
+        return True
+
+    def cancel(self, deal_id, *, sender: str | None = None):
+        self._send("cancel(string)", (deal_id,), sender)
+
+    def open_dispute(self, deal_id, reason_digest, *, sender: str | None = None):
+        self._send("open_dispute(string,string)", (deal_id, reason_digest), sender)
+
+    def apply_committee_verdict(self, deal_id, cert, caller=None, *, sender: str | None = None):
+        """cert is the DOMAIN-level triple (verdict_code, evidence_root, signers).
+
+        NOT reachable over the ETH API: CommitteeCertWire's struct param has no
+        EthAbiType, so the method is not eth-exported (plan R3; measured
+        FuncNotFound for un-exported methods: w1b2-s4-rpc.md §B-④h). The
+        adversarial flow is sim-only by design (R2#2)."""
+        raise RuntimeError(
+            "apply_committee_verdict is not ETH-exported (struct wire param, plan R3): "
+            "adversarial flow is sim-only — run with --sim (w1b2-s4-rpc.md §B-④h)")
+
+    def committee_config(self, members, threshold, *, sender: str | None = None):
+        self._send("committee_config(string[],uint32)", (list(members), int(threshold)), sender)
+
+    def deal_info(self, deal_id) -> dict:
+        return json.loads(self._view("deal_info(string)", (deal_id,),
+                                     frm=self._addr(None)))
+
+    def evidence_entries(self, deal_id) -> list:
         """Mirror of the chain's evidence_entries_json getter."""
-        return json.loads(self.call("evidence_entries_json", deal_id))
-    def balance_of(self, agent): return self.call("balance_of", agent)
-    def due_deals(self, now): return self.call("due_deals", now)
+        return json.loads(self._view("evidence_entries_json(string)", (deal_id,),
+                                     frm=self._addr(None)))
+
+    def balance_of(self, agent, *, sender: str | None = None) -> int:
+        # wire面 is uint128 (R1#1 edge conversion at the balance_of signature).
+        return self._view("balance_of(string)", (agent,), frm=self._addr(sender or self.sender))
+
+    def due_deals(self, now: int | None = None, *, sender: str | None = None) -> list:
+        # `now` defaults to the current block height (the chain treats it as
+        # advisory-only; money movement re-derives time in claim_timeout).
+        if now is None:
+            now = self.block_number()
+        return self._view("due_deals(uint64)", (int(now),), frm=self._addr(sender or self.sender))
 
 
 # ---------------------------------------------------------------------------

@@ -619,7 +619,18 @@ def flow_committee(node):
         return {"alice": node.balance_of(alice), "bob": node.balance_of(bob),
                 "broker": node.balance_of(broker)}
 
+    pre_tap = node.balance_of(alice)
     node.faucet(alice, 10_000)
+
+    def faucet_landed():
+        bal = node.balance_of(alice)
+        if bal - pre_tap >= 10_000:
+            return True, bal
+        return False, bal  # 读路径滞后（pending），继续等
+
+    tapped = wait_for(node, faucet_landed, timeout_s=15.0, interval_s=1.0,
+                      what="faucet read-back")
+    print(f"[committee] faucet read-back OK: alice {pre_tap} -> {tapped} (+{tapped - pre_tap})")
     before = snapshot()
     require_funds(node, alice, 1_000)
     deal_id, _ = new_assessed_deal(node, alice, broker, bob, amount=1_000)

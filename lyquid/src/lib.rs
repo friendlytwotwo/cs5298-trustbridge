@@ -32,10 +32,17 @@
 //! = the W1-A five methods: submit_deliverable, complete, claim_timeout,
 //! cancel, committee_config, evidence_entries_json, balance_of, due_deals —
 //! the keeper/demo write path (w1b2-s4-rpc.md §B-④h proved un-exported
-//! methods are `FuncNotFound` over the ETH API). open_dispute and
-//! apply_committee_verdict deliberately stay non-eth (adversarial flow is
-//! sim-only, R2#2/R3). The single signature exception (registered deviation):
-//! `balance_of` now returns wire `U128` — bare `u128` has no EthAbiType in
+//! methods are `FuncNotFound` over the ETH API).
+//!
+//! R2（路线①）：open_dispute / apply_committee_verdict 亦 eth 导出，对抗流
+//! 上链跑真 devnet。open_dispute 参数 (String,String) 本就 ABI 兼容；
+//! apply_committee_verdict 的 wire 参数扁平化为 (string,uint8,string[])，体内
+//! 重建 wire 结构体——结构体参数无 EthAbiType，而裸 u8（ethabi.rs:258-280，
+//! 活体先例 create_deal 的 est_confidence）与 Vec<String>（ethabi.rs:395，
+//! 活体先例 committee_config）均有。诚实边界：扁平 wire 仍无签名，demo 占位
+//! 性质未变，真实 oracle 认证 TODO(W4)（committee.rs:12-18）。方案见
+//! workflow-out/plan.md §4。单一签名例外（登记偏离）：
+//! `balance_of` returns wire `U128` — bare `u128` has no EthAbiType in
 //! v0.8.1 (ethabi.rs:218-281); same edge-conversion pattern as the
 //! faucet/create_deal amount params (R1#1).
 
@@ -187,7 +194,7 @@ pub const ACCESS_MATRIX: &[(&str, Access)] = &[
     ("claim_timeout",         Access::Anyone),  // permissionless by design（timeout.rs 模式）
     ("cancel",                Access::Buyer),
     ("open_dispute",          Access::BuyerOrSeller), // core.rs:180 "Any party"
-    ("apply_committee_verdict", Access::Committee),  // caller 须为委员会成员且 cert.signers 包含 caller；wire 无签名为 demo 占位，真实 oracle 认证 TODO(W4)（committee.rs:12-18 生产路径）（仲裁#1）
+    ("apply_committee_verdict", Access::Committee),  // caller 须为委员会成员且 signers 包含 caller；R2 起扁平 eth wire（verdict_code+signers），仍无签名、真实 oracle 认证 TODO(W4)（committee.rs:12-18 生产路径）（仲裁#1）
     ("committee_config",      Access::Broker),   // demo: broker-managed（既有 TODO(W2) 注释保留）
     ("deal_info | evidence_entries_json | balance_of | due_deals", Access::Anyone), // 只读 getter
 ];
@@ -225,9 +232,10 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
 // W1-B2 属性面增补（D3）：正常流/keeper 所需的 network 方法补 `export = eth`
 //（submit_deliverable/complete/claim_timeout/cancel/committee_config/
 // evidence_entries_json/balance_of/due_deals），先例 = W1-A 五方法；仅属性行
-// + 行内注释，方法清单/ACCESS_MATRIX/函数体零改动。未列入者：
-// open_dispute / apply_committee_verdict —— 对抗流组件，刻意不 eth 化
-//（R2#2 注记 / R3 结构体参数无 EthAbiType），消除清单歧义。
+// + 行内注释，方法清单/ACCESS_MATRIX/函数体零改动。
+// open_dispute / apply_committee_verdict —— 对抗流组件，W1-B2 曾刻意不 eth 化
+//（R2#2 注记 / R3 结构体参数无 EthAbiType）；R2 路线①解除：两者均 eth 导出，
+// apply_committee_verdict 的 wire 参数扁平化为 (uint8,string[])（plan.md §4）。
 // 借用纪律（S5 实证，D3-2）：每个方法开头单点 reborrow
 // `let state = &mut *ctx.network;`（只读 getter 用 `&*`），体内一律
 // `state.<field>`；不逐处 `ctx.network.` 前缀——多字段并存时逐处前缀触发
@@ -441,9 +449,10 @@ pub fn cancel(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
     Ok(())
 }
 
-// W1-B2 注记（R2#2）：open_dispute 刻意不 eth 化——对抗流组件，与
-// apply_committee_verdict 同留 sim（消除「未列亦未说明」的清单歧义）。
-#[method::network]
+// W1-B2 注记（R2#2）历史记录：open_dispute 曾刻意不 eth 化（对抗流留在 sim）。
+// R2 路线①解除：本方法 eth 导出；参数 (DealId, Digest) = (string,string) 全 ABI
+// 兼容，_ABI 行 W1-B2 已冻结（rpc.py `open_dispute(string,string)`）。
+#[method::network(export = eth)]
 pub fn open_dispute(ctx: &mut _, deal_id: DealId, reason_digest: Digest) -> LyquidResult<()> {
     let state = &mut *ctx.network;
     // core.rs:180: "Any party" = the deal's parties (BuyerOrSeller); before
@@ -460,8 +469,22 @@ pub fn open_dispute(ctx: &mut _, deal_id: DealId, reason_digest: Digest) -> Lyqu
 /// Apply a committee verdict. The certificate is re-validated against the
 /// on-chain committee config; `Malicious` bumps the misconduct log.
 /// Production path: verdict arrives via oracle certified call — see committee.rs.
-#[method::network]
-pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, cert: committee::CommitteeCertWire) -> LyquidResult<()> {
+///
+/// R2 route ① wire shape: `(deal_id, verdict_code: u8, signers: Vec<AgentId>)`
+/// = `(string,uint8,string[])`. Struct params have no EthAbiType, but bare
+/// `u8` does (ethabi.rs:258-280; live precedent = create_deal's
+/// `est_confidence`) and so does `Vec<AgentId>` (ethabi.rs:395; live
+/// precedent = committee_config). The wire struct is rebuilt in-body from the
+/// flat params, so the validation / verdict / write-back chain below is
+/// byte-for-byte unchanged (committee.rs untouched).
+/// Honest boundary: the flat wire still carries NO signature — the demo
+/// placeholder stands, real oracle authentication is TODO(W4)
+/// (committee.rs:12-18 production path).
+#[method::network(export = eth)]
+pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, verdict_code: u8, signers: Vec<AgentId>) -> LyquidResult<()> {
+    // R2 路线①：扁平 wire 参数 → wire 结构体（结构体与 into_domain 保留，
+    // committee 域/壳零改动）；其后调用链逐字沿用 W1-B2 形态。
+    let cert = committee::CommitteeCertWire { verdict_code, signers };
     // 权威源是 committee_config 写入的 network 状态；committee::members() 只是
     // instance 侧占位 shim（本函数不再调用它）。S5-verified（was
     // SPIKE(W1)）: `state.committee_members.iter()` 的语法即平台 HashMap
@@ -504,13 +527,25 @@ pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, cert: committee::Co
         state.misconduct.insert(k, v);
     }
     apply_payout(state, &payout, &buyer, &seller, &broker, escrowed)?;
+    // R2 取证缝（本函数体唯一新增）：misconduct 无 getter 且方法清单冻结（不得
+    // 新增方法），故走既有 println 观测缝（先例 fund 的 deal_view、deal_info）。
+    // 打印**累计**计数视图（每个 Ok 裁决都打，NotFulfilled 场景的对照点是计数
+    // 不增而非无行）；println 非共识状态，语义零影响，计数单点仍在 core。
+    {
+        let mut counts: Vec<(AgentId, u32)> =
+            state.misconduct.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        counts.sort();
+        let view = counts.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
+        lyquid::println!("apply_verdict: deal={} verdict={} misconduct=[{}]", deal_id, verdict_code, view);
+    }
     Ok(())
 }
 
 // --- committee config (demo: broker-managed; trust assumption documented) ---
 // W1-B2（D3）：参数面 Vec<AgentId> 的 EthAbiType 有实现（impl<T: EthAbiType>
 // EthAbiType for Vec<T>，ethabi.rs:395 实读），故可加 export=eth；demo 正常/
-// 超时流不前置委员会配置（R2#2），本导出仅备查。
+// 超时流不前置委员会配置（R2#2）——R2 起对抗流实调本方法（node 模式每次运行
+// 前置 committee_config，地址制委员名单）。
 
 #[method::network(export = eth)] // W1-B2 属性面增补（D3）：Vec 参数 ABI 兼容（R3）
 pub fn committee_config(ctx: &mut _, members: Vec<AgentId>, threshold: u32) -> LyquidResult<()> {

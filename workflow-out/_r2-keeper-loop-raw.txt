@@ -1,0 +1,42 @@
+# R2 T6-A keeper loop transcript — deal Y = deal-3 (explicit --deals, NO --once)
+# instance 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351  start_block=212  deadline_Y=213
+# command: python scripts/keeper.py --node http://127.0.0.1:10087 --contract <addr> --deals deal-3 --interval 5
+# (keeper.py is ZERO-CHANGE in R2; loop mode, default nudge on)
+########## keeper stdout (2026-10-29 23:39:20) ##########
+[keeper] explicit deals: ['deal-3']
+[keeper] node=http://127.0.0.1:10087 contract=0xFD6F7A6a5c21A3f503EBaE7a473639974379c351 sender=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 nudge=True
+[keeper] watching ['deal-3'] every 5s (guard decides; submissions are free)
+[keeper] nudge: zero-value faucet sent (one automined block)
+[keeper 23:39:22] deal-3: {"state": "Refunded", "action": "claimed", "tx": "0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02"}
+[keeper 23:39:28] deal-3: {"state": "Refunded", "action": "terminal"}
+[keeper 23:39:33] deal-3: {"state": "Refunded", "action": "terminal"}
+[keeper 23:39:38] deal-3: {"state": "Refunded", "action": "terminal"}
+
+########## keeper stopped; attribution window closed (2026-10-29 23:39:52) ##########
+# block-scan attribution (plan T6-A step 5): for each block in (start_block, end_block]
+# take eth_getBlockByNumber(n, true) txs; classify by from == keeper sender AND
+# input[:10] in {0xb540def8 faucet/nudge, 0x786cfc8f claim_timeout}.
+$ python - <<EOF ... EOF
+keeper sender (NodeClient default) = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+start_block = 212   end_block (after Refunded read-back) = 214
+deal Y (deal-3) deadline_slot = 213   deal X (deal-2, collection-only) deadline_slot = 210
+
+block 212 (window start, contains fund(Y)): txs=1
+   from=0x70997970c51812dc3a010c7d01b50e0d17dc79c8 sel=0x73451f65 hash=0xf7d14de71fab0fe436bfe3996ae8a90f7ece21a353e281c3981fac6cbde7ec3c
+
+block 213: from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 (keeper) selector=0xb540def8 -> faucet(nudge) (OK) hash=0x79615ea052e08cfd2e62922dbbb28538f99fe701483d34878809d09ca417ccbc gasUsed=0x923c
+block 214: from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 (keeper) selector=0x786cfc8f -> claim_timeout (OK) hash=0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02 gasUsed=0x8c9c
+
+ATTRIBUTION VERDICT: PASS — every block in (212, 214] carries exactly one tx, all from the keeper sender and all one of the two keeper selectors (nudge=faucet 0xb540def8 / claim_timeout 0x786cfc8f).
+=> the block that crossed deal-3's deadline (213) was mined by the keeper's own nudge,
+   so 'keeper loop drove the timeout' holds with no operator tx inside the window.
+
+# final read-back + balance check (after the window)
+deal-3 info: {'id': 'deal-3', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Refunded', 'timeout_slots': 1, 'deadline_slot': 213}
+balance alice=19000 bob=0 broker=0
+deal-2 (X) info: {'id': 'deal-2', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Funded', 'timeout_slots': 1, 'deadline_slot': 210}
+
+# deal X (deal-2) teardown AFTER the attribution window closed (plan T6-A step 1:
+#  'X 取证后留置不 claim ... 收尾可由 alice cancel 或补一笔 claim_timeout，动作与本目标归因无关')
+deal-2 after claim_timeout: state=Refunded  alice 19000->20000
+deal X registration: deal-2 was the due_deals evidence deal; locked 1_000 released at teardown.

@@ -1,0 +1,26 @@
+# R2 final-state review on the new instance (2026-10-29 23:43:39)
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351  (Lyquid-tldda6zqdhab2kdysepcqxx73uvm3sxz7wbaa)
+# includes the node --flow all run (deal-10..14) — every deal created in R2
+block_number = 315
+deal states:
+  deal-1: state=Refunded  amount=1000 timeout_slots=1 deadline_slot=206
+  deal-2: state=Refunded  amount=1000 timeout_slots=1 deadline_slot=210
+  deal-3: state=Refunded  amount=1000 timeout_slots=1 deadline_slot=213
+  deal-4: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=521
+  deal-5: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=531
+  deal-6: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=541
+  deal-7: state=Settled   amount=1000 timeout_slots=300 deadline_slot=549
+  deal-8: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=557
+  deal-9: state=Settled   amount=1000 timeout_slots=300 deadline_slot=568
+  deal-10: state=Settled   amount=1000 timeout_slots=300 deadline_slot=579
+  deal-11: state=Refunded  amount=1000 timeout_slots=1 deadline_slot=288
+  deal-12: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=595
+  deal-13: state=Settled   amount=1000 timeout_slots=300 deadline_slot=603
+  deal-14: state=Refunded  amount=1000 timeout_slots=300 deadline_slot=611
+balances: alice=77000 bob=3920 broker=80  (sum=81000)
+faucet history (each 10_000 unless noted):
+  draft 10_000 + T6-A 10_000 + attempt1 10_000 + attempt2 10_000 + attempt3 10_000
+  + T6-C normal 10_000 + node --flow all: normal 10_000, timeout 1_000, adversarial 10_000
+  => total minted = 81000 ; sum of balances = 81000  (conservation)
+due_deals() now = []
+R1 instance (untouched, read-only): broker balance_of = 40

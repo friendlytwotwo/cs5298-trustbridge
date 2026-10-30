@@ -1,0 +1,87 @@
+# R2 T6-B adversarial flow on the new devnet instance (2026-10-29 23:40:45)
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351  (Lyquid-tldda6zqdhab2kdysepcqxx73uvm3sxz7wbaa)
+# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract <addr> --flow adversarial
+#
+# 附件 A（attempt 1，失败并暴露编码器缺陷）：原文见 _r2-adversarial-attempt1-raw.txt。
+# 症状：apply_committee_verdict 交易 status 0x1 但 deal-4 停留 Disputed（平台吞 Err）。
+# 定位：rpc.py _encode_args 的 string[] 元素偏移把长度字算进 head_size（每偏移多 0x20），
+# 链上解出的 signers/members 为垃圾串 -> 成员/签名守卫拒绝。与 cast calldata 对比：
+#   mine: ...0000a0 0000...a0 | cast: ...000040 0000...80（差一字）
+# 修复：_enc_value('string[]') 的 head_size = 32*len(items)（偏移相对长度字之后的 tail）。
+# 连带 R1 登记修正：committee_config(string[],uint32) 在 R1 node 模式下同样从未真正生效
+# （无 getter，正常/超时流不依赖委员会；R2 对抗流首次依赖时才暴露）。
+# 修复后编码器与 cast 逐字节对齐（附件 B）；attempt 1 的 deal-4 留置 Disputed，
+# 由本轮末尾的补偿裁决回收（见本文件尾部）。
+
+# 附件 B：编码器 vs cast calldata 交叉校验（修复后）
+MATCH   apply_committee_verdict(string,uint8,string[])  args=('deal-x', 2, ['n1', 'n2'])
+MATCH   apply_committee_verdict(string,uint8,string[])  args=('deal-y', 0, [])
+MATCH   apply_committee_verdict(string,uint8,string[])  args=('deal-z', 1, ['0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266', 'node-1', 'node-2'])
+MATCH   committee_config(string[],uint32)  args=(['n1', 'n2', 'n3'], 3)
+MATCH   fund(string)  args=('deal-1',)
+MATCH   create_deal(string,string,uint128,uint16,string,string,uint64,uint8)  args=('a', 'b', 1000, 200, 't', 'acc', 200, 90)
+ENCODER VERDICT: ALL MATCH cast calldata
+
+########## attempt 2 — demo stdout (2026-10-29 23:40:45) ##########
+
+====================================================================
+  FLOW 3 — adversarial: forged deliverable -> dispute -> committee Malicious verdict
+====================================================================
+[adversarial] faucet(alice,10000) -> balance_of(alice)=39000 (self-funded arm; T6 general rule)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[malicious] deal=deal-5 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[malicious] final state=Refunded  alice 39000->39000  bob 0->0  broker 0->0
+Traceback (most recent call last):
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 508, in <module>
+    main()
+    ~~~~^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 502, in main
+    flows[name](node)
+    ~~~~~~~~~~~^^^^^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 318, in flow_adversarial
+    flow_adversarial_node(node)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 426, in flow_adversarial_node
+    raise RuntimeError(f"malicious refund: alice {before_m['alice']}->{after_m['alice']} != +1000")
+RuntimeError: malicious refund: alice 39000->39000 != +1000
+DEMO_EXIT=1
+
+########## attempt 2 note (aborted, assertion bug in the demo, NOT a chain failure) ##########
+# attempt 2 DID land the Malicious verdict (deal-5 -> Refunded) but the demo's balance
+# assertion compared against the pre-fund snapshot (before the -1000 debit), so it
+# demanded +1000 where the correct invariant is 'after == post-fund basline + 1000'.
+# Fixed: open_scenario now returns BOTH the pre-fund and post-fund snapshots and the
+# refund/settlement assertions are anchored on the post-fund baseline.
+# Abandoned state after attempt 2: deal-5 Refunded (Malicious, misconduct[bob]=1),
+# deal-4 Disputed (attempt 1, its 1_000 still locked). Both are registered here;
+# deal-4 is recovered by a compensating verdict at the end of this log.
+
+########## attempt 3 — demo stdout (2026-10-29 23:41:16) ##########
+
+====================================================================
+  FLOW 3 — adversarial: forged deliverable -> dispute -> committee Malicious verdict
+====================================================================
+[adversarial] faucet(alice,10000) -> balance_of(alice)=39000 (self-funded arm; T6 general rule)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[malicious] deal=deal-6 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[malicious] final state=Refunded  alice 49000 -> 48000 (after fund) -> 49000 (after verdict)  bob 0->0  broker 0->0
+[malicious] misconduct counter has no getter (method list frozen) — evidence is the apply_verdict println cumulative view via `shaker console` (_r2-adversarial-console-raw.txt)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[fulfilled] deal=deal-7 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[fulfilled] final state=Settled  alice 49000 -> 48000 (after fund) -> 48000 (after verdict)  bob 0->980  broker 0->20
+[fulfilled] split check OK: fee=20, bob +980, broker +20
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[not-fulfilled] deal=deal-8 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[not-fulfilled] final state=Refunded  alice 48000 -> 47000 (after fund) -> 48000 (after verdict)  bob 980->980  broker 20->20
+[not-fulfilled] misconduct control point: its apply_verdict println shows the SAME counter value as after the Malicious verdict (no bump) — see console evidence
+
+====================================================================
+  DEMO COMPLETE
+====================================================================
+DEMO_EXIT=0
+
+# 尾部补偿动作：attempt 1 遗留的 deal-4（Disputed）用 NotFulfilled(1) 裁决回收——
+# 选 1 而非 2：不改变 misconduct 计数（保持上面 console 取证的三裁决序列语义），
+# 并且把 alice 的 1_000 托管全额退回（结算类补偿，与本轮任何门禁无关）。
+deal-4 after compensating NotFulfilled verdict: state=Refunded  alice 48000->49000
+balances: alice=49000 bob=980 broker=20

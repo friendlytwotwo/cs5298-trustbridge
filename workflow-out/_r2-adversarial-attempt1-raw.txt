@@ -1,0 +1,29 @@
+# R2 T6-B adversarial flow on the new devnet instance (2026-10-29 23:40:06)
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351 (Lyquid-tldda6zqdhab2kdysepcqxx73uvm3sxz7wbaa)
+# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract <addr> --flow adversarial
+# three scenarios on ONE wire (apply_committee_verdict(string,uint8,string[])):
+#   Malicious(2) -> Refunded + misconduct[bob]+1 ; Fulfilled(0) -> Settled (split) ;
+#   NotFulfilled(1) -> Refunded, misconduct NOT bumped
+########## demo stdout ##########
+
+====================================================================
+  FLOW 3 — adversarial: forged deliverable -> dispute -> committee Malicious verdict
+====================================================================
+[adversarial] faucet(alice,10000) -> balance_of(alice)=20000 (self-funded arm; T6 general rule)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[malicious] deal=deal-4 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[malicious] final state=Disputed  alice 30000->29000  bob 0->0  broker 0->0
+Traceback (most recent call last):
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 508, in <module>
+    main()
+    ~~~~^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 502, in main
+    flows[name](node)
+    ~~~~~~~~~~~^^^^^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 318, in flow_adversarial
+    flow_adversarial_node(node)
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 424, in flow_adversarial_node
+    raise RuntimeError(f"malicious verdict did not reach Refunded: {final_m}")
+RuntimeError: malicious verdict did not reach Refunded: {'id': 'deal-4', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Disputed', 'timeout_slots': 300, 'deadline_slot': 521}
+DEMO_EXIT=1

@@ -1,0 +1,85 @@
+# R2 T7 final regression (2026-10-29 23:42:33)
+
+$ cd ../workflow-out/verify_core && cargo test --lib --tests
+running 33 tests
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+$ python scripts/demo.py --selftest
+SELFTEST OK
+
+$ python scripts/demo.py --sim --flow all > /tmp/r2-t7-sim.txt; diff _r2-t0-sim-baseline-raw.txt /tmp/r2-t7-sim.txt
+  IDENTICAL to T0 sim baseline
+
+# frozen gate (new wording): three files vs HEAD empty + four-file md5 == T0 baseline
+$ git diff --stat lyquid/src/types.rs lyquid/src/core.rs lyquid/src/committee.rs
+  (empty above = OK)
+$ md5sum -c workflow-out/_r2-t0-frozen-baseline.txt
+lyquid/src/types.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/assessor.rs: OK
+md5sum: WARNING: 1 line is improperly formatted
+
+$ grep -rn "sim-only" scripts/ agents/
+  grep exit=1 (1 = zero hits)
+
+$ git status --short  (R2 change surface; no commit executed)
+ M README.md
+ M agents/common/rpc.py
+ M lyquid/src/assessor.rs
+ M lyquid/src/lib.rs
+ M scripts/demo.py
+ M scripts/keeper.py
+ M workflow-out/implementation.md
+ M workflow-out/plan.md
+?? workflow-out/_collab/
+?? workflow-out/_commit-plan.md
+?? workflow-out/_implementation-prev-w1a-backup.md
+?? workflow-out/_plan-prev-r1-backup.md
+?? workflow-out/_plan-prev-w1b2-backup.md
+?? workflow-out/_plan-prev-w1b2-closure-backup.md
+?? workflow-out/_pre-task-snapshot-r1.patch
+?? workflow-out/_pre-task-snapshot-r2.patch
+?? workflow-out/_probe_cold_a0.md
+?? workflow-out/_probe_gate_a0.md
+?? workflow-out/_probe_impl_a0.md
+?? workflow-out/_probe_plan_r1_a0.md
+?? workflow-out/_probe_plan_r2_a0.md
+?? workflow-out/_probe_plan_r3_a0.md
+?? workflow-out/_r1-console-fund-raw.txt
+?? workflow-out/_r1-console-raw.txt
+?? workflow-out/_r1-demo-all-raw.txt
+?? workflow-out/_r1-demo-normal-raw.txt
+?? workflow-out/_r1-deploy-final-raw.txt
+?? workflow-out/_r1-deploy-raw.txt
+?? workflow-out/_r1-due-deals-raw.txt
+?? workflow-out/_r1-final-state-raw.txt
+?? workflow-out/_r1-g2-raw.txt
+?? workflow-out/_r1-keeper-nudge-raw.txt
+?? workflow-out/_r1-keeper-raw.txt
+?? workflow-out/_r1-mock-selftest-raw.txt
+?? workflow-out/_r1-rpc-smoke-raw.txt
+?? workflow-out/_r2-adversarial-attempt1-raw.txt
+?? workflow-out/_r2-adversarial-console-raw.txt
+?? workflow-out/_r2-adversarial-raw.txt
+?? workflow-out/_r2-assess-castcall-raw.txt
+?? workflow-out/_r2-deploy-raw.txt
+?? workflow-out/_r2-due-nonempty-raw.txt
+?? workflow-out/_r2-final-state-raw.txt
+?? workflow-out/_r2-g3a-sim-after-raw.txt
+?? workflow-out/_r2-keeper-loop-raw.txt
+?? workflow-out/_r2-normal-assess-raw.txt
+?? workflow-out/_r2-t0-env-raw.txt
+?? workflow-out/_r2-t0-frozen-baseline.txt
+?? workflow-out/_r2-t0-sim-baseline-raw.txt
+?? workflow-out/_r2-t7-regression-raw.txt
+?? workflow-out/_w1b1-deploy-zz2jue.txt
+?? workflow-out/_w1b1-r1-submodule-state-check.txt
+?? workflow-out/_w1b1-setupdevnet-bootstrap.log
+?? workflow-out/w1b2-r1-demo-normal.md
+?? workflow-out/w1b2-r1-demo-timeout.md
+?? workflow-out/w1b2-r1-s3-assess.md

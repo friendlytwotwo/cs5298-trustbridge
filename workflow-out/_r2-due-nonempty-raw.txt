@@ -1,0 +1,41 @@
+# R2 T6-A — due_deals non-empty (deal X, collection-only) + keeper-driven deal Y setup
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351   (2026-10-29 23:39:09)
+#
+# 偏离登记（R2 执行期新发现，已修）：rpc.py _decode_ret 的 string[] 元素偏移口径错了——
+# 元素偏移是相对「长度字之后」的 tail（base+32），不是相对数组基址。R1 只在 due_deals
+# 上见过空数组（[] 不触发偏移解析），故缺陷潜伏到 R2 T6-A 首个非空返回才暴露（读回
+# 32 字节零串）。实测非空返回原文已在下段 word 表中原样入档；修正后与 cast 标准解码一致。
+# 首次非空读取发生在 deal-1（该 deal 因解码缺陷取证失败，已在其后 claim 回收并在此登记：
+# deal-1 于 block 207 Refunded，alice 余额回流，不进 keeper 归因窗口）。
+#
+# 资金（T6 总则）：本臂自带 faucet；每笔 fund 前断言 balance_of(alice) >= 1_000。
+# deal X 取证后留置不 claim（锁 1_000），其收尾在 keeper 归因窗口关闭后进行（见 keeper 日志尾）。
+#
+block_number at start = 207
+balance_of(alice) at start = 20000
+funds gate(X): balance_of(alice) = 20000 >= 1000  OK
+deal X = deal-2 (est_ms=200 -> timeout_slots=1)
+deal X after fund: state=Funded deadline_slot=210 timeout_slots=1
+due_deals BEFORE crossing the deadline: block=209 deadline=210 -> []
+  nudge -> block=210
+due_deals AFTER crossing the deadline: block=210 deadline=210 -> ['deal-2']
+RESULT: due_deals non-empty, contains deal X = deal-2  (now=210 >= deadline=210)
+due_deals raw return: 0x00000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000066465616c2d320000000000000000000000000000000000000000000000000000
+  word[0] = 0000000000000000000000000000000000000000000000000000000000000020
+  word[1] = 0000000000000000000000000000000000000000000000000000000000000001
+  word[2] = 0000000000000000000000000000000000000000000000000000000000000020
+  word[3] = 0000000000000000000000000000000000000000000000000000000000000006
+  word[4] = 6465616c2d320000000000000000000000000000000000000000000000000000
+NOTE: deal X is left FUNDED and locked at 1_000 (collection-only); it is NOT claimed
+      until the keeper attribution window has closed (see the keeper log tail).
+funds gate(Y): balance_of(alice) = 19000 >= 1000  OK
+deal Y = deal-3 (est_ms=200 -> timeout_slots=1)
+deal Y after fund: state=Funded deadline_slot=213 timeout_slots=1
+balance_of(alice) after both funds = 18000
+probe eth_getBlockByNumber('latest', true): number=0xd4 txs=1
+probe tx keys = ['accessList', 'blockHash', 'blockNumber', 'blockTimestamp', 'chainId', 'from', 'gas', 'gasPrice', 'hash', 'input', 'maxFeePerGas', 'maxPriorityFeePerGas', 'nonce', 'r', 's', 'to', 'transactionIndex', 'type', 'v', 'value', 'yParity']
+probe tx0.from=0x70997970c51812dc3a010c7d01b50e0d17dc79c8 input=0x73451f65 hash=0xf7d14de71fab0fe436bfe3996ae8a90f7ece21a353e281c3981fac6cbde7ec3c
+START_BLOCK=212
+DEAL_Y=deal-3
+DEADLINE_Y=213
+DEAL_X=deal-2

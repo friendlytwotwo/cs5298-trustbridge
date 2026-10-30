@@ -1,0 +1,9 @@
+# R2 T0 frozen-file baseline (G4/G5b/G7 comparison source)
+# generated: 2026-10-29 23:29:16  HEAD: dc78d2f
+# --- command 1: git diff --numstat lyquid/src/types.rs lyquid/src/core.rs lyquid/src/committee.rs lyquid/src/assessor.rs
+5	0	lyquid/src/assessor.rs
+# --- command 2: md5sum lyquid/src/types.rs lyquid/src/core.rs lyquid/src/committee.rs lyquid/src/assessor.rs
+f33e334a2c256da6f2cf08927add165e *lyquid/src/types.rs
+4ae54a4717daf35284ffe76d0ebd0b32 *lyquid/src/core.rs
+c5f660a13d5c18b5798bfb675fa8729e *lyquid/src/committee.rs
+4df7cda64e7e9eb4483c0b8be64068aa *lyquid/src/assessor.rs

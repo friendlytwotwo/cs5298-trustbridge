@@ -1,0 +1,18 @@
+# R2 T6-C normal flow with ON-CHAIN assess (replay) — one-shot E2E (2026-10-29 23:42:11)
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351  (Lyquid-tldda6zqdhab2kdysepcqxx73uvm3sxz7wbaa)
+# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract <addr> --flow normal
+# node-mode assess: assess_brief(instance, export=eth, empty base_url/api_key => HeuristicModel replay)
+#   brief = DealBrief four-field JSON (buyer/seller profile digests, terms digest, license scope)
+########## demo stdout ##########
+
+====================================================================
+  FLOW 1 — normal: assess -> escrow -> deliver -> settle
+====================================================================
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+deal=deal-9 info={'id': 'deal-9', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+final state=Settled balances: alice=58000 bob=1960 broker=40
+
+====================================================================
+  DEMO COMPLETE
+====================================================================
+DEMO_EXIT=0

@@ -1,0 +1,6 @@
+
+# 通道直证（union of R1 discipline）：cast call 直取 assess_brief，brief = 与 demo 完全同款
+# 的 DealBrief 四字段 JSON（同一 alice/bob 地址、同一 terms digest、同一 license_scope）。
+# store: brief string = {"buyer_profile_digest": "a965f12a83ebedef449ce601a24e3fc2b844092fa29daef620dbe4af236e3b1b", "license_scope": "online-video,12mo,EU", "seller_profile_digest": "8fa0ea23b90cec6c76a4f243a4bc2497b0619588f38030a78396b3e0f914f076", "terms_digest": "ff580cc43c17c3f94e27d97eddc8304c1564fd0f811b89f31d8f3ec5604a0bdc"}
+$ docker exec multi-tools cast call --rpc-url http://node1:10087/api 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351 "assess_brief(string,string,string,string) returns (string)" "<brief>" "" "" ""
+"{\"qualification_score\":75,\"risks\":[\"heuristic-mode\"],\"est_duration_ms\":60000,\"est_confidence\":40}"

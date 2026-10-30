@@ -1,0 +1,18 @@
+# R2 T0 environment probe (2026-10-29 23:29:32)
+$ docker ps --format "table {{.Names}}\t{{.Status}}"
+NAMES              STATUS
+multi-tools        Up 2 hours
+multi-node1-1      Up 2 hours
+multi-node4-1      Up 2 hours
+multi-node2-1      Up 2 hours
+multi-node3-1      Up 2 hours
+multi-registry-1   Up 2 hours
+multi-anvil-1      Up 2 hours
+
+$ curl -s -X POST http://127.0.0.1:10087/api ... eth_blockNumber
+{"jsonrpc":"2.0","id":1,"result":"0xc6"}
+$ env | grep -i TB_LLM
+(empty — real-LLM gate stays closed)
+
+$ docker exec multi-tools cast call --rpc-url http://node1:10087/api 0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849 "balance_of(string) returns (uint128)" 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266   # R1 instance read-only liveness
+40

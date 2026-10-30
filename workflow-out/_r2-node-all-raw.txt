@@ -1,0 +1,44 @@
+# R2 node-mode --flow all (full sequence normal+timeout+adversarial in ONE process) (2026-10-29 23:43:16)
+# purpose: verify the R2 gate-removal change — node 'all' sequence now equals the sim one.
+# instance: 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351
+########## demo stdout ##########
+
+====================================================================
+  FLOW 1 — normal: assess -> escrow -> deliver -> settle
+====================================================================
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+deal=deal-10 info={'id': 'deal-10', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+final state=Settled balances: alice=67000 bob=2940 broker=60
+
+====================================================================
+  FLOW 2 — timeout: seller stalls, watcher claims, buyer refunded
+====================================================================
+deal=deal-11 info={'id': 'deal-11', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 1, 'deadline_slot': None} (short-estimate create: est_ms=200)
+deal=deal-11 deadline_slot=288 (timeout_slots=1)
+nudge: block=287 deadline_slot=288 — nudging past it
+  nudge -> block=288
+  nudge -> block=289
+watcher: discovered=['deal-1', 'deal-2', 'deal-3', 'deal-4', 'deal-5', 'deal-6', 'deal-7', 'deal-8', 'deal-9', 'deal-10', 'deal-11'] due=['deal-11']
+final state=Refunded alice=68000 (made whole)
+
+====================================================================
+  FLOW 3 — adversarial: forged deliverable -> dispute -> committee Malicious verdict
+====================================================================
+[adversarial] faucet(alice,10000) -> balance_of(alice)=68000 (self-funded arm; T6 general rule)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[malicious] deal=deal-12 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[malicious] final state=Refunded  alice 78000 -> 77000 (after fund) -> 78000 (after verdict)  bob 2940->2940  broker 60->60
+[malicious] misconduct counter has no getter (method list frozen) — evidence is the apply_verdict println cumulative view via `shaker console` (_r2-adversarial-console-raw.txt)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[fulfilled] deal=deal-13 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[fulfilled] final state=Settled  alice 78000 -> 77000 (after fund) -> 77000 (after verdict)  bob 2940->3920  broker 60->80
+[fulfilled] split check OK: fee=20, bob +980, broker +20
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[not-fulfilled] deal=deal-14 state ladder: Qualified -> Funded -> Submitted -> Disputed (timeout_slots=300)
+[not-fulfilled] final state=Refunded  alice 77000 -> 76000 (after fund) -> 77000 (after verdict)  bob 3920->3920  broker 80->80
+[not-fulfilled] misconduct control point: its apply_verdict println shows the SAME counter value as after the Malicious verdict (no bump) — see console evidence
+
+====================================================================
+  DEMO COMPLETE
+====================================================================
+DEMO_EXIT=0

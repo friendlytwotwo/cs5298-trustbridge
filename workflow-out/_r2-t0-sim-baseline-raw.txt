@@ -1,0 +1,23 @@
+[demo] SIM MODE (FakeNode) — orchestration smoke only; deal semantics truth = rust core tests
+
+====================================================================
+  FLOW 1 — normal: assess -> escrow -> deliver -> settle
+====================================================================
+deal=deal-1 info={'id': 'deal-1', 'buyer': 'agent-alice', 'seller': 'agent-bob', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+final state=Settled balances: alice=9000 bob=980 broker=20
+
+====================================================================
+  FLOW 2 — timeout: seller stalls, watcher claims, buyer refunded
+====================================================================
+deal=deal-2 deadline_slot=300 (timeout_slots=300)
+watcher: due_deals=['deal-2']
+final state=Refunded alice=10000 (made whole)
+
+====================================================================
+  FLOW 3 — adversarial: forged deliverable -> dispute -> committee Malicious verdict
+====================================================================
+final state=Refunded alice=11000 misconduct={'agent-bob': 1}
+
+====================================================================
+  DEMO COMPLETE
+====================================================================

@@ -45,6 +45,18 @@
 //! `balance_of` returns wire `U128` — bare `u128` has no EthAbiType in
 //! v0.8.1 (ethabi.rs:218-281); same edge-conversion pattern as the
 //! faucet/create_deal amount params (R1#1).
+//!
+//! R3（路线②，E2 四节点委员会演示）：顶层壳模块 `committee_certified`（oracle
+//! 主题 `cert_verdict`）把 W1-B1 的 cert_probe 探针正主化为演示级生产接线——
+//! 认证回调 `committee_verdict_certified` 把 `ctx.cert.signers`（平台证书里的
+//! 真实节点签名集）映射为 NodeID 显示串，以 `CommitteeCertWire` 形态进入与本
+//! 文件 `apply_committee_verdict` **完全相同**的校验/裁决/写回/结算链（共享
+//! 单点 helper `apply_cert_and_payout`）——路线①② 共享 core::apply_verdict
+//! 单点，信任模型唯一。待裁 deal 由 network 域 `e2_armed_deal` 经共识状态传给
+//! 全体节点的 `propose`（init 仍只携带 price-feed 已证的 avg_num/target 二字段）。
+//! 该模块是 **cert 门控的资金路径**（helper → apply_payout → credit 真实结算），
+//! 不是 probe 类 SPIKE 例外；其 7 方法门禁台账见 `committee_certified.rs`
+//! 模块头 E2 门禁表。方案：workflow-out/plan.md §3。
 
 pub mod types;
 pub mod core;
@@ -52,6 +64,7 @@ pub mod committee;
 pub mod assessor;
 pub mod timeout;
 pub mod probe;
+pub mod committee_certified;
 
 use types::*;
 use lyquid::prelude::*;
@@ -99,6 +112,16 @@ state! {
     network probe_last_signers_raw: Vec<u64> = Vec::new();
     network probe_last_signers_nodes: Vec<String> = Vec::new();
     instance probe_propose_count: u64 = 0;
+
+    // R3（路线② E2）域：认证裁决 oracle 主题——先例 = 上面的 `cert_probe`
+    // （price-feed:167 声明形态；probe/mod.rs:13-16 已证子模块不能自带 state!，
+    // 故新主题字段并入本块）。probe 的 cert_probe 保留不动，作为机制对照面。
+    network oracle cert_verdict;
+    // R3 arming：待裁 deal 的共识选择（network 域 = 共识持久、全节点可见；
+    // 仲裁 R2#1-a）。init 只携带 price-feed 已证的 `avg_num`/`target` 二字段
+    // （风险 R2），待裁对象改由本字段经共识状态传给全体节点的 propose；
+    // 未 arm 时为空串，propose fail-closed。
+    network e2_armed_deal: String = String::new();
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +190,8 @@ fn bridge_core_err(e: core::TransitionError) -> lyquid::LyquidError {
 // The table is the audit surface (one row per network fn); `require` is the
 // only enforcement point. W1 landed the real caller identity in
 // `caller_agent` alone and every guard is live without further edits.
+// R3 指向：committee_certified 的 certified 回调面不入本矩阵（cert 即认证，
+// origin=ZERO 过不了地址门）；其门禁台账见 committee_certified.rs 模块头 E2 表。
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -236,6 +261,12 @@ fn require(access: Access, caller: &Address, state: &__lyquid::NetworkState, dea
 // open_dispute / apply_committee_verdict —— 对抗流组件，W1-B2 曾刻意不 eth 化
 //（R2#2 注记 / R3 结构体参数无 EthAbiType）；R2 路线①解除：两者均 eth 导出，
 // apply_committee_verdict 的 wire 参数扁平化为 (uint8,string[])（plan.md §4）。
+// R3（路线②）通道分工（committee_certified.rs）：e2_configure 的 bytes32[] wire
+// 面不在 rpc.py 编码器支持集（string/uint*/bool/string[]）——**走 cast send 通道**
+//（docker_exec_cast，S2 probe_configure 同形先例），_ABI 无此行、编码器零扩展
+//（终裁冻结条款 1）；e2_arm / e2_net_config 走 NodeClient eth 收发（export = eth，
+// 返回面 string 已支持）；e2_run_verdict_round 走 **cast call**（S2 §3/§4 实证：
+// cast send 对内部异步提交类方法 status 1 但内层静默丢失）。
 // 借用纪律（S5 实证，D3-2）：每个方法开头单点 reborrow
 // `let state = &mut *ctx.network;`（只读 getter 用 `&*`），体内一律
 // `state.<field>`；不逐处 `ctx.network.` 前缀——多字段并存时逐处前缀触发
@@ -478,67 +509,30 @@ pub fn open_dispute(ctx: &mut _, deal_id: DealId, reason_digest: Digest) -> Lyqu
 /// flat params, so the validation / verdict / write-back chain below is
 /// byte-for-byte unchanged (committee.rs untouched).
 /// Honest boundary: the flat wire still carries NO signature — the demo
-/// placeholder stands, real oracle authentication is TODO(W4)
-/// (committee.rs:12-18 production path).
+/// placeholder stands; real authentication is the R3 route ② oracle certified
+/// call (`committee_certified::committee_verdict_certified`, same helper).
+///
+/// R3 行为保持重构（仲裁 R1#3 / 风险 R7）：构建 wire 结构体之后的
+/// **证书校验/裁决/写回/结算链整体搬入共享 helper `apply_cert_and_payout`**
+/// （路线② 认证回调用同一个 helper）。本函数保留 wire 形态、Committee 地址门
+/// 与 caller∈signers 检查——路线①语义零变化（G2 sim 零回退 + G3 对抗流复跑）。
 #[method::network(export = eth)]
 pub fn apply_committee_verdict(ctx: &mut _, deal_id: DealId, verdict_code: u8, signers: Vec<AgentId>) -> LyquidResult<()> {
     // R2 路线①：扁平 wire 参数 → wire 结构体（结构体与 into_domain 保留，
-    // committee 域/壳零改动）；其后调用链逐字沿用 W1-B2 形态。
+    // committee 域/壳零改动）。
     let cert = committee::CommitteeCertWire { verdict_code, signers };
-    // 权威源是 committee_config 写入的 network 状态；committee::members() 只是
-    // instance 侧占位 shim（本函数不再调用它）。S5-verified（was
-    // SPIKE(W1)）: `state.committee_members.iter()` 的语法即平台 HashMap
-    // 句柄的常规迭代，编译通过即证据。
-    // 顺序无关性：`members.contains(s)` 与阈值比较均与迭代顺序无关
-    // （ahash 确定性种子下 HashMap 迭代本身也确定，见 prelude::new_hashmap）。
     let state = &mut *ctx.network;
-    let members: Vec<AgentId> = state.committee_members.iter().map(|(m, _)| m.clone()).collect();
-    let threshold = *state.committee_threshold as usize;
     // 仲裁#1：caller 须为委员会成员（require 的 Committee 臂，同一
     // committee_members 状态）且亲自签署本证书；wire 无签名为 demo 占位——
-    // 真实提交者认证走 oracle certified call，TODO(W4)
-    // （committee.rs:12-18 生产路径）。
+    // 真实提交者认证走 oracle certified call（R3 路线② 已落地：认证回调
+    // committee_verdict_certified 复用同一 helper，签名集来自平台证书
+    // ctx.cert.signers，经 cert 门做实质成员校验）。
     let caller = require(Access::Committee, &ctx.caller, state, None)?;
     if !cert.signers.iter().any(|s| *s == caller) {
         return Err(lyquid_error("caller must be among the certificate signers"));
     }
-    // 读-算-校同源（阶段3b）：同一条目切片先喂 into_domain 折叠出证书根，再传 core::apply_verdict 由 validate_cert 重算比对——cert.evidence_root 与裁决校验不可能指向不同数据。
-    let entries: Vec<EvidenceEntry> = state.evidence_log.get(&deal_id).cloned().unwrap_or_default();
-    let cert = cert.into_domain(&entries);
-
-    // misconduct 计数单点在 core::apply_verdict（经 &mut misconduct 完成），
-    // 平台层不得重复累加；终态同样由 core 从裁决映射，平台层不推断。
-    // S5 新形态差异（登记 implementation.md）：v0.7.3 network state 的
-    // HashMap 是 hashbrown+ahash（prelude::HashMap，确定性种子），而领域
-    // 类型 MisconductLog = std::collections::HashMap（types.rs:181，零平台
-    // 依赖冻结）——二者类型不同，core 的 &mut MisconductLog 形参无法直接
-    // 接收 network 状态句柄。桥接（lib.rs 平台层；types/core 零改动）：
-    // std 镜像传入、Ok 后写回——计数单点仍只在 core，平台层不推断。
-    let mut misconduct_domain: std::collections::HashMap<AgentId, u32> =
-        state.misconduct.iter().map(|(k, v)| (k.clone(), *v)).collect();
-    let (payout, buyer, seller, broker, escrowed) = {
-        let deal = state.deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
-        let p = core::apply_verdict(deal, cert, &members, threshold, &entries, &mut misconduct_domain).map_err(bridge_core_err)?;
-        (p, deal.buyer.clone(), deal.seller.clone(), deal.broker.clone(), deal.amount)
-    };
-    // 仅 Ok 路径写回：Err 时 `?` 早退、镜像丢弃，与 deal 不变的语义一致。
-    state.misconduct.clear();
-    for (k, v) in misconduct_domain {
-        state.misconduct.insert(k, v);
-    }
-    apply_payout(state, &payout, &buyer, &seller, &broker, escrowed)?;
-    // R2 取证缝（本函数体唯一新增）：misconduct 无 getter 且方法清单冻结（不得
-    // 新增方法），故走既有 println 观测缝（先例 fund 的 deal_view、deal_info）。
-    // 打印**累计**计数视图（每个 Ok 裁决都打，NotFulfilled 场景的对照点是计数
-    // 不增而非无行）；println 非共识状态，语义零影响，计数单点仍在 core。
-    {
-        let mut counts: Vec<(AgentId, u32)> =
-            state.misconduct.iter().map(|(k, v)| (k.clone(), *v)).collect();
-        counts.sort();
-        let view = counts.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
-        lyquid::println!("apply_verdict: deal={} verdict={} misconduct=[{}]", deal_id, verdict_code, view);
-    }
-    Ok(())
+    // R3 行为保持：其后的校验/裁决/写回/结算链逐字搬入 helper（单点）。
+    apply_cert_and_payout(state, deal_id, cert)
 }
 
 // --- committee config (demo: broker-managed; trust assumption documented) ---
@@ -734,6 +728,70 @@ fn apply_payout(state: &mut __lyquid::NetworkState, p: &Payout, buyer: &AgentId,
 
 /// Demo treasury account for slash proceeds (see apply_payout doc).
 const TREASURY: &str = "treasury";
+
+/// R3（路线②）：裁决链单点 —— **证书校验、裁决映射、misconduct 镜像、状态写回
+/// 与资金结算只有这一份实现**。两个调用方：
+///   - 路线① `apply_committee_verdict`（扁平 eth wire + Committee 地址门 +
+///     caller∈signers 的 demo 占位认证）；
+///   - 路线② `committee_certified::committee_verdict_certified`（certified
+///     回调，签名集来自平台证书 `ctx.cert.signers`，映射为 NodeID 显示串）。
+/// 两条路线的信任差异只在「谁认证了 signer 集」；此后的语义完全共享
+/// （core::apply_verdict 单点，committee.rs 零改动）。
+///
+/// **这是资金路径**：末尾 apply_payout → credit 真实结算（plan §3.2-E/H）。
+/// evidence_root 由本函数从**当前全量证据日志**折叠（into_domain 单点，
+/// core.rs:225-231 读-算-校同源契约），调用方不得自带根。
+///
+/// `pub(crate)`：仅 crate 内可见（跨模块调用需要；对外方法面不变）。
+pub(crate) fn apply_cert_and_payout(state: &mut __lyquid::NetworkState, deal_id: DealId, cert: committee::CommitteeCertWire) -> LyquidResult<()> {
+    let verdict_code = cert.verdict_code;
+    // 权威源是 committee_config 写入的 network 状态；committee::members() 只是
+    // instance 侧占位 shim（本函数不调用它）。S5-verified（was
+    // SPIKE(W1)）: `state.committee_members.iter()` 的语法即平台 HashMap
+    // 句柄的常规迭代，编译通过即证据。
+    // 顺序无关性：`members.contains(s)` 与阈值比较均与迭代顺序无关
+    // （ahash 确定性种子下 HashMap 迭代本身也确定，见 prelude::new_hashmap）。
+    let members: Vec<AgentId> = state.committee_members.iter().map(|(m, _)| m.clone()).collect();
+    let threshold = *state.committee_threshold as usize;
+    // 读-算-校同源（阶段3b）：同一条目切片先喂 into_domain 折叠出证书根，再传 core::apply_verdict 由 validate_cert 重算比对——cert.evidence_root 与裁决校验不可能指向不同数据。
+    let entries: Vec<EvidenceEntry> = state.evidence_log.get(&deal_id).cloned().unwrap_or_default();
+    let cert = cert.into_domain(&entries);
+
+    // misconduct 计数单点在 core::apply_verdict（经 &mut misconduct 完成），
+    // 平台层不得重复累加；终态同样由 core 从裁决映射，平台层不推断。
+    // S5 新形态差异（登记 implementation.md）：v0.7.3 network state 的
+    // HashMap 是 hashbrown+ahash（prelude::HashMap，确定性种子），而领域
+    // 类型 MisconductLog = std::collections::HashMap（types.rs:181，零平台
+    // 依赖冻结）——二者类型不同，core 的 &mut MisconductLog 形参无法直接
+    // 接收 network 状态句柄。桥接（lib.rs 平台层；types/core 零改动）：
+    // std 镜像传入、Ok 后写回——计数单点仍只在 core，平台层不推断。
+    let mut misconduct_domain: std::collections::HashMap<AgentId, u32> =
+        state.misconduct.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let (payout, buyer, seller, broker, escrowed) = {
+        let deal = state.deals.get_mut(&deal_id).ok_or_else(|| lyquid_error("no such deal"))?;
+        let p = core::apply_verdict(deal, cert, &members, threshold, &entries, &mut misconduct_domain).map_err(bridge_core_err)?;
+        (p, deal.buyer.clone(), deal.seller.clone(), deal.broker.clone(), deal.amount)
+    };
+    // 仅 Ok 路径写回：Err 时 `?` 早退、镜像丢弃，与 deal 不变的语义一致。
+    state.misconduct.clear();
+    for (k, v) in misconduct_domain {
+        state.misconduct.insert(k, v);
+    }
+    apply_payout(state, &payout, &buyer, &seller, &broker, escrowed)?;
+    // R2 取证缝：misconduct 无 getter 且方法清单冻结（不得新增方法），故走既有
+    // println 观测缝（先例 fund 的 deal_view、deal_info）。打印**累计**计数视图
+    // （每个 Ok 裁决都打，NotFulfilled 场景的对照点是计数不增而非无行）；
+    // println 非共识状态，语义零影响，计数单点仍在 core。R3：路线② 回调经同一
+    // helper 同样打本行（console 取证=node1），两路线计数视图可直接对照。
+    {
+        let mut counts: Vec<(AgentId, u32)> =
+            state.misconduct.iter().map(|(k, v)| (k.clone(), *v)).collect();
+        counts.sort();
+        let view = counts.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
+        lyquid::println!("apply_verdict: deal={} verdict={} misconduct=[{}]", deal_id, verdict_code, view);
+    }
+    Ok(())
+}
 
 /// Consensus time source. S5-verified (was SPIKE(W1)): the host API
 /// `lyquor_api::chain_pos()` returns the `ChainPos` (block/idx packed u128),

@@ -1,0 +1,21 @@
+2026-10-24T10:45:39.693639Z  INFO ThreadId(01) shaker::deploy: bartender.image_hash = sha256:cd33f78d230119026c297ee314024c8ac026f27886e7e99c5b9f991859c175c9
+2026-10-24T10:45:39.693700Z  INFO ThreadId(01) shaker::deploy: bartender.os_version = 0.8
+2026-10-24T10:45:39.762084Z  INFO ThreadId(01) shaker::deploy: bartender.oracle_library = 0x5FbDB2315678afecb367f032d93F642f64180aa3
+2026-10-24T10:45:39.762145Z  INFO ThreadId(01) shaker::deploy: bartender.ed25519_library = 0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512
+2026-10-24T10:45:39.762272Z  INFO ThreadId(01) shaker::deploy: bartender.input = 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000cd33f78d230119026c297ee314024c8ac026f27886e7e99c5b9f991859c175c900000000000000000000000000000000000000000000000000000000000000e00000000000000000000000005fbdb2315678afecb367f032d93f642f64180aa3000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f051200000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000022676863722e696f2f6c7971756f722d6c6162732f6c7971756964733a6c61746573740000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+2026-10-24T10:45:39.822367Z  INFO ThreadId(01) shaker::deploy: bartender.address = 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
+Status: created
+Lyquid ID: Lyquid-f7vljmg2ymknxo6ox4lwdblt6ldygrc2kf6aa
+Contract: 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
+Platform Version: 0.8
+2026-10-24T10:45:47.797850Z  INFO ThreadId(01) shaker::deploy: bartender.lyquid_id = Lyquid-f7vljmg2ymknxo6ox4lwdblt6ldygrc2kf6aa
+2026-10-24T10:45:47.798020Z  INFO ThreadId(01) shaker: created Lyquid-f7vljmg2ymknxo6ox4lwdblt6ldygrc2kf6aa => 0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0
+Availability committee (threshold 1): Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa, Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia, Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia, Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+Source Epoch: 1
+Destination Epoch: 1
+Committee Size: 4
+Threshold: 1
+Deadline Blocks: 50
+Admitted Images: 1
+Pending Deployments: 0
+Committee: Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa, Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia, Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia, Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa

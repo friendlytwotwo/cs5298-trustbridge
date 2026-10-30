@@ -1,0 +1,150 @@
+error: invalid character `{` in package name: `{{project-name}}`, the first character must be a Unicode XID start character (most letters or `_`)
+ --> ../../usr/local/cargo/git/checkouts/ldk-b72281d44a8ce511/fd575e8/lyquid-template/Cargo.toml:2:8
+  |
+2 | name = "{{project-name}}"
+  |        ^^^^^^^^^^^^^^^^^^
+    Checking trustbridge v0.1.0 (/tmp/tb)
+warning: unused doc comment
+   --> src/lib.rs:186:1
+    |
+186 | / /// Devnet-only faucet so the demo can mint internal-ledger tokens.
+187 | | /// TODO(W2): gate behind a DEMO flag; listed in the report's trust-assumption
+188 | | /// table as a demo-only trust hole.
+    | |_-----------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+   --> src/lib.rs:202:1
+    |
+202 | / /// Broker creates a deal from an accepted assessment (see assessor.rs for the
+203 | | /// instance->network two-step). The timeout must be estimate-derived.
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:264:1
+    |
+264 | /// Buyer escrows the full amount (internal ledger debit + state transition).
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:303:1
+    |
+303 | / /// Append-only communication notarization. Anyone may submit; entries are
+304 | | /// sequenced per deal. This is the fulfillment evidence the committee rules on.
+305 | | /// 裁决时的证书根由本日志条目折叠派生（core::evidence_root，经 apply_committee_verdict 单点读取）。
+    | |_---------------------------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:340:1
+    |
+340 | /// Buyer-consented settlement of a submitted deal.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:360:1
+    |
+360 | / /// Permissionless timeout claim — the on-chain guard half of the
+361 | | /// "off-chain trigger; on-chain guard" pattern (watcher: timeout.rs).
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:375:1
+    |
+375 | /// Buyer cancels a deal that has no submitted evidence yet.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:406:1
+    |
+406 | / /// Apply a committee verdict. The certificate is re-validated against the
+407 | | /// on-chain committee config; `Malicious` bumps the misconduct log.
+408 | | /// Production path: verdict arrives via oracle certified call — see committee.rs.
+    | |_---------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:504:1
+    |
+504 | / /// Advisory-only listing of deals past their timeout at the CALLER-supplied
+505 | | /// `now`. The parameter cannot move funds: the only guard on money movement
+506 | | /// is `claim_timeout`, which re-derives time via `current_slot` — a forged
+507 | | /// `now` at most perturbs this informational list. Signature kept identical
+508 | | /// to the FakeNode mirror (rpc.py `due_deals(now)`); stage-four alignment.
+    | |_--------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/timeout.rs:25:1
+   |
+25 | / /// Instance watcher body: fetch due deals via the network getter and submit
+26 | | /// claims for each. Ledger effects are zero when the guard rejects — safe to
+27 | | /// re-run, safe to run on every node.
+   | |_-------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/mod.rs:20:1
+   |
+20 | / /// R1 canary method: touches the probe-owned field through the generated
+21 | | /// context. If `state!` were reusable per module, this compiles; the
+22 | | /// expected failure mode is the field being missing on `crate::__lyquid`.
+   | |_-------------------------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+error[E0616]: field `__internal` of struct `__lyquid::NetworkState` is private
+  --> src/probe/mod.rs:15:1
+   |
+15 | / state! {
+16 | |     // R1 canary: probe-owned network field.
+17 | |     network probe_r1_canary: u64 = 0;
+18 | | }
+   | |_^ private field
+   |
+   = note: this error originates in the macro `$crate::__lyquid_define_oracle_internal_methods` which comes from the expansion of the macro `state` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0609]: no field `probe_r1_canary` on type `&mut __lyquid::NetworkState`
+  --> src/probe/mod.rs:26:12
+   |
+26 |     *state.probe_r1_canary += 1;
+   |            ^^^^^^^^^^^^^^^ unknown field
+   |
+   = note: available fields are: `deal_counter`, `misconduct`, `committee_threshold`, `committee_members`, `evidence_log` ... and 2 others
+
+Some errors have detailed explanations: E0609, E0616.
+For more information about an error, try `rustc --explain E0609`.
+warning: `trustbridge` (lib) generated 11 warnings
+error: could not compile `trustbridge` (lib) due to 3 previous errors; 11 warnings emitted

@@ -1,0 +1,47 @@
+# 任务
+
+【claim_timeout 空 revert 调试】对 trustbridge（multi devnet 运行中，4 节点 v0.8.1）调试 claim_timeout 的空 data revert：加 export=eth 的分阶段探针 probe_claim_sim（cast call 可读、逐阶段报告 A:enter/B:found/C:state/D:now/E:deadline/F:payout/G/H），定位 panic 点→修复→keeper 实测退款→Refunded 证据。硬约束：壳 39/39（verify_core 套件 = core 32 + escrow_lifecycle 5 + modelcheck_refund 2 全绿）、core 语义冻结（types/core 零改动）、探针独立可移除。
+
+# 编排者已完成的一手诊断（2026-10-28 实测，均为证据非猜测）
+
+## D1 部署镜像是旧的（根因）
+- 链上实例 `Lyquid-ss7x5edz…` @ `0x1c85638e118b37167e9298c2268758e058DdfDA0`（deal-1 存于其实例）。
+- md5 三方比对：部署记录（_container-md5.txt，部署时刻源码）lib.rs=b54beb9d；容器 /tmp/tb-lyquid/src/lib.rs=cd9acb36（653 行）；本地工作树 lib.rs=0b7136c3（751 行，含 W1-B2 全部增补）。三值互不相同。
+- 实证：对 0x1c85 `cast call balance_of(string)` 与 `due_deals(uint64)` 一律 `Barrel(FuncNotFound)`——这两个方法只在 W1-B2 增补后存在；同刻 `deal_info(string)`（W1-A 就有）正常返回 deal-1 JSON。
+- 结论：**部署镜像不含 W1-B2 增补，claim_timeout 根本不在部署镜像的 eth 导出面**。cast send claim_timeout 的"空 revert"= 旧镜像上未导出方法在 send/estimate 路由的执行错误，不是 wasm panic，也不是 core 语义 bug。
+
+## D2 cast send 的 gas estimation 失败是全局已知限制（非本方法问题）
+- workflow-out/w1b2-s4-rpc.md §B-③④b（2026-10-25 实测）：eth_estimateGas 对 lyquid 合约调用一律 `execution reverted` data 0x（连必然成功的 deal_info 也一样）；§B-⑤ 决策门：**写通道 = eth_sendTransaction 不带 gas 字段（节点自动注气）+ eth_getTransactionReceipt 轮询 status==0x1**。
+- 2026-10-27 的 finding（w1b2-claim-revert-finding.md）把 cast send（必走 estimateGas）的失败误判为新 panic。
+- scripts/keeper.py 现用 `cast send`（必走 estimateGas）→ 必然撞上 D2 限制，需改为 eth_sendTransaction 通道（契约 selector 已固化：claim_timeout(string)=0x786cfc8f）。
+
+## D3 环境现状（只读核验过）
+- 容器全部 Up 2h：multi-node1-4、multi-anvil、multi-registry、multi-tools。
+- deal-1 现状（deal_info 实测）：`{"id":"deal-1","buyer":"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","seller":"bob","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":95}`；当前块 96+（早已过 deadline）。
+- anvil#0 私钥 0xac0974…ff80（=BROKER=buyer，0xf39Fd6…92266），fund 时已 faucet 过。
+- 部署通道（W1-B1 实证）：宿主 docker cp 源码 → multi-tools:/tmp/tb-lyquid → 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key 0xac0974…ff80 Cargo.toml`。**shaker deploy 每次创建全新实例（新地址）**——新实例上 deal-1 不存在，需在新实例重放 faucet/create_deal/fund（命令序列见 w1a-funded-evidence.txt：faucet→create_deal→fund，timeout_slots 本次可为 1 造快过期）。
+
+## D4 代码事实
+- lyquid/src/lib.rs:414-425 `claim_timeout`：无 require 守卫（Access::Anyone by design），路径 = current_slot() → core::claim_timeout(deal, now) → apply_payout；本地树已带 `#[method::network(export = eth)]`（W1-B2 增补，未部署）。
+- core.rs:170-178 `core::claim_timeout`：Funded 且 now>=deadline → full_refund；纯逻辑零 panic 点。错误桥 bridge_core_err 全变体生成带消息的 LyquidRuntime。
+- lib.rs:709-713 `current_slot()` = `lyquor_api::chain_pos().map(|p| p.block()).unwrap_or(0)`。
+- ACCESS_MATRIX（lib.rs:180-193）=「每个 network fn 一行」的审计面；探针若加 network 方法须同步加一行（ Anyone + 注记 probe-removable），移除时同删。W1-B1 先例：探针方法曾用 instance 面（probe/mod.rs），但 instance 面直读 network 状态未验证过，探针要读 deals → network 面 export=eth 是已验证可 cast call 的形态（deal_info 同款只读 getter）。
+- keeper.py 122 行，stdlib-only；已有 decode_abi_string；cast() 经 docker exec cast call/send。修正点：新增 eth_sendTransaction JSON-RPC 路径（docker exec curl POST，params [{from,to,data}]，轮询 eth_getTransactionReceipt），selector 0x786cfc8f + ABI string 编码 deal_id。
+- 本地树未提交改动：lib.rs/assessor.rs/Cargo.toml/rpc.py（W1-B2 成果，= 执行基线）。
+
+# 要求产出（直接输出以下两段，无附加寒暄）
+
+## 第一段：完整方案 markdown（我将原样写入 workflow-out/plan.md）
+结构：目标 / 前提与已证事实（引 D1-D4，可精简）/ 受影响文件清单（至多 15 个）/ 子任务拆分与执行顺序（T1..Tn，每步含验收判据）/ 逐文件改动点（探针函数签名与 A~H 各阶段内容、ACCESS_MATRIX 行、keeper.py 函数级改动、证据文件名）/ 风险与回退 / 探针移除步骤。关键设计决定需显式论证：
+1. probe_claim_sim 放 network 面还是 instance 面（给出理由；提示：需读 deals 状态，instance 面直读 network 未验证，network 面 export=eth 只读 getter 是已验证形态；ACCESS_MATRIX 需同步行）。
+2. 探针如何在不改 core 的前提下模拟 claim 语义（提示：克隆 deal 后在其上调用 core::claim_timeout——core 是纯函数，Clone 已 derive；逐阶段输出 A..H + serde_json 结果串，lyquid::println! 双通道）。
+3. 新实例重放序列（faucet/create_deal/fund 三笔 + timeout_slots 取 1 的参数值）与 deal-1 命名。
+4. keeper 修正的最小面（只加发送函数与编码，不动轮询/幂等结构）。
+5. Refunded 证据判据：新实例 deal_info state=="Refunded" 字面 + cast send/eth_sendTransaction tx hash + 退款前后 balance_of 对比 + keeper 日志。
+6. 全程不动 types.rs/core.rs；verify_core 39/39 复验点（部署前 + 探针移除后各一次）。
+
+## 第二段：结尾单独一行 JSON 元数据
+{"planRounds": <方案审查轮数估计 1-10>, "codeRounds": <代码审查轮数估计 1-10>, "tooBig": false, "summary": "<方案摘要≤200字>"}
+
+# 长度纪律（追加，覆盖前文冲突项）
+方案总长控制在 6000 字内。代码一律只给签名与要点注释，不写完整函数体（编码员负责成码）。第一段方案 + 第二段一行 JSON，除此之外零冗余。

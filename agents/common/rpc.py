@@ -85,6 +85,15 @@ _ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "claim_timeout(string)": ("786cfc8f", ("string",), "bool"),
     "cancel(string)": ("0b4f3f3d", ("string",), None),
     "open_dispute(string,string)": ("a48ab911", ("string", "string"), None),
+    # R2 路线①：apply_committee_verdict 的 wire 面由结构体扁平化为
+    # (string,uint8,string[])。selector 实取（multi-tools 容器，2026-10-29，
+    # R2 T5 wire 探针）：`cast sig "apply_committee_verdict(string,uint8,string[])"`
+    # → 0xa32974e3；同一批探针复核 open_dispute 的 a48ab911 未漂移。
+    "apply_committee_verdict(string,uint8,string[])": (
+        "a32974e3",
+        ("string", "uint8", "string[]"),
+        None,
+    ),
     "committee_config(string[],uint32)": ("15df3c73", ("string[]", "uint32"), None),
     "deal_info(string)": ("ec78f86e", ("string",), "string"),
     "evidence_entries_json(string)": ("16417010", ("string",), "string"),
@@ -100,9 +109,10 @@ _ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     ),
 }
 
-# apply_committee_verdict is deliberately NOT in this table: its wire param is
-# the CommitteeCertWire struct, which has no EthAbiType in ldk v0.8.1 (plan R3)
-# — it stays un-exported and the adversarial flow is sim-only (R2#2).
+# R2 路线①（R1 的排除注记已被取代）：apply_committee_verdict 的结构体 wire 参数
+# （CommitteeCertWire）在 ldk v0.8.1 无 EthAbiType（plan R3），故 lib.rs 已把它扁平化
+# 为 (string,uint8,string[]) 并 eth 导出——上一行的 selector 即实取冻结值。对抗流自
+# R2 起在真 devnet 上跑（不再是「仅 sim」形态）。
 
 
 class NodeError(RuntimeError):
@@ -144,8 +154,13 @@ def _enc_value(t: str, v) -> bytes:
         b = str(v).encode()
         return _word(len(b)) + _pad32(b)  # length word + padded payload
     if t == "string[]":
+        # R2 修正（编码器缺陷，与 _decode_ret 同源错误）：元素偏移必须相对「长度字
+        # 之后」的 tail 起点（标准 ABI），旧实现把长度字也算进了 head_size，导致每个
+        # 偏移多 0x20。R1 的 committee_config(string[],uint32) 因此从未真正配置成功
+        # （无 getter，读不回来，正常/超时流也不依赖），R2 对抗流首次依赖时才暴露。
+        # 修正后与 `cast calldata` 逐字节一致（见 workflow-out/_r2-adversarial-raw.txt 附录）。
         items = list(v)
-        head_size = 32 * (len(items) + 1)  # length word + one offset per item
+        head_size = 32 * len(items)          # one offset per item, from the tail start
         out = _word(len(items))
         tails = []
         off = head_size
@@ -186,13 +201,20 @@ def _decode_ret(t: str, hexdata: str):
         ln = int.from_bytes(data[off:off + 32], "big")
         return data[off + 32:off + 32 + ln].decode()
     if t == "string[]":
+        # R2 修正（编码器缺陷，R1 未暴露）：动态数组的元素偏移是相对「长度字之后
+        # 的起点」（ABI 标准），不是相对数组基址。R1 只在 due_deals 上见过空数组
+        # （[] 不触发偏移解析），非空返回在 R2 T6-A 首次出现时被误读为 32 字节的
+        # 零串——实测原文：0x20 | len=1 | 0x20 | 0x06 | "deal-1"（word[2]=0x20
+        # 只有按 tail = base+32 解释才落到 word[3] 的长度字）。修正后与 cast 的
+        # 标准解码一致。
         base = int.from_bytes(data[0:32], "big")
         n = int.from_bytes(data[base:base + 32], "big")
+        tail = base + 32                      # element offsets are relative to here
         out = []
         for i in range(n):
-            eo = int.from_bytes(data[base + 32 * (i + 1):base + 32 * (i + 2)], "big")
-            ln = int.from_bytes(data[base + eo:base + eo + 32], "big")
-            out.append(data[base + eo + 32:base + eo + 32 + ln].decode())
+            eo = int.from_bytes(data[tail + 32 * i:tail + 32 * (i + 1)], "big")
+            ln = int.from_bytes(data[tail + eo:tail + eo + 32], "big")
+            out.append(data[tail + eo + 32:tail + eo + 32 + ln].decode())
         return out
     if t == "bool":
         return int.from_bytes(data[0:32], "big") == 1
@@ -386,13 +408,26 @@ class NodeClient:
     def apply_committee_verdict(self, deal_id, cert, caller=None, *, sender: str | None = None):
         """cert is the DOMAIN-level triple (verdict_code, evidence_root, signers).
 
-        NOT reachable over the ETH API: CommitteeCertWire's struct param has no
-        EthAbiType, so the method is not eth-exported (plan R3; measured
-        FuncNotFound for un-exported methods: w1b2-s4-rpc.md §B-④h). The
-        adversarial flow is sim-only by design (R2#2)."""
-        raise RuntimeError(
-            "apply_committee_verdict is not ETH-exported (struct wire param, plan R3): "
-            "adversarial flow is sim-only — run with --sim (w1b2-s4-rpc.md §B-④h)")
+        R2 路线①：链上方法已 eth 导出（扁平 wire `(string,uint8,string[])`）。
+        本包装保持与 FakeNode 完全相同的域三元组接口——两种传输同调用形态是
+        sim transcript 零漂移的结构保证（plan §6-2-3）；内部把域三元组扁平化，
+        `evidence_root` 只在客户端同源预检里用一次（镜像链上 into_domain 的
+        证据根折叠）：root 过期就在这里早失败，省掉一笔必被拒的交易。
+
+        `sender or caller`：demo 以既有形态 `(deal_id, cert, <principal>)` 调用，
+        principal 位置即 broker 地址，同时充当交易发送方——链上两侧守卫
+        （caller ∈ members ∧ caller ∈ signers）都以本交易的 sender 为准。
+        `sender or caller or self.sender` 的回落链与 notarize/claim_timeout
+        同款。"""
+        verdict_code, cert_root, signers = cert
+        if evidence_root(self.evidence_entries(deal_id)) != cert_root:
+            raise RuntimeError("committee cert evidence_root mismatch (client-side precheck)")
+        self._send("apply_committee_verdict(string,uint8,string[])",
+                   (deal_id, int(verdict_code), list(signers)),
+                   sender or caller or self.sender)
+        # 回执无返回值（与 notarize/claim_timeout 同款不对称注记）：效果由调用方
+        # 读回 deal_info/balance_of 复核（status=="0x1" ≠ 方法 Ok，模块 docstring）。
+        return True
 
     def committee_config(self, members, threshold, *, sender: str | None = None):
         self._send("committee_config(string[],uint32)", (list(members), int(threshold)), sender)

@@ -56,6 +56,15 @@ DEFAULT_NODE = os.environ.get("TB_NODE", "http://127.0.0.1:10087")
 # receipts for txs signed by the #0 dev key (§B-②).
 DEFAULT_SENDER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 
+# Role key table (R1 S4 收尾; 来源 = w1b2-s4-rpc.md §A-0 eth_accounts + §B-②
+# 回执 from 验证). The node's dev signer backend signs per the `from` field
+# (module docstring), so the Python side never holds a private key — the
+# "#0/#1/#2 私钥" story resolves to ADDRESS SELECTION on the wire. The #0 key
+# still lives only in the shaker deploy command line.
+BROKER_ADDR = DEFAULT_SENDER            # anvil#0（create_deal/faucet/committee_config 发送方）
+ALICE_ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"  # anvil#1 = buyer（B-① 双 sender 已验）
+BOB_ADDR = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"    # anvil#2 = seller（sender 首验 = R1 demo，D6）
+
 # Selector + wire-type table. Source: `cast sig "<sig>"` in the multi-tools
 # container, 2026-10-25 (w1b2-s4-rpc.md §B-⓪); faucet/fund/create_deal bytes
 # additionally cross-checked against the LyteLog data of the T1 receipts.
@@ -81,6 +90,14 @@ _ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "evidence_entries_json(string)": ("16417010", ("string",), "string"),
     "balance_of(string)": ("3e6b4459", ("string",), "uint128"),
     "due_deals(uint64)": ("4704839a", ("uint64",), "string[]"),
+    # R1 恢复导出（lib.rs assess_brief 4×string 形态）。selector 实取：
+    # `cast sig "assess_brief(string,string,string,string)"` → 0x3297eeb6
+    #（multi-tools 容器，2026-10-29，R1 T3）。
+    "assess_brief(string,string,string,string)": (
+        "3297eeb6",
+        ("string",) * 4,
+        "string",
+    ),
 }
 
 # apply_committee_verdict is deliberately NOT in this table: its wire param is
@@ -269,6 +286,31 @@ class NodeClient:
     def faucet(self, agent: str, amount: int, *, sender: str | None = None):
         self._send("faucet(string,uint128)", (agent, amount), sender)
 
+    def nudge(self, *, sender: str | None = None):
+        """Benign zero-value faucet to self — one automined block (设计输入⑤).
+
+        The timeout flow needs the chain to advance past a deal's deadline;
+        with automine the only reliable clock tick is "land a transaction".
+        Amount 0 keeps the ledger untouched (faucet has no guards, lib.rs:241).
+        R0 keeper evidence used the same technique externally; R1 bakes it in.
+        """
+        self._send("faucet(string,uint128)", (self._addr(sender), 0), sender)
+
+    def discover_deals(self, limit: int = 10_000) -> list[str]:
+        """Existing deal ids, probed deal-1 upward until the first gap.
+
+        Same discovery loop `create_deal` uses (no on-chain enumeration is
+        guaranteed: due_deals is advisory-only and unverified on the wire,
+        plan D9), so the keeper can run without `--deals` (设计输入①)."""
+        out: list[str] = []
+        n = 1
+        while n <= limit and self._deal_exists(f"deal-{n}"):
+            out.append(f"deal-{n}")
+            n += 1
+        if n > limit:
+            raise RuntimeError("deal id probe overflow (>%d deals)" % limit)
+        return out
+
     def create_deal(self, buyer, seller, amount, fee_bps, terms_d, acceptance_d,
                     est_ms, est_conf, *, sender: str | None = None) -> str:
         # deal_id discovery (plan R1#3 fallback algorithm): eth_sendTransaction
@@ -371,9 +413,32 @@ class NodeClient:
     def due_deals(self, now: int | None = None, *, sender: str | None = None) -> list:
         # `now` defaults to the current block height (the chain treats it as
         # advisory-only; money movement re-derives time in claim_timeout).
+        # 实测注记（R1 T5-3，w1b2-r1-demo-timeout.md 附录）：wire 面**可路由**，
+        # `cast call "due_deals(uint64) returns (string[])"` 返回合法 ABI
+        # string[]（全终态实例上为 []）；D9 的 FuncNotFound 未复现。语义仍只列
+        # Funded 且过 deadline 的 deal，故 demo/keeper 的枚举走 discover_deals。
         if now is None:
             now = self.block_number()
         return self._view("due_deals(uint64)", (int(now),), frm=self._addr(sender or self.sender))
+
+    def assess_brief(self, brief_json: str, base_url: str = "", api_key: str = "",
+                     model: str = "", *, sender: str | None = None) -> dict:
+        """Instance-side LLM assessment over eth_call (R1 S3 恢复的导出面).
+
+        `brief_json` = DealBrief four-field JSON string. Mode contract: empty
+        `base_url` OR `api_key` => HeuristicModel replay (lib.rs:625-635);
+        both non-empty => real backend. Returns the parsed report dict
+        (`qualification_score`/`risks`/`est_duration_ms`/`est_confidence`).
+
+        Trust hole (documented, lib.rs doc): the backend params travel in the
+        eth_call calldata, so any chain reader sees `api_key`. Demo-only;
+        never log or archive the key. eth_call runs node-locally, so the
+        instance `assessment_cache` write does not reach consensus (R1 note).
+        """
+        raw = self._view("assess_brief(string,string,string,string)",
+                         (brief_json, base_url, api_key, model),
+                         frm=self._addr(sender or self.sender))
+        return json.loads(raw)
 
 
 # ---------------------------------------------------------------------------

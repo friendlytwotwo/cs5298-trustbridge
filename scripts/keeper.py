@@ -31,7 +31,20 @@ plan (R6) but is not the primary channel.
 
 Usage:
   python scripts/keeper.py --node http://127.0.0.1:10087 \
-      --contract 0x... --deals deal-1,deal-2 [--interval 20] [--once]
+      --contract 0x... [--deals deal-1,deal-2] [--interval 20] [--once] [--no-nudge]
+
+`--deals` is OPTIONAL (R1 S4): without it the keeper enumerates the escrow
+(deal-1 upward until the first gap, NodeClient.discover_deals — the same
+discovery loop create_deal uses) at startup and prints the discovered list
+(设计输入①). An explicit `--deals` keeps the R0 evidence-run behaviour
+verbatim.
+
+`--nudge` (default ON, `--no-nudge` to disable; 设计输入⑤): once per poll
+round, if any watched deal is Funded, the keeper first sends a zero-value
+faucet to itself — one automined block — then attempts the claims. Reason:
+R0 relied on the operator nudging the chain externally; baking it in makes
+the keeper's timeout path self-contained (the claim guard re-derives the
+deadline from the block height, so the nudge cannot fake eligibility).
 
 Exit: runs forever until Ctrl-C (every action logged with a timestamp);
 `--once` runs a single round and exits — the evidence-run mode.
@@ -68,9 +81,14 @@ def _read_back(node: NodeClient, deal_id: str) -> dict:
     return info
 
 
-def poll_once(node: NodeClient, deals: list[str]) -> dict:
-    """One polling round over `deals`; returns the per-deal report dict."""
+def poll_once(node: NodeClient, deals: list[str], nudge: bool = False) -> dict:
+    """One polling round over `deals`; returns the per-deal report dict.
+
+    `nudge`: at most one zero-value self-faucet per round, sent before the
+    first claim attempt when a Funded deal is seen (设计输入⑤; the claim
+    guard still re-derives the deadline on-chain)."""
     report = {}
+    nudged = False
     for deal_id in deals:
         try:
             info = node.deal_info(deal_id)
@@ -84,6 +102,13 @@ def poll_once(node: NodeClient, deals: list[str]) -> dict:
         if state != "Funded":
             report[deal_id] = {"state": state, "action": "skip"}
             continue
+        if nudge and not nudged:
+            try:
+                node.nudge()
+                nudged = True
+                print("[keeper] nudge: zero-value faucet sent (one automined block)", flush=True)
+            except (NodeError, TxError) as e:
+                print(f"[keeper] nudge failed (continuing): {e}", flush=True)
         # Funded: attempt the claim every poll. The guard rejects until the
         # deadline; one success flips the deal to Refunded and further sends
         # are rejected by the terminal-state guard.
@@ -111,19 +136,29 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--node", default=DEFAULT_NODE, help="node ETH JSON-RPC base URL (host view)")
     p.add_argument("--contract", required=True, help="escrow Lyquid contract address (0x...)")
-    p.add_argument("--deals", required=True, help="comma-separated deal ids to watch")
+    p.add_argument("--deals", default=None,
+                   help="comma-separated deal ids to watch; default = enumerate the escrow")
+    p.add_argument("--nudge", dest="nudge", action="store_true", default=True,
+                   help="send one zero-value faucet per round when a deal is Funded (default)")
+    p.add_argument("--no-nudge", dest="nudge", action="store_false",
+                   help="disable the block-nudge (R0 external-nudge behaviour)")
     p.add_argument("--interval", type=int, default=20, help="poll interval seconds")
     p.add_argument("--once", action="store_true", help="run a single round and exit (evidence runs)")
     args = p.parse_args()
 
-    deals = [d.strip() for d in args.deals.split(",") if d.strip()]
     node = NodeClient(args.node, contract=args.contract)
-    print(f"[keeper] node={args.node} contract={args.contract} sender={node.sender}")
+    if args.deals:
+        deals = [d.strip() for d in args.deals.split(",") if d.strip()]
+        print(f"[keeper] explicit deals: {deals}")
+    else:
+        deals = node.discover_deals()
+        print(f"[keeper] discovered deals: {deals} (source=discovered)")
+    print(f"[keeper] node={args.node} contract={args.contract} sender={node.sender} nudge={args.nudge}")
     print(f"[keeper] watching {deals} every {args.interval}s (guard decides; submissions are free)")
     try:
         while True:
             ts = time.strftime("%H:%M:%S")
-            for deal_id, r in poll_once(node, deals).items():
+            for deal_id, r in poll_once(node, deals, nudge=args.nudge).items():
                 print(f"[keeper {ts}] {deal_id}: {json.dumps(r, ensure_ascii=False)}", flush=True)
             if args.once:
                 print("[keeper] --once: single round done")

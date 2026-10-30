@@ -153,3 +153,29 @@ signer→Node 映射全部落在 e2_configure 配置的四个 NodeID 上。
 | GT3-f | 未执行 git commit/add/push；主路径 lyquid 源零改动 | ✅ 满足（`git status --short lyquid/` = 与 T2 交付态逐字相同；`committee_certified.rs` md5 仍 `83e358ee…`，E2_AVG_NUM 未改） |
 
 **未执行**：任何 `git commit` / `git add` / `git push`；任何 lyquid 源码改动；任何重跑/重部署/重触发 run_round。
+
+---
+
+## §T7 补记：D-T3-1 修复端到端重验（2026-10-30，主控直做，用户授权「继续 R3」）
+
+> 上述 §T3/收尾自检均为 R3-T5+T6 轮时点记录，原文保留。本节为同日后续：T6.1 修复
+> （`d1e6f5f`）当时因「无实跑部署/链写授权」未做端到端重验，本次在新实例上补齐。
+
+- **部署**：新实例 `Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa` @
+  `0x942ED2fa862887Dc698682cc6a86355324F0f01e`（容器源与提交后 `lyquid/` md5 9/9 一致，
+  同 image `sha256:ccf7498b…4603`）；TARGET `0x1BDFe4447e53407051Be1B94F47948d3C6d0a6e3` ≠ 合约。
+- **主跑**：`python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x942E…f01e
+  --instance Lyquid-dpp6…unqa --flow committee` → **`exit 0`，`DEMO COMPLETE`**
+  （`_r3-t7-dt31-verify-raw.txt:69/:72`）。T3 时因 D-T3-1 中断的三段全部实际执行：
+  `faucet read-back OK: alice 0 -> 10000 (+10000)`（:22）、
+  `refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker
+  unchanged`（:31）、console 取证段 25 行完整回放（:32-:59）。
+- **L2 判级复现**：`e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)`
+  （:44）；`cert.signers RAW = [0, 1, 2, 3] (len=4)`（:51）+ 四条互异 signer→NodeID 映射
+  （:52-:55），与当轮 GetNodeInfo 喂给 `e2_configure` 的四个 NodeID 逐字一致；
+  `certified call submitted` 仅一次（:50）、`apply_verdict` 仅一次（:56）、终态
+  `Refunded`（:30）。agreed 行重复回放两次（:44/:49）与 T3 同形态（§T3 如实注记），无重复结算。
+- **资金勾稽**：alice 0 → faucet +10000 → fund −1000 = 9000 → 退款 +1000 = 10000；
+  bob/broker 恒 0——与 T3.5 独立读回结论一致，且这次由 demo 内建断言自身证明（无 RuntimeError）。
+- **联动更新**：`docs/b3-user-test/操作手册.md` §0-2/§3.2/§3.3 与 `通过判据.md` 附录中的
+  「无已档实录」标注已改引本实录；T3 实录保留为修复前对照。

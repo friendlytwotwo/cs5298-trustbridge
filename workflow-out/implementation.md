@@ -732,3 +732,20 @@ $ git apply -R --check -p1 _pre-task-snapshot-r3.patch                 → OK（
 **收尾声明**：本轮未执行任何 `git commit` / `git add` / `git push`（`git log --oneline -1`
 仍为 `dc78d2f`）；未对 devnet 发任何交易、未重启容器；`lyquid/` 源码零改动（冻结四件
 md5 4×OK，`committee_certified.rs` md5 与 `E2_AVG_NUM` 不变）。
+
+---
+
+## §10 后续补记（2026-10-30，主控直做；在上文 R3-T5+T6 收尾之后）
+
+1. **提交序列已执行**：`_commit-plan.md` §2/§5/§6 的建议序列由主控按用户指令落地——
+   R1 C1–C4（`acb7315`/`f36d24e`/`e43d8d2`/`c31d701`）、R2 C5–C7（`6f8f82a`/`785a944`/
+   `efc256c`）、R3-C1–C6（`c150d31`/`5634880`/`d1e6f5f`/`944a5a1`/`826fa50`/`3af0460`）、
+   归档 chore（`d292012`），已推送 origin/main。三轮共改文件（lib.rs/rpc.py/demo.py）按
+   轮次拆 hunk 提交：R1/R2 中间态自 `_pre-task-snapshot-r2.patch`（git diff vs HEAD）与
+   `_pre-task-snapshot-r3.patch`（逆向应用）重建，R2 态三文件 md5 与 §2.6/§5-1 记录值
+   精确一致（`a8fdcf06…`/`a9443231…`/`25bfeae5…`，后两者 LF 规范化后命中；R3 补丁内
+   新增行为 CRLF，混入的 CR 已随规范化清除）。6 个不入库件按计划留在工作树。
+2. **D-T3-1 修复端到端重验（T7）已完成**：新实例 `Lyquid-dpp6…unqa` 上 committee 流
+   `exit 0` 全绿——§9.4「诚实边界」中「端到端重验需新实例、未执行」一项就此核销。
+   实录 `_r3-t7-dt31-verify-raw.txt`，判级 L2 复现；详见 `w1b2-r3-e2-committee.md` §T7。
+   B3 三件套中的「无已档实录」标注已改引该实录。

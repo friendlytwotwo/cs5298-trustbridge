@@ -1,0 +1,77 @@
+# R3-T7: D-T3-1 fix E2E re-verification on a fresh instance
+# date: 2026-10-30 (host local)
+# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x942ED2fa862887Dc698682cc6a86355324F0f01e --instance Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa --flow committee
+# instance deployed from /tmp/tb-lyquid (md5 9/9 == HEAD d292012 lyquid/), image sha256:ccf7498b...4603
+
+
+====================================================================
+  FLOW 4 — committee: 4-node oracle certification (route ②, E2)
+====================================================================
+[committee] env: node=http://127.0.0.1:10087 contract=0x942ED2fa862887Dc698682cc6a86355324F0f01e instance=Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa
+[committee] TARGET=0x1BDFe4447e53407051Be1B94F47948d3C6d0a6e3 (shaker to-hex Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa) != contract=0x942ED2fa862887Dc698682cc6a86355324F0f01e -> OK
+[committee] node1 port=10087 node_id=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia bytes32=0xa9373057a9b750277dd1df0c20f9a8fc66c1efb472a28a213830023dce4b98fe
+[committee] node2 port=11087 node_id=Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa bytes32=0x4eca21e3b3b00ff1481e7c78939ae2acb3815c6c968f2237acfae35993305d7b
+[committee] node3 port=12087 node_id=Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa bytes32=0xd15cb394c5e2a9828c8d0436be0da0657f8bc5b086f217fb933941d24a06b9eb
+[committee] node4 port=13087 node_id=Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia bytes32=0x7434b1441da7152a1732ae8488057df0d4fe8bddda15955f6b3fb53023bef0fe
+[committee] committee_config(NodeID×4, threshold=4) sent by broker (escrow 成员域)
+[committee] e2_configure(bytes32[]×4, 4) cast send -> blockHash            0x74bdc23d868a5a9a67aa2302b093217746dbbbf8bf8f5e88654fb6cf6cd3860a (console: staged committee of 4 nodes)
+[committee] __lyquor_oracle_advance_epoch(cert_verdict, 0x1BDFe4447e53407051Be1B94F47948d3C6d0a6e3) -> True
+[committee]   dest_epoch poll #1 -> 1
+[committee] __lyquor_oracle_finalize_epoch(cert_verdict, 0x1BDFe4447e53407051Be1B94F47948d3C6d0a6e3) -> True
+[committee] e2_net_config after activate: {'armed_deal': '', 'current': {'committee': 4, 'epoch': 1, 'threshold': 4}, 'dest': {'change_count': 5, 'epoch': 1}, 'get_epoch': 1, 'staging': {'committee': 4, 'threshold': 4}}
+[committee] faucet read-back OK: alice 0 -> 10000 (+10000)
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[committee] deal=deal-1 info={'id': 'deal-1', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+[committee] deal=deal-1 state=Funded (deliverable_digest=None -> check_evidence_shape=false -> NotFulfilled)
+[committee] deal=deal-1 state=Disputed (evidence entries=3)
+[committee] e2_net_config after arm: {'armed_deal': 'deal-1', 'current': {'committee': 4, 'epoch': 1, 'threshold': 4}, 'dest': {'change_count': 5, 'epoch': 1}, 'get_epoch': 1, 'staging': {'committee': 4, 'threshold': 4}}
+[committee] arm read-back OK: armed_deal == deal-1 (pre-arm='')
+[committee] e2_run_verdict_round() -> True (node1 single trigger; cast call channel — 禁多次触发)
+[committee] final state=Refunded balances after={'alice': 10000, 'bob': 0, 'broker': 0}
+[committee] refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker unchanged
+[committee] console evidence (source=node1, rc=124, 25 matching line(s)):
+  e2_configure: staged committee of 4 nodes threshold=4 (dest epoch advance/finalize required to activate)
+  e2_net_config: {"armed_deal":"","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+  e2_net_config: {"armed_deal":"","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+  e2_arm: armed_deal=deal-1 (network domain; single send visible to all nodes)
+  e2_net_config: {"armed_deal":"deal-1","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+  e2_run_verdict_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=4)
+  e2_propose: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia deal=deal-1 verdict=1 (shape_ok=false, entries=3, avg_num=4, target.seq_id=HashBytes(Hash("b813e12d322b9312d099fba2da69b8f7edc8656fdc673f5e454b894471ca3cbd")))
+  e2_aggregate: input from Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia -> deal=deal-1 verdict=1 (ts_ms=1793340170745)
+  e2_aggregate: input from Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa -> deal=deal-1 verdict=1 (ts_ms=1793340170771)
+  e2_aggregate: input from Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia -> deal=deal-1 verdict=1 (ts_ms=1793340170783)
+  e2_aggregate: input from Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa -> deal=deal-1 verdict=1 (ts_ms=1793340170875)
+  e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+  e2_aggregate: input from Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia -> deal=deal-1 verdict=1 (ts_ms=1793340170745)
+  e2_aggregate: input from Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa -> deal=deal-1 verdict=1 (ts_ms=1793340170771)
+  e2_aggregate: input from Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia -> deal=deal-1 verdict=1 (ts_ms=1793340170783)
+  e2_aggregate: input from Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa -> deal=deal-1 verdict=1 (ts_ms=1793340170875)
+  e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+  e2_run_verdict_round: certified call submitted to the sequencing backend
+  committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4) deal=deal-1 verdict=1
+  committee_verdict_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+  committee_verdict_certified: signer 1 -> Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa
+  committee_verdict_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+  committee_verdict_certified: signer 3 -> Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia
+  apply_verdict: deal=deal-1 verdict=1 misconduct=[]
+  committee_verdict_certified: applied deal=deal-1 verdict=1 signers=["Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia", "Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa", "Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa", "Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia"] (signers must be distinct NodeIDs among committee_members)
+
+====================================================================
+  COMMITTEE FLOW SUMMARY
+====================================================================
+  instance  = Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa
+  contract  = 0x942ED2fa862887Dc698682cc6a86355324F0f01e
+  target    = 0x1BDFe4447e53407051Be1B94F47948d3C6d0a6e3 (shaker to-hex; != contract)
+  deal      = deal-1 -> Refunded
+  signers   = see committee_verdict_certified lines above (each must map to a real NodeID among committee_members)
+
+====================================================================
+  DEMO COMPLETE
+====================================================================
+
+# EXIT: DEMO COMPLETE banner printed (last statement of main()); no traceback;
+# python exit code observed as 0 (EXIT=0 printed by the tee wrapper).
+# L2 reproduced: inputs=4 (agreed, avg_num=4), signers RAW [0,1,2,3] len=4,
+# 4 distinct signer->NodeID mappings == the 4 NodeIDs fed to e2_configure.
+# D-T3-1 fix verified: faucet read-back OK + refund check OK lines present,
+# refund conservation 10000->9000->10000, bob/broker=0, final Refunded.

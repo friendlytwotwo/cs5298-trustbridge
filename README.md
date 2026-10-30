@@ -25,7 +25,7 @@ CS5298 Final Project. Plan: [`docs/FinalProject_计划书_TrustBridge_2026-10-12
 | evidence_root | ✅ real contract: FNV-1a-64 chained fold over ordered entries, order-sensitive, pinned vectors; same-source check on the demo path (see trust assumptions) |
 | Platform wrappers (lib.rs) | ✅ guards complete: access matrix, error bridge, fund precheck, committee gate (unsigned certs rejected); ⚠️ 73 known `cargo check` errors vs real ldk — that alignment IS the W1 spike, by design |
 | Timeout | ✅ watcher + on-chain guard primary path implemented (SPIKE-gated); ⚠️ native `trigger!` registration disabled until spike #1 |
-| LLM assessor | ✅ instance-side seam + serde contract parse; real backend call SPIKE-gated |
+| LLM assessor | ✅ instance seam wired; on-chain driven in replay mode (R1); real backend pending egress/credentials |
 | Python side | ✅ FakeNode mirrors Rust semantics (committee gate / fee / deadlines / misconduct / FNV root); `--selftest` 7/7 pinned vectors |
 | Tests | ✅ verify_core shell 39/39 (core 32 + escrow 5 + modelcheck 2); sim 3 flows conservation-clean |
 | Pending | W1 spikes (timer semantics, oracle committee round, llm two-step, RPC envelope, macro audit); W4: oracle certification, seller stake/slash, #2833 receipt binding |
@@ -38,7 +38,7 @@ CS5298 Final Project. Plan: [`docs/FinalProject_计划书_TrustBridge_2026-10-12
 | evidence_root | ✅ 真契约：FNV-1a-64 链式折叠、顺序敏感、向量钉死；demo 路径为同源校验（见信任假设） |
 | 平台封装（lib.rs） | ✅ 守卫齐备：权限矩阵、错误桥接、基金预检、委员会门禁（未签名证书被拒）；⚠️ 对真实 ldk 仍有 73 个已知 `cargo check` 错——该对齐本身就是 W1 spike，属预期状态 |
 | 超时 | ✅ watcher + 链上守卫主路径已实装（SPIKE 门控）；⚠️ 原生 `trigger!` 注册在 spike #1 通过前保持禁用 |
-| LLM 评估器 | ✅ instance 侧接缝 + serde 契约解析；真实后端调用 SPIKE 门控 |
+| LLM 评估器 | ✅ instance 接线在链上以回放模式实测驱动（R1）；真实后端待 egress/凭据 |
 | Python 端 | ✅ FakeNode 镜像 Rust 语义（委员会门禁/fee/期限/罚没/FNV 根）；`--selftest` 7/7 钉死向量 |
 | 测试 | ✅ verify_core 壳 39/39（core 32 + escrow 5 + modelcheck 2）；sim 三流程账目守恒 |
 | 待办 | W1 spike 五项（timer 语义、oracle 委员会回合、llm 两步提交、RPC 包格式、宏漂移审计）；W4：oracle 认证、卖家保证金/罚没、#2833 回执绑定 |
@@ -104,7 +104,7 @@ lyquid/                 Rust Lyquid = the trust layer
   tests/modelcheck_refund.rs   exhaustive event-ordering model check (E3 evidence)
 agents/                 Python agent side (scripted behavior, pluggable LLM)
   common/protocol.py    message envelopes + canonical JSON + sha256 + FNV-1a evidence_root mirror
-  common/rpc.py         NodeClient (devnet placeholder, SPIKE W1-4) + FakeNode (gated sim mirror; truth = rust core)
+  common/rpc.py         NodeClient (ETH JSON-RPC, S4 对齐: multi v0.8.1 实测; 角色密钥表/nudge/枚举内建) + FakeNode (gated sim mirror; truth = rust core)
   common/llm.py         ScriptedLLM (deterministic replay) / OpenAICompatLLM (TB_LLM=openai)
   alice.py broker.py bob.py    per-agent CLIs
 scripts/                devnet-up / deploy / demo orchestration (+ --selftest vector pins)
@@ -125,7 +125,7 @@ lyquid/                 Rust Lyquid = 信任层本体
   tests/modelcheck_refund.rs   事件排序穷举模型检查(E3 证据)
 agents/                 Python Agent 端(脚本化行为、可插拔 LLM)
   common/protocol.py    消息信封 + 规范化 JSON + sha256 + FNV-1a 证据根镜像
-  common/rpc.py         NodeClient(devnet 占位,SPIKE W1-4)+ FakeNode(带门禁的仿真镜像;真值 = rust core)
+  common/rpc.py         NodeClient(ETH JSON-RPC, S4 对齐: multi v0.8.1 实测; 角色密钥表/nudge/枚举内建) + FakeNode(带门禁的仿真镜像;真值 = rust core)
   common/llm.py         ScriptedLLM(确定性回放)/ OpenAICompatLLM(TB_LLM=openai)
   alice.py broker.py bob.py    各 Agent 的 CLI
 scripts/                devnet-up / deploy / demo 编排(--selftest 向量自测)

@@ -1,0 +1,17 @@
+### keeper --once (discovery path, nudge default on)
+[keeper] discovered deals: ['deal-1', 'deal-2', 'deal-3'] (source=discovered)
+[keeper] node=http://127.0.0.1:10087 contract=0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849 sender=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 nudge=True
+[keeper] watching ['deal-1', 'deal-2', 'deal-3'] every 20s (guard decides; submissions are free)
+[keeper 21:59:34] deal-1: {"state": "Settled", "action": "terminal"}
+[keeper 21:59:34] deal-2: {"state": "Settled", "action": "terminal"}
+[keeper 21:59:34] deal-3: {"state": "Refunded", "action": "terminal"}
+[keeper] --once: single round done
+EXIT=0
+
+### keeper --deals deal-3 --once --no-nudge (explicit path)
+[keeper] explicit deals: ['deal-3']
+[keeper] node=http://127.0.0.1:10087 contract=0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849 sender=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 nudge=False
+[keeper] watching ['deal-3'] every 20s (guard decides; submissions are free)
+[keeper 21:59:34] deal-3: {"state": "Refunded", "action": "terminal"}
+[keeper] --once: single round done
+EXIT=0

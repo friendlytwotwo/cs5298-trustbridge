@@ -1,0 +1,25 @@
+
+====================================================================
+  adversarial: sim-only — apply_committee_verdict 不在 eth 导出面(plan R3)，对抗流请 --sim
+====================================================================
+
+====================================================================
+  FLOW 1 — normal: assess -> escrow -> deliver -> settle
+====================================================================
+deal=deal-2 info={'id': 'deal-2', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+final state=Settled balances: alice=18000 bob=1960 broker=40
+
+====================================================================
+  FLOW 2 — timeout: seller stalls, watcher claims, buyer refunded
+====================================================================
+deal=deal-3 info={'id': 'deal-3', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 1, 'deadline_slot': None} (short-estimate create: est_ms=200)
+deal=deal-3 deadline_slot=191 (timeout_slots=1)
+nudge: block=190 deadline_slot=191 — nudging past it
+  nudge -> block=191
+  nudge -> block=192
+watcher: discovered=['deal-1', 'deal-2', 'deal-3'] due=['deal-3']
+final state=Refunded alice=19000 (made whole)
+
+====================================================================
+  DEMO COMPLETE
+====================================================================

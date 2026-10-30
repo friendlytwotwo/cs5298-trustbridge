@@ -1,0 +1,19 @@
+### final deal_info sweep
+"{\"id\":\"deal-1\",\"buyer\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"seller\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"amount\":1000,\"state\":\"Settled\",\"timeout_slots\":300,\"deadline_slot\":471}"
+
+"{\"id\":\"deal-2\",\"buyer\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"seller\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"amount\":1000,\"state\":\"Settled\",\"timeout_slots\":300,\"deadline_slot\":482}"
+
+"{\"id\":\"deal-3\",\"buyer\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"seller\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"amount\":1000,\"state\":\"Refunded\",\"timeout_slots\":1,\"deadline_slot\":191}"
+
+"{\"id\":\"deal-4\",\"buyer\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"seller\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"amount\":1000,\"state\":\"Refunded\",\"timeout_slots\":300,\"deadline_slot\":495}"
+
+### final balances (alice/bob/broker)
+0x70997970C51812dc3A010C7d01b50e0d17dc79C8 = 19000 [1.9e4]
+0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC = 1960
+0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 = 40
+### evidence_entries deal-1
+"[{\"seq\":0,\"from\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"to\":\"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266\",\"payload_digest\":\"bee6b97435be36bd708e025928597172f137dd610360017ef0a3c525adb008bd\",\"slot\":169},{\"seq\":1,\"from\":\"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266\",\"to\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"payload_digest\":\"992573964e174530ad8f1397e3bc0748c558bb16ab693a50981308dc0474d695\",\"slot\":170},{\"seq\":2,\"from\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"to\":\"0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266\",\"payload_digest\":\"6e3b509ad6a4a0b943c5ac742edce3be3da3517d3d73a6506fee965655924272\",\"slot\":172},{\"seq\":3,\"from\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"to\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"payload_digest\":\"5b3df286daff72fb1a3f679bcc5f3b67e3687e95980abd67eddde7b6b9a29de3\",\"slot\":173},{\"seq\":4,\"from\":\"0x70997970C51812dc3A010C7d01b50e0d17dc79C8\",\"to\":\"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC\",\"payload_digest\":\"b0e9d8c82d0e1b323b6aaed1dbb3737fc336676218a1f621ecadf2878890345e\",\"slot\":175}]"
+
+### evidence_entries deal-3
+"[]"
+

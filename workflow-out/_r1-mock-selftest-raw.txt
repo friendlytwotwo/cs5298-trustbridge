@@ -1,0 +1,5 @@
+### mock server self-test (multi-tools: python3 /tmp/r1_mock_llm.py, 0.0.0.0:9111)
+{"id": "chatcmpl-mock", "object": "chat.completion", "choices": [{"index": 0, "message": {"role": "assistant", "content": "{\"qualification_score\": 88, \"risks\": [\"mock-egress-mode\"], \"est_duration_ms\": 1234, \"est_confidence\": 55}"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}}
+### mock request log (paths + auth presence)
+/v1/chat/completions auth=Bearer probe body={"model":"m","messages":[]}
+/v1/chat/completions auth=Bearer probe body={"model":"m","messages":[]}

@@ -1,0 +1,15 @@
+### setup: create long-deadline deal-4 + fund (buyer alice=#1)
+created deal-4 {'id': 'deal-4', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+funded  {'id': 'deal-4', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+
+### keeper --once --deals deal-4 (Funded, not due -> nudge branch + not-due path)
+[keeper] explicit deals: ['deal-4']
+[keeper] node=http://127.0.0.1:10087 contract=0x40918Ba7f132E0aCba2CE4de4c4baF9BD2D7D849 sender=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 nudge=True
+[keeper] watching ['deal-4'] every 20s (guard decides; submissions are free)
+[keeper] nudge: zero-value faucet sent (one automined block)
+[keeper 21:59:43] deal-4: {"state": "Funded", "action": "not-due-or-reverted", "tx": "0x6def3da2717e9cca9bdea68ba0c4d9978c44a05acb80d5b3ccd69b900ff717e0"}
+[keeper] --once: single round done
+EXIT=0
+
+### cleanup: buyer cancel deal-4
+after cancel {'id': 'deal-4', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Refunded', 'timeout_slots': 300, 'deadline_slot': 495}

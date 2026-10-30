@@ -1,0 +1,8 @@
+### G2(a) balance_of(string) returns (uint128) 0xf39F...92266
+0
+### G2(b) assess_brief replay (empty base_url/api_key/model)
+"{\"qualification_score\":75,\"risks\":[\"heuristic-mode\"],\"est_duration_ms\":60000,\"est_confidence\":40}"
+### egress probe 1 (hostname multi-tools)
+Error: server returned an error response: error code -1: Execution error: Barrel(Lyquid(LyquidRuntime("assess(llm): llm call: openai-compat: HTTP transport error: Host runtime: http request failed: error sending request for url (http://multi-tools:9111/v1/chat/completions)"))).
+### egress probe 2 (container IP)
+Error: server returned an error response: error code -1: Execution error: Barrel(Lyquid(LyquidRuntime("assess(llm): llm call: openai-compat: HTTP transport error: Host runtime: http_request rejected by egress policy: blocked private/internal address `172.18.0.2`"))).

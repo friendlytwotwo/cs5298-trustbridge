@@ -1,0 +1,5 @@
+block_number     : 193
+discover_deals   : ['deal-1', 'deal-2', 'deal-3']
+due_deals()      : []
+assess_brief     : {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+deal_info deal-3 : {'id': 'deal-3', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Refunded', 'timeout_slots': 1, 'deadline_slot': 191}

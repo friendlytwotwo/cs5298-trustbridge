@@ -1,0 +1,2 @@
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+console_rc=124

@@ -37,6 +37,11 @@ use serde::Deserialize;
 use lyquid_llm::backend::openai_compat::OpenAiCompatBackend;
 use lyquid_llm::{call_model, ModelRequest, OutputFormat};
 
+/// R1 wire form: lib.rs `assess_brief` parses the four fields from the single
+/// `brief_json` string param (the 7×string signature hit solc "Stack too
+/// deep"; see lib.rs doc + w1b2-r1-s3-assess.md). Field names are the JSON
+/// keys — identical to build_request's input names, so no serde rename.
+#[derive(Deserialize)]
 pub struct DealBrief {
     pub buyer_profile_digest: String,
     pub seller_profile_digest: String,

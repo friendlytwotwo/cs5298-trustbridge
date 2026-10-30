@@ -577,12 +577,20 @@ pub fn due_deals(ctx: &_, now: u64) -> LyquidResult<Vec<DealId>> {
 // Instance functions (node-local; LLM egress lives ONLY here)
 // ---------------------------------------------------------------------------
 
-/// Instance-side assessment (W1-B2 S3 wiring, R2#1 wire shape): assess a
-/// buyer brief with the LLM and return the report JSON STRING (native face;
-/// the former export=eth face is withdrawn — see the platform-limit note at
-/// the attribute below). The caller (broker) then submits `create_deal` with
-/// the returned estimate values — the documented two-step commit; nothing here
-/// touches consensus state (instance `assessment_cache` only).
+/// Instance-side assessment (R1: export = eth restored in the 4×string wire
+/// shape): assess a buyer brief with the LLM and return the report JSON STRING.
+/// The caller (broker) then submits `create_deal` with the returned estimate
+/// values — the documented two-step commit; nothing here touches consensus
+/// state (instance `assessment_cache` only).
+///
+/// Wire shape (R1): `brief_json` is the DealBrief four-field JSON
+/// (`{"buyer_profile_digest","seller_profile_digest","terms_digest",
+/// "license_scope"}`; assessor.rs `#[derive(Deserialize)]` is the parse
+/// contract). The former 7-param form (four brief strings + three backend
+/// params) tripped solc "Stack too deep" on the generated instance stub in
+/// SequenceBackend.sol — the 6×string variant compiled, so 4 parameters are
+/// the safe margin. The 7-param record stays as the platform-limit archive:
+/// workflow-out/w1b2-claim-probe-evidence.txt §2 and w1b2-r1-s3-assess.md §4.
 ///
 /// Mode contract (R1#4): `api_key` OR `base_url` empty => HeuristicModel
 /// (TB_LLM replay, offline-deterministic); both non-empty => LyquidLlmModel
@@ -594,32 +602,16 @@ pub fn due_deals(ctx: &_, now: u64) -> LyquidResult<Vec<DealId>> {
 /// the eth wire call includes them in calldata, so the "key" is visible to
 /// whoever can read the chain anyway — a documented demo trust hole, to be
 /// moved behind instance config in W2'. Do NOT log the key.
-///
-/// W1-B2 收尾偏离登记（2026-10-28，实测）：`export = eth` 已撤下——7 个动态
-/// 参数（全 string）的 instance 桩在 shaker 生成的 SequenceBackend.sol 里触发
-/// solc「Stack too deep」（`dataEnd`/`headStart` 深 2 槽；0.8.24/0.8.30/0.8.37
-/// 三版 solc 均复现；删掉该桩即编译通过，6 参数版本亦通过）。证据：
-/// workflow-out/w1b2-claim-probe-evidence.txt §2（部署阻塞与处置）与
-/// w1b2-shell-rebaseline.txt。
-/// 方法体/签名/assess 语义零改动，仅失去 eth 远程调用面（仓内无任何调用方；
-/// 平台侧栈上限放宽或签名改造后可恢复）。本行属**持久保留**的登记性偏离。
-#[method::instance]
+#[method::instance(export = eth)] // R1 恢复导出：7→4 string（solc 6-string 实测边界，D3）
 pub fn assess_brief(
     ctx: &mut _,
-    buyer_profile_digest: String,
-    seller_profile_digest: String,
-    terms_digest: String,
-    license_scope: String,
+    brief_json: String,   // DealBrief 四字段的 JSON 串（R1 wire 形态）
     base_url: String,
     api_key: String,
     model: String,
 ) -> LyquidResult<String> {
-    let brief = assessor::DealBrief {
-        buyer_profile_digest,
-        seller_profile_digest,
-        terms_digest,
-        license_scope,
-    };
+    let brief: assessor::DealBrief = serde_json::from_str(&brief_json)
+        .map_err(|e| lyquid_error(&format!("brief parse: {e}")))?;
     // 模式契约（R1#4）：api_key/base_url 任一为空 => HeuristicModel（TB_LLM
     // 回放，离线确定）；双非空 => LyquidLlmModel（R1#4 后端构造）。
     let (mode, report) = if api_key.is_empty() || base_url.is_empty() {

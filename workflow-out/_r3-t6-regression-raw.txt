@@ -1,0 +1,232 @@
+# R3-T6 回归实录 — B3 收尾回归（2026-10-30）
+
+# HEAD = dc78d2f（未 commit/add/push；本文件写于工作树）
+# 纪律：本轮无实跑部署、无任何链写（不发交易、不建 deal、不重跑 committee 流）、无容器重启；
+#       日志一律直接重定向（不用 `tee /dev/stderr`，D-T3-2 截断教训）。
+# 本文件分段：T6.0 前置核验 → T6.1 D-T3-1 修复与回归 → T6.2 壳 40/40 → T6.5 收尾自检。
+
+########## T6.0 前置核验 ##########
+
+# command: docker ps --format "{{.Names}} {{.Status}}"
+multi-tools Up 16 hours
+multi-node1-1 Up 16 hours
+multi-node4-1 Up 16 hours
+multi-node2-1 Up 16 hours
+multi-node3-1 Up 16 hours
+multi-registry-1 Up 16 hours
+multi-anvil-1 Up 16 hours
+[exit=0]  → 7 容器全部 Up
+
+# command: md5sum -c workflow-out/_r2-t0-frozen-baseline.txt
+lyquid/src/types.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/assessor.rs: OK
+md5sum: WARNING: 1 line is improperly formatted
+[exit=0]  → 4×OK（WARNING 为已知基线文件格式告警，R2 同款）
+
+# command: git diff --stat -- lyquid/src/types.rs lyquid/src/core.rs lyquid/src/committee.rs
+（空输出）  → 冻结三文件零改动
+
+# command: git diff --numstat -- lyquid/src/assessor.rs
+5	0	lyquid/src/assessor.rs
+→ assessor 对 HEAD 仍 +5（R1 已审，在场）
+
+# command: md5sum lyquid/src/committee_certified.rs
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+# command: sed -n 91p lyquid/src/committee_certified.rs
+const E2_AVG_NUM: u16 = 4;
+→ GT3-f 口径不变（md5 与 E2_AVG_NUM 均未变）
+
+# command: git status --porcelain | wc -l
+94
+→ 规划期记数 93；执行时点为 94（差额 1 = T4 轮收尾后新增的留证件，以执行时点为准）
+
+# command: md5sum scripts/demo.py
+4fd99a6a3abe8d403d4fc5e2f7190b3c *scripts/demo.py
+→ 修复前留档（pre-T6.1）
+
+# command: git log --oneline -1
+dc78d2f W1-B2 closure evidence: probe A-H loop -> keeper Refunded proof, S4 RPC decision gate, shell rebaseline 40/40
+
+########## T6.1 D-T3-1 行为修复（scripts/demo.py） ##########
+
+# 修复前（pre-T6.1 工作树 :622-623；784 行；md5 4fd99a6a3abe8d403d4fc5e2f7190b3c）：
+    node.faucet(alice, 10_000)
+    before = snapshot()
+# 病灶：faucet 是 fire-and-forget send，读路径滞后一块 → before["alice"] 读到 0，
+# 终态断言 after[alice] == before[alice] 必然误报（D-T3-1；实录 _r3-t3-committee-raw.txt:41）。
+
+# 修复后（当前工作树 :622-634；795 行；md5 d81c50b1c0f0c15f376b1307e0861a88）：
+    pre_tap = node.balance_of(alice)
+    node.faucet(alice, 10_000)
+
+    def faucet_landed():
+        bal = node.balance_of(alice)
+        if bal - pre_tap >= 10_000:
+            return True, bal
+        return False, bal  # 读路径滞后（pending），继续等
+
+    tapped = wait_for(node, faucet_landed, timeout_s=15.0, interval_s=1.0,
+                      what="faucet read-back")
+    print(f"[committee] faucet read-back OK: alice {pre_tap} -> {tapped} (+{tapped - pre_tap})")
+    before = snapshot()
+
+# 差异数学：2 行 → 13 行 = 净 +11；其后行号整体 +11 位移（784 → 795）。
+# 锚点回验（修复后实读；对照 = 本轮编辑前实读的 784 行版，逐行比对）：
+#   余额断言本体（修复前 :692-696）→ 现 :703-707，逐字未改；
+#   arm_state abort 分支（修复前 :648-658）→ 现 :659-669；
+#   advance False 分支（修复前 :606-607）→ 未位移（在插入点之前），现仍 :606-607。
+
+# command: python -m py_compile scripts/demo.py
+[py_compile exit=0]
+
+# command: python scripts/demo.py --selftest
+  PASS  empty log == offset basis
+  PASS  single entry
+  PASS  two entries, slice order
+  PASS  permutation, order-sensitive
+  PASS  deterministic and order-divergent
+  PASS  official FNV vector fnv1a64(b"a")
+  PASS  official FNV vector fnv1a64(b"foobar")
+SELFTEST OK
+[selftest exit=0]  → 7 PASS
+
+# command: python scripts/demo.py --sim --flow all > /tmp/r3t6/sim.txt 2>&1
+[sim all exit=0]
+# command: diff -u workflow-out/_r2-t0-sim-baseline-raw.txt /tmp/r3t6/sim.txt
+（无输出）
+[diff exit=0]
+# 两侧行数：23 / 23（wc -l）→ IDENTICAL（修复只触 node-only flow_committee，sim 路径零改动）
+
+# command: python scripts/demo.py --sim --flow committee
+[demo] SIM MODE (FakeNode) — orchestration smoke only; deal semantics truth = rust core tests
+
+====================================================================
+  FLOW 4 — committee: 4-node oracle certification (route ②, E2)
+====================================================================
+[committee] node-only flow: FakeNode has no oracle certification round; rerun with --node <url> --contract <addr> --instance Lyquid-…
+[sim committee exit=1]
+→ 门控行为不因修复漂移（SystemExit rc=1）
+
+# 诚实边界：flow_committee 的端到端重验需要新实例（部署/链写），不在本轮授权面；
+# 修复后新增的 `[committee] faucet read-back OK: …` 与 `[committee] refund check OK: …`
+# 均**无已档实录**——本轮未对任何实例运行 committee 流。
+
+########## T6.2 壳 40/40 复跑（宿主通道） ##########
+
+# command: rustc --version
+rustc 1.99.1 (58cf8f9c3 2026-10-13)
+# command: cargo --version
+cargo 1.99.1 (5f94df478 2026-08-27)
+# command: cd ../workflow-out/verify_core && cargo test --lib --tests
+warning: function `report_json` is never used
+   --> F:\canvus auto\downloads\202609CS5298\trustbridge\lyquid\src\assessor.rs:167:15
+warning: `trustbridge` (lib) generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running unittests src\lib.rs (target\debug\deps\trustbridge-56f8a9a87b378b3f.exe)
+
+running 33 tests
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests\escrow_lifecycle.rs (target\debug\deps\escrow_lifecycle-979b01dd9eb8a959.exe)
+
+running 5 tests
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests\modelcheck_refund.rs (target\debug\deps\modelcheck_refund-fcda2c5b11bea064.exe)
+
+running 2 tests
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+[cargo test exit=0]
+→ 33 + 5 + 2 = 40/40，0 failed。通道 = 宿主（规划期 2026-10-30 实跑同一通道）；
+  宿主通道成功，按方案 §5-R2 无需启用容器 fallback（登记 D-T6-1）。
+
+########## T6.5 收尾自检 ##########
+
+# --- 1) 冻结门复验（与 T6.0 同口径，收尾时点） ---
+# command: md5sum -c workflow-out/_r2-t0-frozen-baseline.txt
+lyquid/src/types.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/assessor.rs: OK
+md5sum: WARNING: 1 line is improperly formatted
+[exit=0]  → 4×OK
+# command: git diff --stat -- lyquid/src/types.rs lyquid/src/core.rs lyquid/src/committee.rs
+（空输出）
+# command: git diff --numstat -- lyquid/src/assessor.rs
+5	0	lyquid/src/assessor.rs
+# command: md5sum lyquid/src/committee_certified.rs ; sed -n 91p lyquid/src/committee_certified.rs
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+const E2_AVG_NUM: u16 = 4;
+→ 冻结四件 + 三文件 diff + assessor +5 + committee_certified md5/E2_AVG_NUM 全部不变
+
+# --- 2) 提交面计数对照 ---
+# command: git status --porcelain | wc -l
+96
+→ T6.0 = 94；+2 行 = `?? docs/b3-user-test/`（3 文件折叠为一行）+ `?? workflow-out/_r3-t6-regression-raw.txt`。
+  本轮文件面新增 = 5 件（#4/#5/#6 三文档 + #7 本日志；#8 `_commit-plan.md` 与 #9
+  `implementation.md` 为既有 ??/M 文件的改写，不新增状态行）。
+# command: git log --oneline -1
+dc78d2f W1-B2 closure evidence: probe A-H loop -> keeper Refunded proof, S4 RPC decision gate, shell rebaseline 40/40
+→ 未 commit / add / push
+
+# --- 3) 三文档引用回验（分域，不抽样） ---
+# ① 操作手册：`scripts/demo.py` 引用共 39 处（去重），其中 3 处显式标注「修复前」
+#    （:622-623 / :648-658 / :692-696，Appendix C 与 D-T3-1 病灶史），其余 36 处
+#    （含仲裁修订新增的 :595）逐条核对**修复后行号/函数锚点**：
+#    - 行号引用：:50-55 :87 :147-176 :279 :533-549 :565-568 :569-573 :580-586 :585 :586
+#      :588-592 :595 :595-597 :598-601 :604-607 :609-612 :613 :622-633 :622-634 :637 :638-642
+#      :643-649 :652-669 :659-669 :672 :673 :674-676 :674-680 :677-680 :697-700 :703-707
+#      :703-709 :708-709 :711-724 :726-732 :783-786 → 起始行逐条 grep 命中（51 项行级检查 PASS）
+#      另：第二轮仲裁修订新增的同单元裸行号简写 :741 / :741-743 / :752（同一 demo.py 文件，
+#      3 项检查 PASS）→ demo 行级检查合计 54 项
+#    - 函数锚点：wait_for / arm_state / terminal_state / faucet_landed 均在位
+#    - 附：rpc.py 11 处引用（:52-56 :77-79 :91 :97 :282-287 :287 :338-361 :352-361 :358
+#      :392-412 :442，14 项检查 PASS）、implementation.md 引用 1 处（:250-253，2 项检查 PASS）、
+#      新增文件引用 3 处（agents/common/llm.py:48、agents/requirements.txt:4、README.md:67，
+#      各 1 项，共 3 项 PASS；仲裁修订新增）
+#    - 检验器注：:726-732 的期望短语跨 :731/:732 两行，检验器按 :732 取 token 报 1 次
+#      「未命中」，人工复核为 PASS（文档无误；短语在 :731 起）；rpc.py:52-56 同款 token
+#      位置错位（:56 是 dataclasses 行，仍在标准库导入范围内）亦人工复核为 PASS
+#    → 合计 73 项行级检查（54+14+2+3）：72 项自动 PASS + 1 项 token 位置人工复核 PASS
+#      （rpc.py:52-56 的 :56 为 dataclasses 行，仍在标准库导入范围内）。
+# ② 通过判据：console 原文行 :5 :6 :15 :17 :18 :19 :24 :29 :30 :31 :32-35 :36 :37 :38 :39
+#    全量回验 PASS；四条 signer 映射的 NodeID 与 transcript :12-15 的 node_id **逐字相同**
+#    且四者互异（IDENTITY CLOSURE = True）；读回引用 _r3-t3-final-state-raw.txt
+#    :5 :6-8 :11-16 :15 :19-27 全 PASS；w1b2-r3-e2-committee.md :49 :58 :87 :89
+#    :93-99（表头 :93 + 行 :95-99）:106 :121 全 PASS。
+# ③ 反馈收集表：四维齐备（任务理解 :29 / 操作顺畅度 :55 / 结果可信度 :83 / 开放意见 :105）；
+#    无虚构示例反馈（「示例」仅出现在免责声明 :5 与自检项 :123）。
+
+# --- 4) 提交覆盖表勾稽 ---
+# workflow-out/_commit-plan.md §6.1：`git status --porcelain` = 96 行，覆盖表 = 96 行，未归属 = 0
+# 分组计数：C1=1 / C2=1 / C3=1 / C4=16 / C7=18 / R3-C1=2 / R3-C2=1 / R3-C3=1 / R3-C4=1 /
+#           R3-C5=1 / R3-C6=30 / 不入库=6 / 不入库·归档=1 / 归档=16（合计 96）
+
+# --- 5) 只读复验（devnet，无链写；R9 纪律：无 warp / 无重启 / 无发交易） ---
+# command: python - <<PY  (NodeClient 只读快照，contract=0x8700…589)
+block_number = 404
+deal_info(deal-1) = {"amount": 1000, …, "state": "Refunded", "timeout_slots": 300, "deadline_slot": 637}
+balance_of(alice)  = 10000
+balance_of(bob)    = 0
+balance_of(broker) = 0
+evidence_entries(deal-1).len = 3
+e2_net_config = {"armed_deal": "deal-1", "current": {"committee": 4, "epoch": 1, "threshold": 4}, …}
+[py exit=0]
+→ 与 T3.5 归档读数（block 341）完全一致；block 高度 404 来自 T4 轮既有交易
+  （T4.5 链扫范围 0..404），本轮未产生任何交易。
+
+# --- 6) 本轮未做（诚实边界） ---
+# flow_committee 端到端重跑（需新实例部署 + 链写）：未做；操作手册中修复后新增行
+# （faucet read-back OK / refund check OK / console 取证段）均标「无已档实录」。
+# 对抗流 node 复跑：未做（授权面无链写实跑），登记于 implementation.md §6-#2 / §7.5-#2。
+
+# --- 7) 第三轮仲裁修订补记（2026-10-30；追加，不改既有行） ---
+# 操作手册 :10/:183 的已档 TARGET 原为 41 字符损坏串
+#   （0xc05034ED5191cbc3404956D9b7DfC7391e99bfc，少 1 字符且 d→D 翻转），
+#   已替换为实录 42 字符值 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc，并逐字比对 PASS
+#   （_r3-t3-committee-raw.txt:11、_r3-t3-deploy-raw.txt:584）。
+# §0 表其余证据字面同批核验：合约地址 42 字符、实例名 44 字符，与实录一致 PASS。
+# 原 T6.5-① 的 73 项行级检查覆盖代码行号/函数锚点，未含证据字面值比对，本条补齐该盲区。

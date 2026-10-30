@@ -1,0 +1,43 @@
+# R3 T3.3 main run — flow committee (single run, 2026-10-30T02:51:52Z)
+# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 --instance Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --flow committee
+# instance=Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa contract=0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 target=0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc
+# discipline: run exactly once; any RuntimeError is evidence (T3.4 grading/diagnosis), never a reason to rerun.
+
+
+====================================================================
+  FLOW 4 — committee: 4-node oracle certification (route ②, E2)
+====================================================================
+[committee] env: node=http://127.0.0.1:10087 contract=0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 instance=Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+[committee] TARGET=0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc (shaker to-hex Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa) != contract=0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 -> OK
+[committee] node1 port=10087 node_id=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia bytes32=0xa9373057a9b750277dd1df0c20f9a8fc66c1efb472a28a213830023dce4b98fe
+[committee] node2 port=11087 node_id=Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa bytes32=0x4eca21e3b3b00ff1481e7c78939ae2acb3815c6c968f2237acfae35993305d7b
+[committee] node3 port=12087 node_id=Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa bytes32=0xd15cb394c5e2a9828c8d0436be0da0657f8bc5b086f217fb933941d24a06b9eb
+[committee] node4 port=13087 node_id=Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia bytes32=0x7434b1441da7152a1732ae8488057df0d4fe8bddda15955f6b3fb53023bef0fe
+[committee] committee_config(NodeID×4, threshold=4) sent by broker (escrow 成员域)
+[committee] e2_configure(bytes32[]×4, 4) cast send -> blockHash            0x46bb1821752b7cb63c05e0ea2cbbdfd2805d82ee194140349758e9bf39954a3b (console: staged committee of 4 nodes)
+[committee] __lyquor_oracle_advance_epoch(cert_verdict, 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc) -> True
+[committee]   dest_epoch poll #1 -> 1
+[committee] __lyquor_oracle_finalize_epoch(cert_verdict, 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc) -> True
+[committee] e2_net_config after activate: {'armed_deal': '', 'current': {'committee': 4, 'epoch': 1, 'threshold': 4}, 'dest': {'change_count': 5, 'epoch': 1}, 'get_epoch': 1, 'staging': {'committee': 4, 'threshold': 4}}
+assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'risks': ['heuristic-mode'], 'est_duration_ms': 60000, 'est_confidence': 40}
+[committee] deal=deal-1 info={'id': 'deal-1', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+[committee] deal=deal-1 state=Funded (deliverable_digest=None -> check_evidence_shape=false -> NotFulfilled)
+[committee] deal=deal-1 state=Disputed (evidence entries=3)
+[committee] e2_net_config after arm: {'armed_deal': 'deal-1', 'current': {'committee': 4, 'epoch': 1, 'threshold': 4}, 'dest': {'change_count': 5, 'epoch': 1}, 'get_epoch': 1, 'staging': {'committee': 4, 'threshold': 4}}
+[committee] arm read-back OK: armed_deal == deal-1 (pre-arm='')
+[committee] e2_run_verdict_round() -> True (node1 single trigger; cast call channel — 禁多次触发)
+[committee] final state=Refunded balances after={'alice': 10000, 'bob': 0, 'broker': 0}
+Traceback (most recent call last):
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 784, in <module>
+    main()
+    ~~~~^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 778, in main
+    flows[name](node)
+    ~~~~~~~~~~~^^^^^^
+  File "F:\canvus auto\downloads\202609CS5298\trustbridge\scripts\demo.py", line 694, in flow_committee
+    raise RuntimeError(
+        f"[committee] refund accounting mismatch: before={before} after_fund={after_fund} "
+        f"after={after} (NotFulfilled must refund the buyer and leave seller/broker untouched)")
+RuntimeError: [committee] refund accounting mismatch: before={'alice': 0, 'bob': 0, 'broker': 0} after_fund={'alice': 9000, 'bob': 0, 'broker': 0} after={'alice': 10000, 'bob': 0, 'broker': 0} (NotFulfilled must refund the buyer and leave seller/broker untouched)
+
+# demo exit=1

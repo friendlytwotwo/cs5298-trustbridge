@@ -1,0 +1,91 @@
+# T4.6 代码量统计原始输出——执行员，2026-10-30 12:10:23 +0800
+# 工作根目录: trustbridge/
+# 计数工具: wc -l（GNU coreutils，宿主 Git Bash）；solloc/cloc 本机不可用（plan §3-T4.6 已核验）
+
+########## 1. wc -l 原始输出 ##########
+$ wc -l experiments/evm-contrast/Escrow.sol lyquid/src/*.rs
+   407 experiments/evm-contrast/Escrow.sol
+   273 lyquid/src/assessor.rs
+   185 lyquid/src/committee.rs
+   433 lyquid/src/committee_certified.rs
+   909 lyquid/src/core.rs
+   850 lyquid/src/lib.rs
+    86 lyquid/src/timeout.rs
+   197 lyquid/src/types.rs
+  3340 total
+
+$ ls lyquid/src/   # 确认目录结构：*.rs 均在顶层，另有 probe/ 子目录（不计入本口径）
+total 172
+drwxr-xr-x 1 lenovo 197121     0 Oct 30 08:45 .
+drwxr-xr-x 1 lenovo 197121     0 Oct 25 01:16 ..
+-rw-r--r-- 1 lenovo 197121 12382 Oct 29 21:49 assessor.rs
+-rw-r--r-- 1 lenovo 197121  8189 Oct 24 12:33 committee.rs
+-rw-r--r-- 1 lenovo 197121 22288 Oct 30 08:45 committee_certified.rs
+-rw-r--r-- 1 lenovo 197121 41749 Oct 19 01:34 core.rs
+-rw-r--r-- 1 lenovo 197121 49177 Oct 30 08:30 lib.rs
+drwxr-xr-x 1 lenovo 197121     0 Oct 28 23:39 probe
+-rw-r--r-- 1 lenovo 197121  5285 Oct 24 23:33 timeout.rs
+-rw-r--r-- 1 lenovo 197121  8420 Oct 19 01:35 types.rs
+
+$ ls lyquid/src/probe/   # 子目录内容（仅供说明，不计入 lyquid/src/*.rs 口径）
+total 32
+drwxr-xr-x 1 lenovo 197121     0 Oct 28 23:39 .
+drwxr-xr-x 1 lenovo 197121     0 Oct 30 08:45 ..
+-rw-r--r-- 1 lenovo 197121  1215 Oct 24 19:06 mod.rs
+-rw-r--r-- 1 lenovo 197121  6965 Oct 24 19:24 s1_timer.rs
+-rw-r--r-- 1 lenovo 197121 15171 Oct 28 23:39 s2_oracle.rs
+
+########## 2. #[cfg(test)] 起始行（测试模块起点） ##########
+$ grep -n "cfg(test)" lyquid/src/*.rs
+lyquid/src/committee.rs:92:#[cfg(test)]
+lyquid/src/assessor.rs:209:#[cfg(test)]
+lyquid/src/core.rs:309:#[cfg(test)]
+
+$ grep -c "cfg(test)" lyquid/src/*.rs   # 每文件出现次数
+lyquid/src/committee.rs:1
+lyquid/src/assessor.rs:1
+lyquid/src/committee_certified.rs:0
+lyquid/src/core.rs:1
+lyquid/src/types.rs:0
+lyquid/src/lib.rs:0
+lyquid/src/timeout.rs:0
+
+########## 3. 派生口径计算（由上面 wc 与 cfg(test) 行号直接算出） ##########
+  lyquid/src/*.rs 合计（wc 自带 total 行亦为同值）: 2933
+  其中 lib.rs: 850
+  六文件（core/committee_certified/committee/types/assessor/timeout，不含 lib.rs）合计: 2083
+  测试行（三处 #[cfg(test)] 起至文件尾，含该行）:
+    core.rs:     909 - (309-1) = 601
+    committee.rs: 185 - (92-1)  = 94
+    assessor.rs:  273 - (209-1) = 65
+    测试行合计 = 760
+  六文件去测试 = 2083 - 760 = 1323
+  lyquid/src 顶层去测试 = 2933 - 760 = 2173
+
+  交叉校验（脚本计算 vs plan §2 基线）:
+    Escrow.sol             plan=407    实测=407    -> MATCH
+    contract6_with_tests   plan=2083   实测=2083   -> MATCH
+    topsrc_with_tests      plan=2933   实测=2933   -> MATCH
+
+########## 4. 运行时字节码 ##########
+  来源: workflow-out/_r3-t4-flows-raw.txt:22 的 runtimeBytecodeBytes 字段（T4.3 canonical run-3 实跑产出）:
+    runtimeBytecodeBytes=8709
+  独立复核: workflow-out/_r3-t4-evidence-recheck-raw.txt 的 cast codesize 读回:
+    cast codesize      = 8709
+
+########## 5. 口径声明（报告引用本件时必须照录） ##########
+  (a) 计数工具 = wc -l（行数，含空行与注释）；solloc/cloc 不可用，未做「有效代码行」折算。
+  (b) 两档：含测试 = 文件总行数；去测试 = 总行数 − 该文件 #[cfg(test)] 起始行至文件尾的行数。
+      本仓库三处测试模块均延至文件尾（core.rs:309 / committee.rs:92 / assessor.rs:209），
+      故去测试 = 起始行号 − 1。
+  (c) 两档：含 lib.rs（合约导出方法层/平台胶水，plan §2 判级口径明确计入 Lyquid 合约侧）
+      与不含 lib.rs（仅合约本体六文件）。
+  (d) lyquid/src/*.rs 为顶层 glob，不含 probe/ 子目录（probe/ 内容见 §1，不计入任何一档）。
+  (e) Escrow.sol 无单元测试；其行为验证等价物是 run-contrast.sh 的三流（normal/timeout/adversarial）
+      + 负对照（签名集绑定 deal/root 重放必败）流程，见 _r3-t4-flows-raw.txt。
+  (f) 代码量对比三列（plan §2 硬约束，不得回退为单口径 407-vs-2083）：
+      a) Escrow.sol 单合约 = 407（无测试）
+      b) Lyquid 合约本体六文件 = 2083（含测试）/ 1323（去测试）
+      c) lyquid/src 顶层合计 = 2933（含 lib.rs 850，含测试）/ 2173（去测试）
+
+# 生成时刻 2026-10-30 12:10:26 +0800

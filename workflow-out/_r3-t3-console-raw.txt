@@ -1,0 +1,39 @@
+# R3 T3.4 console full capture — grading basis (2026-10-30T02:52:21Z)
+# command: MSYS_NO_PATHCONV=1 timeout 60 docker exec multi-tools shaker console Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --endpoint ws://node1:10087/ws
+# source = node1 (clause 2); instance NAME (not address); rc=124 = normal timeout close (T1 precedent).
+
+e2_configure: staged committee of 4 nodes threshold=4 (dest epoch advance/finalize required to activate)
+e2_net_config: {"armed_deal":"","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":637}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":637}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":637}
+e2_net_config: {"armed_deal":"","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+e2_arm: armed_deal=deal-1 (network domain; single send visible to all nodes)
+e2_net_config: {"armed_deal":"","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+e2_net_config: {"armed_deal":"deal-1","current":{"committee":4,"epoch":1,"threshold":4},"dest":{"change_count":5,"epoch":1},"get_epoch":1,"staging":{"committee":4,"threshold":4}}
+e2_run_verdict_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=4)
+e2_propose: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia deal=deal-1 verdict=1 (shape_ok=false, entries=3, avg_num=4, target.seq_id=HashBytes(Hash("b813e12d322b9312d099fba2da69b8f7edc8656fdc673f5e454b894471ca3cbd")))
+e2_aggregate: input from Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia -> deal=deal-1 verdict=1 (ts_ms=1793328719418)
+e2_aggregate: input from Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa -> deal=deal-1 verdict=1 (ts_ms=1793328719458)
+e2_aggregate: input from Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa -> deal=deal-1 verdict=1 (ts_ms=1793328719460)
+e2_aggregate: input from Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia -> deal=deal-1 verdict=1 (ts_ms=1793328719460)
+e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+e2_aggregate: input from Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia -> deal=deal-1 verdict=1 (ts_ms=1793328719418)
+e2_aggregate: input from Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa -> deal=deal-1 verdict=1 (ts_ms=1793328719458)
+e2_aggregate: input from Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa -> deal=deal-1 verdict=1 (ts_ms=1793328719460)
+e2_aggregate: input from Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia -> deal=deal-1 verdict=1 (ts_ms=1793328719460)
+e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+e2_run_verdict_round: certified call submitted to the sequencing backend
+committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4) deal=deal-1 verdict=1
+committee_verdict_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+committee_verdict_certified: signer 1 -> Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa
+committee_verdict_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+committee_verdict_certified: signer 3 -> Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia
+apply_verdict: deal=deal-1 verdict=1 misconduct=[]
+committee_verdict_certified: applied deal=deal-1 verdict=1 signers=["Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia", "Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa", "Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa", "Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia"] (signers must be distinct NodeIDs among committee_members)
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":637}
+rc=124

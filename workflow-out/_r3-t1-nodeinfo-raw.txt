@@ -1,0 +1,9 @@
+# T1 step1 GetNodeInfo x4 (host) + connectivity - 2026-10-30T02:04:39Z
+=== GetNodeInfo host:10087 ===
+{"nodeId":{"value":"Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia"},"version":"0.8.1+9e5108a"}
+=== GetNodeInfo host:11087 ===
+{"nodeId":{"value":"Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa"},"version":"0.8.1+9e5108a"}
+=== GetNodeInfo host:12087 ===
+{"nodeId":{"value":"Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa"},"version":"0.8.1+9e5108a"}
+=== GetNodeInfo host:13087 ===
+{"nodeId":{"value":"Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia"},"version":"0.8.1+9e5108a"}

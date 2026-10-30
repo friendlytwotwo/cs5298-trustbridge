@@ -1,0 +1,327 @@
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+fund:deal_view: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+fund:deal_view: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+fund:deal_view: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":531}
+apply_verdict: deal=deal-5 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=1]
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":541}
+apply_verdict: deal=deal-6 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":549}
+apply_verdict: deal=deal-7 verdict=0 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":557}
+apply_verdict: deal=deal-8 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+apply_verdict: deal=deal-4 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+fund:deal_view: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":1,"deadline_slot":null}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":595}
+apply_verdict: deal=deal-12 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":595}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":603}
+apply_verdict: deal=deal-13 verdict=0 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":603}
+assess_brief: mode=heuristic report={"qualification_score":75,"risks":["heuristic-mode"],"est_duration_ms":60000,"est_confidence":40}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+fund:deal_view: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Qualified","timeout_slots":300,"deadline_slot":null}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Funded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Submitted","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Disputed","timeout_slots":300,"deadline_slot":611}
+apply_verdict: deal=deal-14 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-6","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":541}
+deal_info: {"id":"deal-7","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":549}
+deal_info: {"id":"deal-8","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":557}
+deal_info: {"id":"deal-9","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":568}
+deal_info: {"id":"deal-10","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":579}
+deal_info: {"id":"deal-11","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":288}
+deal_info: {"id":"deal-12","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":595}
+deal_info: {"id":"deal-13","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Settled","timeout_slots":300,"deadline_slot":603}
+deal_info: {"id":"deal-14","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":611}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":206}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-2","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":210}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-3","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":1,"deadline_slot":213}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-4","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":521}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+deal_info: {"id":"deal-5","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":531}
+probe_configure: staged committee of 4 nodes threshold=2 (dest epoch advance/finalize required to activate)
+probe_run_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=1)
+probe_propose: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia round=1 ts_ms=1793325951381 (avg_num=1 target.seq_id=HashBytes(Hash("b813e12d322b9312d099fba2da69b8f7edc8656fdc673f5e454b894471ca3cbd")))
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_run_round: certified call submitted to the sequencing backend
+probe_on_certified: ctx.cert.signers RAW = [0, 2] (type Vec<SignerID>=Vec<u32>, len=2)
+probe_on_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+probe_on_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+probe_on_certified: payload(round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia ts_ms=1793325951381) recorded; probe_rounds=1
+probe_bump_threshold: set_threshold(4) -> true (false = epoch==0 or same-threshold)
+probe_run_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=1)
+probe_propose: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia round=2 ts_ms=1793326023257 (avg_num=1 target.seq_id=HashBytes(Hash("b813e12d322b9312d099fba2da69b8f7edc8656fdc673f5e454b894471ca3cbd")))
+probe_aggregate: aggregated round=2 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_aggregate: aggregated round=2 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_run_round: certified call submitted to the sequencing backend
+probe_on_certified: ctx.cert.signers RAW = [0, 1, 2, 3] (type Vec<SignerID>=Vec<u32>, len=4)
+probe_on_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+probe_on_certified: signer 1 -> Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa
+probe_on_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+probe_on_certified: signer 3 -> Node-oq2lcra5u4ksufzsv2ciqbl56dkp5c653ikzkx3lh62tai566d7dseia
+probe_on_certified: payload(round=2 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia ts_ms=1793326023257) recorded; probe_rounds=2

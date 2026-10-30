@@ -1,0 +1,79 @@
+# T4.1/T4.3 宿主↔容器 md5 勾稽（拷出 + 拷回双向）——执行员，生成时刻 2026-10-30 12:04:12 +0800
+# 工作根目录: trustbridge/
+# md5sum 格式差异说明：宿主（Git Bash coreutils）输出 'hash<空格>*path'，容器输出 'hash<两个空格>path'；
+# 比较逻辑按字段解析并剥离前导 '*'，只比对 32 位 md5 值。仅格式差异豁免，内容判据是 md5 严格相等。
+
+########## 第一部分：拷出方向（宿主 experiments/evm-contrast/ -> 容器 /tmp/tb-evm） ##########
+
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools rm -rf /tmp/tb-evm
+  rc=0
+$ MSYS_NO_PATHCONV=1 docker cp experiments/evm-contrast/. multi-tools:/tmp/tb-evm
+  rc=0
+
+$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-evm multi-tools md5sum Escrow.sol foundry.toml run-contrast.sh
+a0dc82822b327d38bb13b07080f85872  Escrow.sol
+640194e587e96f8a6cc90983c70e8a55  foundry.toml
+8b0a3454e4139f65000a5ad40b928482  run-contrast.sh
+
+$ md5sum experiments/evm-contrast/Escrow.sol experiments/evm-contrast/foundry.toml experiments/evm-contrast/run-contrast.sh   # 宿主源文件
+a0dc82822b327d38bb13b07080f85872 *experiments/evm-contrast/Escrow.sol
+640194e587e96f8a6cc90983c70e8a55 *experiments/evm-contrast/foundry.toml
+8b0a3454e4139f65000a5ad40b928482 *experiments/evm-contrast/run-contrast.sh
+
+# 逐项比对:
+  Escrow.sol       container=a0dc82822b327d38bb13b07080f85872 host=a0dc82822b327d38bb13b07080f85872 -> MATCH
+  foundry.toml     container=640194e587e96f8a6cc90983c70e8a55 host=640194e587e96f8a6cc90983c70e8a55 -> MATCH
+  run-contrast.sh  container=8b0a3454e4139f65000a5ad40b928482 host=8b0a3454e4139f65000a5ad40b928482 -> MATCH
+  拷出勾稽结果: 3/3 MATCH
+
+########## 第二部分：实跑（canonical run —— 编号 run-3） ##########
+# 说明：本次实跑与下面第三部分的拷回勾稽在同一次执行中完成，中间不再做任何 rm/cp 源文件操作，
+#       以确保容器内产物与宿主归档件的一一对应关系可核。
+$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-evm multi-tools bash run-contrast.sh   # 输出见 _r3-t4-flows-raw.txt / 本件末段摘要
+  EXIT_CODE=0
+  run 期间时间戳: start=12:04:18
+  contract=0x976C214741b4657bd99DFD38a5c0E3ac5C99D903 deployTx=0x4e99b421a157bd7a1c15e86acb949660e5fb639edff1333fe0e5a417160c7447 deployGasUsed=0x1d8a88 runtimeBytecodeBytes=8709 escrow_sol_lines=407
+  deploy	Escrow	0x4e99b421a157bd7a1c15e86acb949660e5fb639edff1333fe0e5a417160c7447	deployGasUsed=0x1d8a88	codeSize=8709	srcLines=407
+  negative-control replay rc=1 (non-zero = signature set is bound to deal/root; expected)
+  DONE
+
+########## 第三部分：拷回方向（容器产出 -> 宿主归档件） ##########
+
+$ MSYS_NO_PATHCONV=1 docker cp multi-tools:/tmp/tb-evm/gas-raw.txt workflow-out/_r3-t4-gas-raw.txt
+  rc=0
+$ MSYS_NO_PATHCONV=1 docker cp multi-tools:/tmp/tb-evm/report.txt  workflow-out/_r3-t4-flows-raw.txt
+  rc=0
+
+$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-evm multi-tools md5sum gas-raw.txt report.txt   # 容器侧
+3f49b7358d2c11b4972580270ca2c141  gas-raw.txt
+db00915f7fbf421e6c3a31619a5b8ddc  report.txt
+
+$ md5sum workflow-out/_r3-t4-gas-raw.txt workflow-out/_r3-t4-flows-raw.txt   # 宿主拷回件
+3f49b7358d2c11b4972580270ca2c141 *workflow-out/_r3-t4-gas-raw.txt
+db00915f7fbf421e6c3a31619a5b8ddc *workflow-out/_r3-t4-flows-raw.txt
+
+# 逐项比对:
+  gas-raw.txt              container=3f49b7358d2c11b4972580270ca2c141 host=3f49b7358d2c11b4972580270ca2c141 -> MATCH
+  report.txt               container=db00915f7fbf421e6c3a31619a5b8ddc host=db00915f7fbf421e6c3a31619a5b8ddc -> MATCH
+  拷回勾稽结果: 2/2 MATCH
+
+## 勾稽总计: 拷出 3/3 + 拷回 2/2
+## GT4-b: PASS（3/3 + 2/2）
+
+########## 第四部分：执行过程如实登记（含执行员自身失误，两轮作废 run 的产物留证） ##########
+# (a) 12:02:39 run-1 实跑成功；12:02:44 拷回并存档，容器侧↔宿主 2/2 一致
+#     （当时 md5: gas-raw=f4bc15e9014546b08e227894eee230b8 / report=37a15e0b0cf7bbacef4bcc0af146c84b）。
+# (b) 12:02:58 执行员重写本日志时误重跑 'rm -rf /tmp/tb-evm'，容器内 run-1 产物被清；run-1 宿主件已另存留证。
+# (c) 12:03:27 run-2 实跑成功；其产物拷回后宿主 md5 为 44ef19a4…/b1f7ecc1…，但同样的重写失误在 12:03:48 再次清空容器，
+#     容器侧勾稽无法在本件成型；run-2 宿主件已另存留证。
+# (d) 本次 run-3 = 本件第二部分，与第三部分同一次执行，产物即归档件，勾稽见上。
+# 留证件 md5 复核（应与 (a)/(c) 记录一致）：
+  f4bc15e9014546b08e227894eee230b8 *workflow-out/_r3-t4-run1-superseded-gas-raw.txt
+  37a15e0b0cf7bbacef4bcc0af146c84b *workflow-out/_r3-t4-run1-superseded-flows-raw.txt
+  44ef19a44d91d0444ffe3e6eafb0cebd *workflow-out/_r3-t4-run2-superseded-gas-raw.txt
+  b1f7ecc14e8762d11b9cfd768c321e21 *workflow-out/_r3-t4-run2-superseded-flows-raw.txt
+
+# 附：归档件行数
+  20 workflow-out/_r3-t4-gas-raw.txt
+  45 workflow-out/_r3-t4-flows-raw.txt
+  65 total

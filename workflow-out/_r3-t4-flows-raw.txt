@@ -1,0 +1,45 @@
+===== [T4] build =====
+Compiling 1 files with Solc 0.8.37
+Solc 0.8.37 finished in 291.60ms
+Compiler run successful!
+warning[block-timestamp]: usage of `block.timestamp` in a comparison may be manipulated by validators
+    ╭▸ Escrow.sol:204:17
+    │
+204 │         require(block.timestamp <= deadline(dealId), "deadline passed");
+    │                 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │
+    ╰ help: https://book.getfoundry.sh/reference/forge/forge-lint#block-timestamp
+
+warning[block-timestamp]: usage of `block.timestamp` in a comparison may be manipulated by validators
+    ╭▸ Escrow.sol:227:17
+    │
+227 │         require(block.timestamp >= deadline(dealId), "deadline not reached");
+    │                 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │
+    ╰ help: https://book.getfoundry.sh/reference/forge/forge-lint#block-timestamp
+
+===== [T4] deploy =====
+contract=0x976C214741b4657bd99DFD38a5c0E3ac5C99D903 deployTx=0x4e99b421a157bd7a1c15e86acb949660e5fb639edff1333fe0e5a417160c7447 deployGasUsed=0x1d8a88 runtimeBytecodeBytes=8709 escrow_sol_lines=407
+roles: deployer/broker=0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266 buyer=0x70997970C51812dc3A010C7d01b50e0d17dc79C8 seller=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC committee4=0x90F79bf6EB2c4f870365E785982E1f101E93b906
+===== [T4] committeeConfig(4 members, threshold=3) =====
+committeeSize=4 threshold=3
+===== [T4] flow 1 normal: create -> fund -> notarize -> deliver -> complete =====
+normal deal=1 state=1 (Qualified=1)
+normal final state=5 (Settled=5) buyer=9995994045828355336971->9994993955005354701210 seller=10002937710234942389588 broker=9999990642387141827332
+===== [T4] flow 2 timeout: create -> fund -> warp -> claimTimeout =====
+timeout deal=2 deadline=1793333121 [1.793e9] now=1793333117
+timeout warp: now=1793333147 (deadline=1793333121 [1.793e9])
+timeout final state=6 (Refunded=6) buyer=9994993745447353234304->9994993712734353005313
+===== [T4] flow 3 adversarial: forged deliverable -> dispute -> k-of-n verdict(NotFulfilled) =====
+adv deal=3 state=4 (Disputed=4)
+adv evidenceRoot=0xd79732f279cb2b5fb397203c0e3d68efd66b99e1ea8457d08c17cb421fd6d6fa verdictDigest(NotFulfilled)=0xc6ff5d12a40a43b5e708eb19d4f6063f9c281e0e44e5e59acf7a8bd22d69d2e5 evidenceCount=2
+adv sigs: buyer=0x5a7c522619698c099a77d77360f83c0ee5de3324bbac355d2133167e9000d53e1d2b7879fb42c9af41b0690243e0431acb992c7f01c061912d22eb02e39acdf81c seller=0x3d1b778ae7625f99774b2fb222d03e3909902dbd8bc3e68f1302d58f456842cb7fa1c3c1c69af825dd90879cef8f2ca6e6020153f17dac39ffa12c66a5ca624f1c committee4=0xfc917febfdbb8be5419503c185e92c59a1c7c2fe1ce8ad65e5af6ed624f20fbd6dea829387930fe3ed03e9990919e8d34011cfaa066de7fd7fd1a13d87bab9b21b (3-of-4, raw digest sign)
+adv final state=6 (Refunded=6) buyer=9994993503176351538407->9994993296341350090562
+adv misconduct(seller)=0 (NotFulfilled must NOT bump; Malicious would)
+===== [T4] negative control: replay the same signature set on a different deal =====
+negative-control replay rc=1 (non-zero = signature set is bound to deal/root; expected)
+Error: Failed to estimate gas: server returned an error response: error code 3: execution reverted: non-member signer, data: "0x08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000116e6f6e2d6d656d626572207369676e6572000000000000000000000000000000": Error("non-member signer")
+===== [T4] summary =====
+sol_source_lines=407 runtime_bytecode_bytes=8709 deploy_gasUsed=0x1d8a88
+gas-raw.txt: 20 lines (per-op gasUsed)
+DONE

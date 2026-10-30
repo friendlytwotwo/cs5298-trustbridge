@@ -1,221 +1,319 @@
-# W1-B2 收尾方案：claim_timeout 空 revert 根因闭环（探针佐证 + keeper 写通道改造 + Refunded 实测）
+# R3-T5+T6 方案：B3 三文档与回归收尾（规划师，2026-10-30）
 
-> 规划人：规划师（2026-10-28）。执行基线 = 当前工作树（含 W1-B2 未提交成果 lib.rs / assessor.rs / Cargo.toml / agents/common/rpc.py，**严禁回退**）。
-> 编排者一手诊断 D1–D4 已实证，本方案全部采信为前提，不重新验证、不复活已被推翻的『wasm panic』假设（w1b2-claim-revert-finding.md 原假设作废）。
+六阶段拆分③：文档 + 回归任务，**无实跑部署、无任何链写**（不发交易、不建新 deal、不重跑
+committee 流）。前置：T3 E2 已 L2 达成（实例 `Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa`
+@ `0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589`，`w1b2-r3-e2-committee.md` §T3 + `_r3-t3-*` 四件）；
+T4 对照报告已交付（`r3-t4-contrast-report.md`，implementation.md §8）。旧 T4 方案已备份为
+`_plan-prev-r3t5t6-backup.md`（本轮规划期 cp 逐字节备份，md5 `a7eb173cab74ccd8c4a873d0ad9a8d56`
+两侧一致）。R3 全案（含 §3.4 判级阶梯、§5 B3 定义、T5/T6 行）存于 `_plan-prev-r3-backup.md`。
 
----
+## 0. 受影响文件清单（9 项，供审查员核对）
 
-## 0. 受影响文件清单（供审查员核对，共 8 项）
-
-| # | 文件 | 动作 | 持久性 |
-|---|---|---|---|
-| 1 | `lyquid/src/lib.rs` | 新增探针 `probe_claim_sim` + ACCESS_MATRIX 一行（带移除标记）；T7 移除 | 临时（进→出，终态相对 T0 快照零净变化） |
-| 2 | `scripts/keeper.py` | 写通道从 `cast send` 改为 NodeClient（eth_sendTransaction + 回执轮询） | **持久保留** |
-| 3 | `workflow-out/w1b2-claim-probe-evidence.txt` | 新建：新实例上探针 A~H 输出（cast call 返回）+ node1 容器控制台 probe 阶段行截取（trap 唯一证据通道，附可验证性注记） | 交付物 |
-| 4 | `workflow-out/w1b2-refunded-evidence.md` | 新建：tx hash + `state=="Refunded"` 字面 + balance_of 前后 + keeper 日志 | 交付物 |
-| 5 | `workflow-out/w1b2-claim-revert-finding.md` | 头部追加 superseded 注记（指向 #3/#4 与 D1/D2 根因），**不改正文** | 交付物 |
-| 6 | `../workflow-out/verify_core/`（**parent 级**，非 trustbridge 仓库内） | 路线①：Cargo.toml 增存根 path 依赖；路线②：assessor `#[path]` 改指 HEAD 落盘件 | 持久（壳自身修复） |
-| 6a | `../workflow-out/verify_core/stubs/lyquid-llm/`（Cargo.toml + src/lib.rs） | **路线①新增**：lyquid_llm 最小签名存根 crate（测试纯逻辑不执行，call_model 返回 Err 即可） | 持久（路线①时） |
-| 7 | `workflow-out/w1b2-shell-rebaseline.txt` | 新建：壳重定基线证据（修复前后 cargo test 输出） | 交付物 |
-| 8 | `workflow-out/_pre-task-snapshot.patch` | 新建：T0 工作树快照（事故恢复用） | 自保 artifact |
-
-不改：`lyquid/src/types.rs`、`lyquid/src/core.rs`（core 语义冻结，T7 以 `git diff` 空输出勾稽）；`agents/common/rpc.py`（基线，只复用不改）；`lyquid/Cargo.toml`（基线）。
-
----
-
-## 1. 已采信前提（编排者 2026-10-28 一手诊断，规划不重证）
-
-- **D1 根因**：链上实例 `0x1c85638e118b37167e9298c2268758e058DdfDA0` 是 D3 增补前旧镜像（三方 md5 互不相同）；`balance_of`/`due_deals` 一律 `Barrel(FuncNotFound)`、`deal_info` 正常；`claim_timeout` 不在其 eth 导出面 → **空 revert = 旧镜像未导出方法的执行错误**，非 wasm panic、非 core 语义 bug。
-- **D2 写通道决策**：`cast send`（gas estimation）对 lyquid 合约不可依赖；写通道 = `eth_sendTransaction` 不带 gas 字段 + `eth_getTransactionReceipt` 轮询 `status=="0x1"`（w1b2-s4-rpc.md §B-⑤ 决策门）。
-- **D3 环境现状**：容器全 Up（**属待 G-init 预检前提**，见 §5 T-init——规划期晚些时候宿主 cargo 已实测损坏，环境不可再默认假定）；部署通道 = 宿主 `docker cp` → `multi-tools:/tmp/tb-lyquid` → 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key <anvil#0> Cargo.toml`；每次 deploy 全新实例（新地址），需重放 faucet/create_deal/fund（序列见 w1a-funded-evidence.txt）。anvil#0 私钥 `0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80`。
-- **D4 代码事实**：`lib.rs:414-425` claim_timeout 无守卫（Anyone by design）；`core.rs:170-178` 纯函数零 panic（Funded 且 now≥deadline → full_refund）；`lib.rs:709-713` current_slot()；ACCESS_MATRIX 每 network fn 一行，探针须同步加行（Anyone + probe-removable 注记）；`Deal: Clone` 已 derive（types.rs:93），探针克隆模拟、core 不动。
-
-## 2. 本轮规划期新实证（规划师实跑，编码员须知晓）
-
-1. **验证壳当前编译失败**（关键新事实）：实跑 `cd "F:\canvus auto\downloads\202609CS5298\workflow-out\verify_core" && cargo test --lib --tests` → **error[E0432]/[E0433]**：`assessor.rs:37-38` 的 `use lyquid_llm::...` 无法解析（壳 Cargo.toml 仅有 serde/serde_json）。即未提交的 W1-B2 S3 改动已打破壳的"零平台依赖"前提，**硬约束"39/39"当前不可能原样达成**，须先修壳。
-1a. **『壳补 lyquid-llm git pin』路线已被容器实证否决（冷读仲裁 2026-10-28 实测，勿再尝试）**：multi-tools 容器内（cargo 1.99.0，x86_64）以最小 crate 依赖 `lyquid-llm rev=fd575e8 features=["ldk"]` 跑 `cargo check --offline` → `error[E0425]: cannot find type NativeGuestAbi`（ldk `lyquid/src/runtime/mod.rs:38/40/42`）。该错误出在 ldk 自身源码，**宿主与容器双不可达**；parent 级 ldk clone 的 path 依赖是同一 crate 同一代码，同因失败（备选A 作废）。命令与错误尾部随 T0 一并记入 `w1b2-shell-rebaseline.txt`。
-2. **测试计数漂移**：HEAD（1c0e45f）assessor 5 个 `#[test]`（`git show HEAD:lyquid/src/assessor.rs | grep -c "#\[test\]"` = 5，壳基线 32+5+2=39 出处 w1b2-t0-baseline.txt）；工作树 assessor 6 个 → 修复编译后计数视路线而定：**①存根=33+5+2=40 / ②HEAD 挂载=32+5+2=39**（见 §5 T0-2）。"39/39"按意图执行 = 壳全绿，数字以 T0 重定基线（注明路线）为准并如实登记。
-3. **宿主 cargo 可执行文件已坏，git/path 依赖路线亦不可达**：宿主 cargo git 缓存已含 ldk rev `fd575e8`（`~/.cargo/git/checkouts/ldk-b72281d44a8ce511/` 下有 `fd575e8` 目录），parent 级 `ldk/` 本地 clone 恰在 `fd575e88a920…`（`git -C ldk rev-parse HEAD`）——但以它们为 lyquid-llm 依赖来源的路线已被 §2-1a 实证否决（E0425），ldk clone 此后仅作 T-init 起栈的 compose 文件出处。**2026-10-28 晚（22:39–22:44，目录 mtime）宿主工具链遭外力破坏，规划师复核实证**：`~/.cargo/bin/cargo.exe` 为指向缺失 `rustup.exe` 的断裂符号链接；toolchain `1.99.0` 与 `stable` 两个 bin 目录均仅余 `cargo.pdb` 无 `cargo.exe`（本会话早前实跑 `cargo test` 尚成功，破坏发生在其后）。故宿主侧壳路径以 T-init ③ 通过或修复为前提，否则走容器路线（R1，含 #[path] 改写）。
-4. **宿主 python 通道可用**：`python 3.14.5 + requests 2.34.2` 实测在机；`NodeClient`（agents/common/rpc.py:197-381）已实现 §B-⑤ 全部决策：`_send` = eth_sendTransaction 无 gas 字段 + 回执轮询 status=="0x1"（rpc.py:241-262），且已含 `claim_timeout/deal_info/balance_of/due_deals/faucet/create_deal/fund` 封装与 selector 表（`claim_timeout(string)=0x786cfc8f`，rpc.py:76）；`DEFAULT_NODE=http://127.0.0.1:10087`、URL 拼 `/api`（rpc.py:220）、`DEFAULT_SENDER=0xf39F…92266`（rpc.py:57，=anvil#0=BROKER）。宿主直连 node1 API 通道在 §B/C 已实证（w1b2-s4-rpc.md:13、:153-160）。
-5. **timeout_slots 换算**：`timeout_slots = est_ms×2/400`（types.rs:195-197，SLOT_MS=400、TIMEOUT_SAFETY_FACTOR=2）→ **est_duration_ms=200 ⇒ timeout_slots=1**（与 D3 所述旧实例 deal 参数自洽）。
-6. **只读 getter 形态先例**：`deal_info(ctx: &_, …) -> LyquidResult<String>`（lib.rs:532，共享引用 + JSON 串返回）——探针照此形态方能 cast call 可读；eth_call 对可变方法不开放（w1b2-claim-revert-finding.md 排除项记载 fund 之 call 为 FuncNotFound）。
-
-## 3. 目标 / 非目标
-
-**目标**（= 交付闭环四件套）：
-1. 新实例上 `probe_claim_sim` 各阶段 A~H 输出留存（证明 core 路径在新镜像上全程无 panic 点）；
-2. keeper 实测 `claim_timeout` 退款成功；
-3. workflow-out 留存 Refunded 证据文件（tx hash + `deal_info` `state=="Refunded"` 字面 + `balance_of` 前后对比 + keeper 日志）；
-4. 探针移除后壳全绿复验 + types/core 零改动勾稽。
-
-**非目标**：不修 core 语义（D4 证明无 bug）；不改 ACCESS_MATRIX 既有行；不动 W1-B2 未提交基线（assessor/llm 接线等）；不清理旧实例 `0x1c85…`（仅留 D1 诊断已存档）；不做 anvil#0 之外的账户矩阵。
-
-## 4. 总体策略
-
-D1 已定根因 = 旧镜像，故本任务**不是"修 panic"而是"闭证据环"**：新镜像部署（自带 D3 导出面）+ 探针在 eth_call 读通道逐阶段自证 core 路径干净 + keeper 写通道按 §B-⑤ 决策改造后在真实链上走完 Funded→Refunded。探针按 W1-B1 探针纪律（probe/mod.rs:14-19 additive-only）以显式标记进、显式标记出。另须先修复验证壳编译（§2-1 新事实），否则硬约束无处落地。
-
-## 5. 子任务与执行顺序
-
-### T-init 预检门（G-init，先于一切任务）
-三项检查**全部通过**才进 T0：
-- ① `docker ps` 守护进程可达，且 multi 栈容器（multi-node1-4 / anvil / registry / tools）Up；
-- ② 宿主节点 API 探活：`curl -s -X POST http://127.0.0.1:10087/api -H 'content-type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'` 返回含 `result`；
-- ③ 宿主 `cargo --version` 可执行。
-
-失败处置：
-- ①② 失败 → `docker compose -f docker/multi/docker-compose.yaml up -d`（w1b1-topology.md:14；compose 文件在 parent 级 ldk clone 的 `docker/multi/` 下），或等价 `bash scripts/devnet-up.sh`（README.md:62），随后复检；
-- ③ 失败 → 宿主 cargo 已坏（2026-10-28 仲裁实测 + 规划师独立复核一致：`.cargo/bin` 无 rustup.exe（cargo.exe 为断链）、`1.99.0` 与 `stable` 两个 toolchain bin 目录均只有 cargo.pdb 无 cargo.exe）→ **首选修复 rustup 工具链**（重装 rustup / `rustup toolchain install`）；不可行时走 R1 **容器路线**（改写壳内 `#[path]` 后 docker cp 进容器 cargo test，不依赖宿主 cargo；git pin/path 依赖路线已实证不可达，§2-1a）；备选C 仍须升级编排者确认；
-- 任一处置后**复检仍不过 → escalate，不得带病执行 T0 及之后任务**。
-
-### T0 基线快照 + 壳修复与重定基线（门 G0）
-1. `git -C trustbridge diff > workflow-out/_pre-task-snapshot.patch`（含未提交 W1-B2 全部改动；仅作恢复凭据，**不 stash、不 checkout**）。
-2. 修壳（**二选一，首选①**；git pin / ldk path 依赖路线已实证不可达，§2-1a，勿再尝试）：
-   - **① 存根路线（首选）**：壳内新增本地存根 crate（建议 `../workflow-out/verify_core/stubs/lyquid-llm/`，包名必须是 `lyquid_llm`），壳 Cargo.toml 以 path 依赖引入。签名面按 assessor.rs 实际用量给**最小实现**（全部消费点已核实：assessor.rs:37-38（use）、:116-142（LyquidLlmModel），别无他处）：
-     - `backend::openai_compat::OpenAiCompatBackend`：`openai(&str) -> Result<Self, E>`（E: Display，assessor.rs:124 以 `{e}` 格式化）、`chat_completions(&str, &str) -> Self`、`bearer_auth(self, &str) -> Self`、`output_format(self, OutputFormat) -> Self`（builder 链，assessor.rs:124-129）；
-     - 顶层 `call_model(&OpenAiCompatBackend, &ModelRequest) -> Result<ModelResponse, E>`——**测试纯逻辑不执行此路径，返回 Err 即可**（assessor 的 6 个测试均不触 LLM 路径，已核实：tests 模块内对 LyquidLlmModel/call_model 零引用）；
-     - `ModelRequest::new(&str, &str) -> Self` + `.timeout_ms(..) -> Self` + `.max_output_tokens(..) -> Self`（assessor.rs:136-138）；
-     - `OutputFormat::json_schema(&str, serde_json::Value) -> Self`（assessor.rs:129）、`ModelResponse { text: Option<String> }`（assessor.rs:140-141 的 `.text` 消费）。
-     编码员以编译迭代对齐精确签名（整数宽度等细节以编译器报错为准）。壳仍挂**工作树** assessor → 计数维持 **33+5+2=40**。
-   - **② HEAD 挂载路线**：`git show HEAD:lyquid/src/assessor.rs > 壳内落盘文件`，壳 src/lib.rs 的 assessor `#[path]` 改指它（该版无 lyquid_llm 引用、5 测）→ 回到 **32+5+2=39 字面**；**须登记偏差：壳不再覆盖工作树第 6 测（R2#1 wire-shape pin 的测试面）**。
-3. 复跑 `cargo test --lib --tests`（cwd=壳目录），预期三段 ok：路线① = 33/5/2（=40）、路线② = 32/5/2（=39）。原始输出存 `workflow-out/w1b2-shell-rebaseline.txt`，**注明所选路线与最终计数**及漂移原因（①：W1-B2 未提交 assessor 新增 1 测；②：挂 HEAD 版）；§2-1a 的容器实证（命令+错误尾部）一并录入该文件。
-4. **G0 门**：壳全绿（**注明所选路线与最终计数**，39 或 40）。不过 → 回退 R1（§9）。
-5. **容器路线前置说明（宿主 cargo 未修复时）**：壳进容器跑测试**必须先改写壳内全部 `#[path="F:/…"]` 为容器内路径**——src/lib.rs:4-13（types/core/committee/assessor 四处）、tests/escrow_lifecycle.rs:4、tests/modelcheck_refund.rs:4（两测试文件均已排查确认含 path 属性）——再 docker cp 壳与 lyquid 源进容器（依赖缓存实测可离线解析）。原『直接 cp 运行』不可行，照此改写。
-
-### T1 探针落地（lyquid/src/lib.rs，门 G1）
-按 §6-1 与 §7 设计新增 `probe_claim_sim` + ACCESS_MATRIX 行 + 标记注释。容器内编译检查：
-`docker exec multi-tools-1 sh -c "cd /tmp/tb-lyquid && cargo check"`（在 T2 的 docker cp 之后执行亦可，合并为一次 cp）。
-**G1 门**：cargo check 零 error；`git diff lyquid/src/types.rs lyquid/src/core.rs` 输出为空。
-
-### T2 新实例部署（门 G2）
-1. `docker cp` 宿主 `trustbridge/lyquid/.` → `multi-tools-1:/tmp/tb-lyquid`（覆盖；随后容器内 `md5sum /tmp/tb-lyquid/src/lib.rs` 与宿主比对，杜绝 D1 复发）。
-2. 容器内 `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key 0xac09…ff80 Cargo.toml`（cwd=/tmp/tb-lyquid），记录新实例地址。
-3. **G2 门（镜像自证）**：对新地址 `cast call … "probe_claim_sim(string,uint64) returns (string)" deal-x <now>` 或 `balance_of` 任一调用可路由（不再 FuncNotFound）即证明新镜像生效。
-
-### T3 重放造快过期 deal（门 G3）
-宿主 python + NodeClient（`TB_CONTRACT=<新地址>` 或构造参数），全部走 eth_sendTransaction 通道：
-`faucet("0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", 1_000_000)` →
-`create_deal(buyer="0xf39F…92266", seller="agent-bob", amount=1000, fee_bps=200, terms_d, acceptance_d, est_duration_ms=200, est_confidence=90)`（§2-5 ⇒ timeout_slots=1；caller=DEFAULT_SENDER=anvil#0=BROKER 过 Broker 守卫）→
-`fund("deal-1")`（Buyer 守卫：caller==buyer 同为 anvil#0）。
-**每笔 send 后读回复核**（§A-1 笔 3 教训：status=1 ≠ 方法 Ok）：`deal_info`/`balance_of` 确认 Qualified→Funded。等 `eth_blockNumber > deadline_slot`（轮询；automine 不推进时补一笔 benign `faucet` 造块）。
-**G3 门**：`deal_info(deal-1)` 返回 `state:"Funded"` 且块高 > deadline_slot。
-
-### T4 探针佐证取证
-取证前先实读块高作 advisory 入参：宿主 `curl -s -X POST http://127.0.0.1:10087/api … eth_blockNumber`（透传已证，§B-④d）或 `NodeClient.block_number()`（rpc.py:229）。随后容器内 `cast call --rpc-url http://node1:10087/api <新地址> "probe_claim_sim(string,uint64) returns (string)" deal-1 <块高实读值>`，完整原始输出（A~H 各阶段、**chain_now/caller_now 双值**、块高、实例地址、命令行）存 `workflow-out/w1b2-claim-probe-evidence.txt`。
-**同步截取 node1 容器控制台/日志中的 probe 阶段行**（`docker logs <node1 容器名>`，如 multi-node1-1）一并存入同一证据文件——trap 情形下这是唯一证据通道（§7 定位口径）；并如实注明：**trap 时 println 能否落入节点日志未经本仓可验证**（ldk 仅证实 println 为逐次 host console_output 调用），属尽力定位。若 trap 后节点日志亦无阶段行，按 R4 停止并升级，定位降级为『排除法』。
-**eth_call 读上下文口径（B2）**：D 阶段显示 `chain_now=0` 或 current_slot() 异常**不是停止事件**——按『eth_call 读上下文 chain_pos 失效』登记为新事实后**继续完成 A~H 取证**（caller_now 判定链完整即证据有效）。tx 上下文的 chain_pos 已有实证（finding.md:15：funded_slot=94==fund 块号），T6 退款走 tx 上下文不受 eth_call 读通道影响。
-预期：F 阶段 `Ok` + `Payout{refund_to_buyer:1000,…}`（now 来源=caller 标注）、G 勾稽 `total==1000`、H verdict=PASS-full-refund。**R4 停止条件（仅三类）**：panic、caller_now≥deadline 而 F=Err、G 勾稽失配——触发即停止后续任务并升级（回退 R4）。
-
-### T5 keeper v2 改造（scripts/keeper.py，持久）
-按 §8 改造写通道。门：宿主 `python -c "import ast; ast.parse(open('scripts/keeper.py').read())"` 通过（语法级；运行面由 T6 实测覆盖）。
-
-### T6 keeper 实测退款 + 证据（门 G6）
-1. 记录前值：`balance_of("0xf39F…92266")`（=faucet 后 − 1000 托管）。
-2. 受控运行：`python scripts/keeper.py --node http://127.0.0.1:10087 --contract <新地址> --deals deal-1 --interval 5 --once`（`--once` 跑一轮退出，便于取证；输出含 tx hash——来源 `_send` 回执，见 §6-2/§8）。
-3. 读回复核：`deal_info(deal-1)` 字面 `"state":"Refunded"`；`balance_of` 后值 = 前值 + 1000。
-4. 全部要素写入 `workflow-out/w1b2-refunded-evidence.md`（tx hash、deal_info 原始字面、balance_of 前后、keeper 日志摘录、所用命令）。
-**G6 门**：`state=="Refunded"` 字面 + 余额勾稽 + keeper 日志在档。任一不成立 → 回退 R4/R6 排查后重试（claim_timeout 幂等：Refunded 后重复提交被守卫拒绝，重试安全）。
-
-### T7 探针移除 + 终验（门 G7）
-1. 删除 lib.rs 探针 fn、ACCESS_MATRIX 行、全部 `W1-B2-claim-debug probe` 标记注释；`grep -rn "probe_claim_sim" lyquid/` 零残留。
-2. 勾稽 core 冻结：`git diff --stat lyquid/src/types.rs lyquid/src/core.rs` 为空。
-3. 勾稽净变化：`git diff lyquid/src/lib.rs` 相对 T0 快照无探针残留（lib.rs 终态 = T0 快照态）。
-4. 复跑壳 `cargo test --lib --tests`（cwd=壳目录）全绿，输出追加进 w1b2-shell-rebaseline.txt（T0 前后对照，**注明所选路线与最终计数**——路线①=40 / 路线②=39）。
-5. w1b2-claim-revert-finding.md 头部插入 superseded 注记块（根因=D1 旧镜像 + D2 写通道限制；指向两份新证据文件；原 wasm-panic 假设作废），正文不动。
-**G7 门**：上述 5 项全部成立。
-
-## 6. 逐文件改动点
-
-### 6-1 `lyquid/src/lib.rs`（T1 加 / T7 删，改动全部带标记）
-- **新增探针函数**（置于 claim_timeout 之后、cancel 之前，或只读 getter 区 deal_info 附近——编码员择一，保持与只读形态同区）：
-  ```rust
-  // W1-B2-claim-debug probe BEGIN（probe-removable：T7 整块删除）
-  /// Staged simulation probe for the claim_timeout empty-revert debug
-  /// (D1/D2: old image + write-channel limitation — NOT a core bug).
-  /// Read-only: clones the deal and runs core::claim_timeout on the clone;
-  /// never mutates consensus state, never applies payouts. Over export=eth
-  /// it is eth_call/cast-call readable (deal_info-shaped JSON string).
-  /// Advisory `now` param — precedent due_deals (lib.rs:565-574): the
-  /// parameter cannot move funds; the only money-movement guard is
-  /// claim_timeout itself, which re-derives time via current_slot().
-  #[method::network(export = eth)]
-  pub fn probe_claim_sim(ctx: &_, deal_id: DealId, now: u64) -> LyquidResult<String> {
-      // A~H 阶段见方案 §7；每阶段 push 之后、执行风险操作之前，立即
-      // lyquid::println! 外发该阶段行（deal_info 先例 lib.rs:545，非共识
-      // 输出、语义零影响）——trap 时定位口径 = 节点控制台最后一条
-      // probe 阶段行（返回值与结尾 println 在 trap 时均不可达）。
-      // D 阶段双记 chain_now=current_slot() 与 caller_now=入参 now；
-      // E/F/H 判定一律用 caller_now（零写模拟，不动链上资金语义）。
-      …
-  }
-  // W1-B2-claim-debug probe END
-  ```
-  形态依据：`deal_info(ctx: &_, …) -> LyquidResult<String>`（lib.rs:532）；只读借用 `let state = &*ctx.network;`（getter 先例）；JSON 序列化错误映射 `lyquid_error(&format!(...))`（deal_info 同款，lib.rs:535-536）。
-- **ACCESS_MATRIX 增一行**（lib.rs:180 矩阵内、只读 getter 行之前）：
-  `("probe_claim_sim", Access::Anyone), // W1-B2-claim-debug probe-removable（只读模拟，无守卫面）`
-- **不改**：既有方法体、state! 块、require、current_slot。
-
-### 6-2 `scripts/keeper.py`（T5，持久；全量约 90–110 行的重写幅度）
-- docstring 传输层叙述更新：写通道 = NodeClient（eth_sendTransaction 无 gas 字段 + `eth_getTransactionReceipt` 轮询 `status=="0x1"`，w1b2-s4-rpc.md §B-⑤ / D2）；删除 `cast send --json` 及 gas estimation 相关叙述；"Stdlib only" 改为"依赖 agents/common（requests）"。
-- 顶部 `sys.path.insert(0, str(Path(__file__).resolve().parents[1]))` + `from agents.common.rpc import NodeClient, DEFAULT_NODE`（demo.py:17-18 同款先例）。
-- 删除 `cast()`/`decode_abi_string()`/`deal_state()`/`claim_timeout()` 四个 docker-exec/cast 函数；`poll_once` 改为：
-  `info = node.deal_info(deal_id)`（NodeClient.deal_info，rpc.py:358）→ 状态机同旧逻辑（Settled/Refunded→terminal；非 Funded→skip）→ `receipt = node._send("claim_timeout(string)", (deal_id,))`（**不走** rpc.py:330 的 `claim_timeout` 公开封装——该封装丢弃回执并固定 `return True`（rpc.py:330-337），对返回值直接下标取 tx hash 会 TypeError；`_send`（rpc.py:241-262）返回回执 dict 且已含 `status=="0x1"` 断言）→ **读回复核** `after = node.deal_info(deal_id)`，仅当 `after["state"]=="Refunded"` 记 `action=claimed` 并附 `tx=receipt["transactionHash"]`（字段在档：§B-② 回执含 transactionHash；§A-1 笔 3 口径：status=1 ≠ 方法 Ok）。rpc.py 本身不改（§0 约束维持）。
-- CLI 参数改为 `--node`（默认 DEFAULT_NODE）、`--contract`、`--deals`、`--interval`、`--once`（单轮退出，实测取证用）；保留时间戳日志格式 `[keeper HH:MM:SS] deal: {json}`。
-- NodeError（守卫拒绝/not-due）捕获后按 `action=not-due-or-reverted` 记日志（沿用旧语义）。
-
-### 6-3 `../workflow-out/verify_core/`（T0-2，按所选路线）
-- **路线①（首选）**：`Cargo.toml` 的 `[dependencies]` 增本地存根 `lyquid-llm = { path = "stubs/lyquid-llm" }`；新建 `stubs/lyquid-llm/`（Cargo.toml 包名 `lyquid_llm` + `src/lib.rs` 最小签名面，明细见 §5 T0-2①，编码员以编译迭代对齐）。壳自述"临时 crate 不属于 trustbridge 仓库"，改它不触仓库冻结面。
-- **路线②**：`git show HEAD:lyquid/src/assessor.rs` 落盘为壳内文件（如 `src/assessor_head.rs`），`src/lib.rs` 的 assessor `#[path]` 改指它；登记『壳不再覆盖工作树第 6 测（R2#1 wire-shape pin）』。
-- **容器路线前置**（宿主 cargo 未修复时）：改写壳内全部 `#[path="F:/…"]` 为容器内路径（src/lib.rs:4-13、tests/escrow_lifecycle.rs:4、tests/modelcheck_refund.rs:4）后再 docker cp（§5 T0-5）。
-
-### 6-4 证据文件（新建，格式要点）
-- `w1b2-claim-probe-evidence.txt`：实例地址、部署输出摘录、md5 自证、命令行原文（含 advisory now 实读块高）、A~H 原始返回（hex + 解码 JSON）、**chain_now/caller_now 双值**、node1 控制台阶段行截取、当时块高。
-- `w1b2-refunded-evidence.md`：① claim tx hash（keeper 日志/receipt）② `deal_info(deal-1)` 原始字面（含 `"state":"Refunded"`）③ `balance_of` 前值/后值及 +1000 勾稽 ④ keeper 日志摘录 ⑤ 复现命令清单。
-- `w1b2-shell-rebaseline.txt`：T0 修复前失败输出（E0432/E0433）+ 修复后 40/40 + T7 复验输出；39→40 漂移说明。
-- `w1b2-claim-revert-finding.md`：仅头部插入注记块（superseded by D1/D2 + 两份新证据路径）。
-
-## 7. 探针 A~H 阶段语义（定案）
-
-`stages: Vec<(char, String)>`，每阶段按「push 标记与输入 → **立即 `lyquid::println!("probe_claim_sim: {stage} {detail}")` 外发该阶段行** → 执行风险操作 → 成功后 push 结果」的顺序（println 先例 deal_info，lib.rs:545；控制台输出非共识状态、语义零影响）。**定位口径 = 节点控制台最后一条 probe 阶段行**——trap 时返回值与结尾 println 均不可达，逐阶段外发是唯一实时定位通道；正常路径仍返回 `serde_json::to_string(&stages)` 供 cast call 取证（lyquor 的方法级 Err 在 eth_call 下带消息返回，§A-3 实证），结尾的整包 JSON println 可保留作正常通道输出。入参 `now: u64` 为 **advisory**（先例 due_deals，lib.rs:565-574：参数不动资金）；cast 签名 `"probe_claim_sim(string,uint64) returns (string)"`，`now` 取取证前 `eth_blockNumber` 实读值（透传已证，§B-④d）。**D 阶段双记 chain_now 与 caller_now**（正面回答 w1b2-claim-revert-finding.md:19a 待查项 a）；**E/F/H 判定一律用 caller_now**；H verdict 标注 now 来源。
-
-| 阶段 | 记录内容 | 风险操作（println 外发后执行） |
+| # | 文件 | 动作 |
 |---|---|---|
-| A enter | `"A:enter caller=<ctx.caller>"` | —（进入即记录） |
-| B found | `"B:found id=<deal_id>"` | `state.deals.get(&deal_id)`（miss → 记 `B:miss` 并提前返回报告） |
-| C state | `"C:state=<format!("{:?}", deal.state)>"` | — |
-| D now | `"D:now chain_now=<current_slot()> caller_now=<入参 now> chain_now>0=<bool>"`（**双值并记**，正面回答 finding.md:19a：chain_pos 在调用上下文的真实返回） | `current_slot()`（lib.rs:709 单点） |
-| E deadline | `"E:deadline=<deal.deadline_slot()?> caller_now>=dl=<bool>"` | `deal.deadline_slot()`（types.rs:122） |
-| F payout | `"F:payout=Ok(Payout{…})"` 或 `"F:payout=Err(<TransitionError 变体>)"` | **核心被测点**：`let mut sim = deal.clone(); core::claim_timeout(&mut sim, caller_now)`（core.rs:170-178；克隆体上模拟，共识状态零写） |
-| G conservation | `"G:total=<p.total()>==amount=<deal.amount> <bool>"` + 四字段明细 | `p.total()` 勾稽（apply_payout 的 debug_assert 同式，lib.rs:678，此处以数据形式外显） |
-| H verdict | `"H:verdict=PASS-full-refund <amount>-><buyer> (now=caller:<入参>)"` 或 `"H:verdict=BLOCKED <原因> (now=caller:<入参>)"` ——**标注 now 来源** | 汇总 |
+| 1 | `workflow-out/plan.md` | 覆盖写（本方案；旧 T4 方案 → #2 备份） |
+| 2 | `workflow-out/_plan-prev-r3t5t6-backup.md` | 已建（本轮规划期 cp，md5 `a7eb173c…` 一致） |
+| 3 | `scripts/demo.py` | **改（D-T3-1 行为修复）**：修复前 :622-623 区以 13 行替换（faucet 读回确认后再快照，净 +11，其后行号整体 +11 位移）；断言 :692-696（修复后 :703-707）本体零改动（详见 §4-#3） |
+| 4 | `docs/b3-user-test/操作手册.md` | **新建**（目录一并新建；全案 §5 既定位 `docs/b3-user-test/`） |
+| 5 | `docs/b3-user-test/通过判据.md` | **新建** |
+| 6 | `docs/b3-user-test/反馈收集表.md` | **新建** |
+| 7 | `workflow-out/_r3-t6-regression-raw.txt` | **新建**：T6 回归实录（selftest / sim 逐字 diff / 壳 40/40 / 冻结门 / 修复 diff 摘要） |
+| 8 | `workflow-out/_commit-plan.md` | 增补 §6 R3 提交序列 + 全部 M/?? 文件覆盖表（执行时 `git status --porcelain` 逐行归组） |
+| 9 | `workflow-out/implementation.md` | §5 追加 R3 偏离总表（不删原文）+ §3/§6 状态核销 + 文末追加 §9（本轮执行说明） |
 
-补充：结尾整包 `lyquid::println!("probe_claim_sim: {}", json)`（正常通道）与逐阶段行并存；探针**不得**调用 `apply_payout`、不得任何 `insert/get_mut` 写路径——**不得**以『把最后阶段持久化进实例状态』替代逐阶段外发（违反 §7 零写纪律，且 eth_call 写不落盘）。
+**零改动声明**：`lyquid/` 全部（types.rs/core.rs/committee.rs/assessor.rs/lib.rs/committee_certified.rs
+md5 不变）、`experiments/`、`agents/`、`scripts/keeper.py`、README、全部 `_r3-t3-*`/`_r3-t4-*`
+既有日志只读；不 git commit / add / push。
 
-## 8. keeper v2 写通道设计要点
+## 1. 已采信前提（任务陈述前置 + 本轮规划期实跑核验）
 
-- 复用而非重造：NodeClient 已按 §B-⑤ 实现 `_send`（rpc.py:241-262）并带 `claim_timeout` 封装（rpc.py:330-337）与 selector `0x786cfc8f`（rpc.py:76）——keeper 只做轮询编排与读回复核。**注意：`claim_timeout` 公开封装仅返回 bool（丢弃回执），keeper 直用 `_send` 取回执以附 tx hash**（理由见 §6-2）。
-- sender：claim_timeout 为 Anyone（ACCESS_MATRIX），`DEFAULT_SENDER`（anvil#0）即可，无需私钥进 keeper（节点侧 dev 签名账户，§B-① 实证 from 即生效）。
-- 幂等安全：Refunded 后重复 claim 被守卫拒（core.rs:171 require_states），重试无害（keeper 原教义保留）。
+1. **判级口径出处**：任务述「引用 plan.md §3.4」——§3.4 现存于 R3 全案备份
+   `_plan-prev-r3-backup.md:108` 起（L2/L1/L0 定义在其第 5 点「参与度分级结论表」：
+   L2 = inputs=4 + signers=4；L1 = 1 提案 + 4 签（avg_num=1）；L0 = 平台硬限制三段式诚实报告，
+   绝不以单签冒充四节点）。T5 判据文档引用时写明该路径（plan.md 已按阶段覆盖写，全案冻结条款
+   与 §3.4 以备份件为准）。
+2. **L2 已达成**：console 判级行（`_r3-t3-console-raw.txt` 原文行号）——:24
+   `e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)`、:31
+   `cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4)`、:32-:35 四条
+   `signer N -> Node-…` 映射（四个互不相同 NodeID）、:30/:31/:36 certified/裁决各仅一次、
+   :38 `deal_info … "state":"Refunded"`；读回勾稽 5 项与 GT3 a–f 见
+   `w1b2-r3-e2-committee.md` §T3（:91-:99、:144-:153）。
+3. **D-T3-1 病灶在位**（本轮实读 `scripts/demo.py`；以下均为**修复前（pre-T6.1）工作树行号**，
+   行号 < :622 的引用不受 T6.1 的 +11 位移影响）：:622 `node.faucet(alice, 10_000)` 后
+   **立即** :623 `before = snapshot()`（读路径滞后一块 → before[alice]=0，实录
+   `_r3-t3-committee-raw.txt:41` 以 `refund accounting mismatch` 误报收尾）；:692-696 断言
+   `after == before` 语义本身正确，根因是 stale baseline。`node.faucet` 为 fire-and-forget
+   send（`agents/common/rpc.py:492-494`），`balance_of` 为 view（rpc.py:628-630）；
+   `wait_for(node, predicate, timeout_s, interval_s, *, what)`（demo.py:147-176，间隔递增
+   1s→2s→4s、pending/硬失配两语义可区分、**仅 node 路径使用**）是现成读回轮询 helper；
+   `require_funds`（demo.py:179-188）读回断言余额门。链上事实（faucet 恰一次、全额退款、
+   bob/broker 恒 0）由 `_r3-t3-final-state-raw.txt:19-28`（blocks 0-341 全量扫描仅 1 笔
+   faucet@333）与 :11-16（4/4 PASS）独立证明。
+4. **sim 逐字比对基线**：`_r2-t0-sim-baseline-raw.txt`（23 行冻结件）；比对方法先例 =
+   implementation.md:245-246（`python scripts/demo.py --sim --flow all > /tmp/…; diff -u
+   workflow-out/_r2-t0-sim-baseline-raw.txt /tmp/…` → 无输出 IDENTICAL）。
+5. **壳 40/40 通道**：壳 crate 位于**仓库外** `F:\canvus auto\downloads\202609CS5298\workflow-out
+   \verify_core`（`_commit-plan.md` §3 已登记归属），`cargo test --lib --tests` = 33(lib)+5
+   (escrow_lifecycle)+2(modelcheck_refund)=40（`_r2-t7-regression-raw.txt:3-9` 宿主先例）。
+   **关键约束（本轮实读）**：`verify_core/src/lib.rs:4-13` 与 `tests/escrow_lifecycle.rs:4`、
+   `tests/modelcheck_refund.rs:4` 的 `#[path]` 指向**宿主绝对路径** `F:/canvus auto/…`（Windows
+   盘符形）——Linux 容器内将按相对路径解析（`<crate>/src/F:/…`、`<crate>/tests/F:/…`）。
+   **本轮规划期实跑**（2026-10-30，宿主）：`rustc --version` → 1.99.1；`cd
+   ../workflow-out/verify_core && cargo test --lib --tests` → **33+5+2 全 passed、0 failed
+   （40/40）**——任务述「宿主工具链损坏」在当前机器状态**不成立**，以实跑为准；容器通道
+   降级为 fallback（规格见 §5-R2，零文件改动的目录形映射法）。
+6. **冻结门**（G2 口径，全案 T6 行）：三文件 `git diff --stat lyquid/src/{types,core,committee}.rs`
+   空 + `md5sum -c _r2-t0-frozen-baseline.txt` 四 OK（已知 WARNING 1 line improperly formatted
+   属正常，`_r2-t7-regression-raw.txt:20-25`）+ `assessor.rs` 对 HEAD `+5` 在场；
+   `committee_certified.rs` md5 `83e358ee…` 与 `E2_AVG_NUM=4` 不变（GT3-f 口径）。
+7. **提交面现状**：本轮勘察 `git status --porcelain` = **93 个 M/??**（8 M：README/rpc.py/
+   assessor.rs/lib.rs/demo.py/keeper.py/implementation.md/plan.md；?? 含 experiments/、
+   committee_certified.rs、_collab/、_r1-/_r2-/_r3-* 日志、备份件、probe 件等）。
+   `_commit-plan.md` 现有 §2 R1 序列（C1-C4 + R1-不入库）、§3 壳归属、§5 R2 序列（C5-C8），
+   **无 R3 分组**。多轮共改文件的入库归属须重排（见 §4-#8）。
+8. **implementation.md 现状**（555 行）：§5 偏离与事实修正 = T2 期 12 条（:307-361）；T3 偏离
+   D-T3-1/D-T3-2 在 §7.3（:445-457）；T4 偏离 D-T4-1..7 在 §8.4（:534-545）；§6 未尽清单
+   11 行（:363-377，#4 T5/#5/#6 T6/#3 T4 待核销）；§7.5 遗留表把「对抗流 node 复跑」排向
+   T6（:479）——**本任务陈述未授权任何链写实跑**，该项只能如实登记为遗留（§5-R7）。
+9. **docs/ 布局**：`trustbridge/docs/` 在位（5 份项目文档），`docs/b3-user-test/` 不存在，
+   本轮新建（全案 §5 既定路径，`_plan-prev-r3-backup.md` §5「docs/b3-user-test/，3 文件」）。
+   全案 §5 三件 = 操作手册/演示脚本/反馈收集表；**任务陈述三件 = 操作手册/通过判据/反馈收集表**
+   （演示脚本不在本任务面）——按任务陈述交付，登记 D-T5-1（§4-#4）。
+10. **环境**：本轮实跑 `docker ps` → 7 容器全 Up 15 hours（multi-tools / node1-4 / registry /
+    anvil）。宿主 Python 3.14.5、Git Bash；容器 cast/forge 1.7.1（implementation.md §0）。
 
-## 9. 风险与回退
+## 2. 目标与诚实红线
 
-| # | 风险 | 概率 | 缓解/回退 |
-|---|---|---|---|
-| G-init | 预检门未过（docker / 节点 API / 宿主 cargo 任一失败；**③ 现状实测已失败**，见 §2-3） | — | 按 T-init 失败处置（起栈 / 修 rustup / R1 备选路由）；复检仍不过 → escalate，不得带病执行 T0 及之后任务 |
-| R1 | 壳修复受挫（存根签名对不齐 / 宿主 cargo 未修复） | 中 | git pin 与 ldk path 依赖路线**已实证不可达**（E0425 NativeGuestAbi，§2-1a），勿再尝试；宿主 cargo 未修复时走**容器路线**：先改写壳内全部 `#[path="F:/…"]` 为容器内路径（src/lib.rs:4-13 四处 + tests/escrow_lifecycle.rs:4 + tests/modelcheck_refund.rs:4）再 docker cp 壳与 lyquid 源进 multi-tools 跑 cargo test（依赖缓存实测可离线解析；原『直接 cp 运行』不可行，照此改写）；备选C：壳卸载 assessor 挂载（gate 变 27+5+2=34）——**属硬约束字面变更，须升级编排者确认后方可采用** |
-| R2 | 新实例仍 FuncNotFound（cp 未覆盖/registry 缓存旧码） | 低 | T2 的 md5 三方比对（宿主/容器/部署输出）+ G2 门早失败早暴露；重 cp 重 deploy（每次新地址，旧实例自然废弃） |
-| R3 | 块不推进、deadline 不到 | 低 | 轮询 `eth_blockNumber`，停滞则补 benign `faucet` 造块（automine） |
-| R4 | 新镜像上异常（D1 之外的新根因） | 低 | **停止并升级的仅三类**：① panic（定位=控制台最后一条 probe 阶段行）；② caller_now≥deadline 而 F=Err；③ G 勾稽失配。**eth_call 下 chain_now=0/Err 不属停止事件**——按『eth_call 读上下文 chain_pos 失效』登记新事实后继续取证（tx 上下文 chain_pos 已实证：funded_slot=94==fund 块号，finding.md:15；T6 退款走 tx 上下文不受影响）。触发时携探针报告升级（escalate），不得擅自改 core |
-| R5 | 误伤 W1-B2 未提交基线 | 低 | T0 快照 patch 兜底 `git apply -R`；全程禁 `git stash/checkout/reset`；lib.rs 只做标记块增删 |
-| R6 | 宿主 127.0.0.1:10087 端口不通（keeper v2 通道失效） | 低 | 回退容器通道：`docker exec multi-tools-1 cast rpc --rpc-url http://node1:10087/api eth_sendTransaction '[{"from":"0xf39F…","to":"<addr>","data":"0x786cfc8f<abi(deal-1)>"}]'` + `cast rpc eth_getTransactionReceipt`（§B-①⑤ 实证形态），keeper 以 subprocess 驱动之（此为文档化备选，非首选） |
-| R7 | keeper v2 引入 requests 依赖与"stdlib only"教义冲突 | — | 已裁决：D2/§B-⑤ 决策门优先于旧教义，docstring 如实改写（属登记性偏离，写入证据文件） |
+**目标**：①交付 B3 三份面向组外用户的文档（命令/输出/判据全部回填自已档实录，可照跑、可复核）；
+②完成 D-T3-1 行为修复并以 selftest + sim 逐字 + 壳 40/40 收口回归；③`_commit-plan.md` 增补
+R3 分组覆盖全部 M/?? 文件；④implementation.md 合并 R3 各阶段偏离与增量（不丢条目）。
 
-**总回退闸**：所有文件级改动均有 T0 快照 + git 可恢复；链上新实例为临时造物无需回滚；旧实例 `0x1c85…` 保持原样（D1 证据存档）。
+**诚实红线（硬约束）**：
+- 三文档**只引用已发生的真实证据**（`_r3-t3-*`/`_r2-*`/console 原文行、代码 `文件:行号`），
+  不虚构输出、不引用未来事件；无已档实录的预期行为（如修复后新增的 faucet 读回行）只能写
+  「预期将打印（代码行）+ 本行无已档实录（修复后未重跑，诚实边界）」。
+- 修复的验证口径如实：selftest + sim 逐字 diff + py_compile + `--sim --flow committee`
+  node-only 门控行为；**flow_committee 端到端重验需新实例，不在本任务授权面**（无实跑部署），
+  不得伪装已验证。
+- 判级只认 console 原文行与读回（status≠effect）；引用行号一律用实查行号（D-T4-5 教训：
+  plan 引用与实际行号曾有偏差，引用前逐条回验）。
+- 冻结面（lyquid 全树）零改动；全程不 git commit/add/push。
+- **demo.py 编号基准（仲裁 R1-1）**：三文档一切 `scripts/demo.py` 引用一律以 **T6.1 修复后
+  工作树实读行号**为准（T6.1 完成后重读再写；或改用函数锚点名：`arm_state` abort 分支 /
+  `terminal_state` / `faucet_landed`，防漂移）。D-T3-1 病灶史引用须显式标注「修复前
+  （pre-T6.1）工作树行号」；**不得写 `git show HEAD:scripts/demo.py`**——本轮已实核 HEAD 版
+  demo.py 仅 **195 行**、无 `flow_committee`（grep 0 命中；工作树版 784 行），病灶不在 HEAD。
+  修复前原文锚定 = #7 回归日志「修复前后相关行摘录」（§3-T6.1 第 1 段既定）+ T6.0 修复前
+  md5（§3-T6.0 既定）。
 
-## 10. 验收清单（硬约束映射）
+## 3. 子任务拆分与执行顺序（依赖序；编号沿任务陈述，执行序说明理由）
 
-- [ ] 壳全绿：`cd ../workflow-out/verify_core && cargo test --lib --tests` 三段 ok——**注明所选路线与最终计数**（路线①=33+5+2=40，路线②=32+5+2=39；路线②另登记『不覆盖工作树第 6 测』偏差），漂移原因在 w1b2-shell-rebaseline.txt 留痕——原"39/39"约束之意图（壳全绿）满足，字面数字偏差如实登记
-- [ ] core 语义冻结：`git diff lyquid/src/types.rs lyquid/src/core.rs` 输出为空（T1 与 T7 双时点勾稽）
-- [ ] 探针独立可移除：`grep -rn "probe_claim_sim\|W1-B2-claim-debug" lyquid/ scripts/ agents/` 零残留；lib.rs 终态 == T0 快照态
-- [ ] 探针佐证：w1b2-claim-probe-evidence.txt 含新实例 A~H 完整输出（**F=Ok full_refund（标注 now 来源）+ G 勾稽 + H=PASS**；含 chain_now/caller_now 双值与控制台阶段行截取）
-- [ ] 退款实测：w1b2-refunded-evidence.md 含 tx hash + `state=="Refunded"` 字面 + balance_of 前后 +1000 + keeper 日志
-- [ ] 旧 finding 已注记 superseded（wasm-panic 假设作废声明）
+> 执行序 = **T6.0 → T6.1 → T6.2 → T5.1 → T5.2 → T5.3 → T6.3 → T6.4 → T6.5**。
+> 理由：①修复（T6.1）先行——操作手册必须如实标注「已档实录 = 修复前行为」，先定稿修复才能
+> 写准这条边界；②三文档（T5）次之；③提交计划（T6.3）与 implementation 合并（T6.4）最后——
+> 两者都必须覆盖本轮全部新产物（三文档 + 回归日志 + 修复 diff）。
+
+**T6.0 前置核验**（→ #7 头部）：`docker ps` 7 容器 Up；`md5sum -c workflow-out/_r2-t0-frozen-baseline.txt`
+4×OK；`git diff --stat lyquid/src/{types,core,committee}.rs` 空 + `git diff --numstat
+lyquid/src/assessor.rs` = `5 0`；`git status --porcelain | wc -l` 记数（基线 93，本轮将新增
+≥6：#2/#4/#5/#6/#7 + plan 备份之外的新日志）；修复前 `md5sum scripts/demo.py` 留档。
+
+**T6.1 D-T3-1 行为修复**（→ #3 + #7 第一段）：
+1. 按 §4-#3 改 demo.py（faucet 后读回确认再快照）；`python -m py_compile scripts/demo.py`。
+2. `python scripts/demo.py --selftest` → 预期 `SELFTEST OK`（7 PASS，先例
+   `_r2-t7-regression-raw.txt:11-12`）。
+3. `python scripts/demo.py --sim --flow all > /tmp/r3-t6-sim.txt` → `diff -u
+   workflow-out/_r2-t0-sim-baseline-raw.txt /tmp/r3-t6-sim.txt` → **预期无输出（IDENTICAL）**
+   （修复只在 node-only `flow_committee` 内，先例 implementation.md:245-246 / §5-8）。
+4. `python scripts/demo.py --sim --flow committee` → 预期 node-only 报错退出 rc=1（门控行为
+   不因修复漂移，先例 implementation.md:247-248）。
+5. 以上命令与输出全部原样入 #7（写日志**不用** `tee /dev/stderr`——D-T3-2 教训）。
+
+**T6.2 壳 40/40 复跑**（→ #7 第二段）：主通道 = 宿主（R2 先例逐字）：`cd
+../workflow-out/verify_core && cargo test --lib --tests` → 预期三条 `test result: ok`
+33+5+2（0 failed）。宿主失败才启用容器 fallback（§5-R2 规格照抄执行，含 md5 勾稽）。
+无论哪条通道，#7 须含完整命令行 + 三条 test result 行 + （容器通道时）勾稽记录。
+
+**T5.1 操作手册**（→ #4）：结构（六节，命令序列全部取自实录并标 `文件:行号`）：
+①前置环境（`docker ps --format` 7 容器 Up——`_r3-t3-deploy-raw.txt` T3.0 段；宿主 Python 依赖；
+实例名/地址/TARGET 获取方式）；②部署（`MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-lyquid`
+→ md5 勾稽 9/9 → `touch src/*.rs` + 容器 `cargo check --target wasm32-unknown-unknown` →
+`shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key
+<anvil#0> Cargo.toml` → `created Lyquid-… => 0x…`；证据 `_r3-t3-deploy-raw.txt`（deploy 段
+[QUOTED] 性质如实注明）；`shaker to-hex <实例名>` → TARGET 且断言非零 ≠ 合约）；③主跑建单
+（`python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x8700…589 --instance
+Lyquid-… --flow committee`；逐步预期输出引 `_r3-t3-committee-raw.txt:10-29` 原文行：env/TARGET
+OK、node1-4 NodeID、committee_config、e2_configure staged、advance True、dest_epoch poll、
+finalize True、net_config activated、**[committee] faucet read-back OK: …——代码推导预期行
+（修复后 demo.py 打印语句），无已档实录（修复后未重跑，诚实边界）**（插入位按代码序在
+net_config activated 之后、assess_brief 之前——faucet/require_funds 先于 new_assessed_deal，
+后者 :279 才打印 assess_brief 行；仲裁指令原文定位「assess_brief 与 deal info 之间（:22-:23）」，
+按代码序前移一位（实录 :21-:22 之间），语义不变）、assess_brief、deal-1 Qualified→Funded→Disputed、
+arm 读回 OK、run_verdict_round True、final Refunded；**:30-41 的 RuntimeError 段如实收录并标注 =
+D-T3-1 修复前行为 + 修复后该点预期（引 demo.py 打印语句，注明无已档实录）**）；④console 观察
+（`MSYS_NO_PATHCONV=1 timeout 60 docker exec multi-tools shaker console <实例名> --endpoint
+ws://node1:10087/ws`；关键行引 `_r3-t3-console-raw.txt:5/:15/:19-:24/:30-:38`；**必须用实例名
+不是地址**；rc=124 = 正常超时收尾——`:39`，常见误判点）；⑤终态读回（NodeClient 只读快照命令
+形态与 4/4 PASS 输出——`_r3-t3-final-state-raw.txt:4-16`；一切以读回为准）；⑥常见错误排查表
+（每条带真实证据）：console 用地址而非实例名 / rc=124 误判失败 / 余额断言误报（D-T3-1 活例，
+修复说明）/ advance 返回 False（staging-target mismatch，demo.py:606-607——在插入点 :622 之前，
+不受位移，维持原行号）/ arm 读回第三值即 abort 绝不重 arm（demo.py 修复前 :648-658 / 修复后
+:659-669，`arm_state` abort 分支）/ 无 `--instance` 调 committee 流 fail-closed rc=1
+（implementation.md:250-253 重录实录）。附录：其他三动线（normal/timeout/adversarial）与 EVM
+对照实验的**已档证据指针**（`w1b2-r1-demo-normal.md` 等 + `r3-t4-contrast-report.md`）——
+只给指针不复制命令（本任务证据面 = `_r3-t3-*`）。
+
+**T5.2 通过判据**（→ #5）：①判级口径 L2/L1/L0 三层表（引 `_plan-prev-r3-backup.md` §3.4 第 5
+点原文要义：L2 = inputs=4+signers=4（arm 一次 + node1 单次触发 + avg_num=4）；L1 = 1 提案+4 签；
+L0 = 三段式诚实报告绝不单签冒充；fallback 触发条件）；②L2 验收清单（逐条引 console 原文行：
+:24 / :31 / :32-:35 四映射且 NodeID 与 transcript node 行一致 / :30+:31+:36 各仅一次（无重复
+结算）/ :38 Refunded）；③读回勾稽清单（5 项：arm 单次+读回、run_round 单次、终态 Refunded、
+余额全额退款、misconduct 不增——`w1b2-r3-e2-committee.md` :93-:99 + `_r3-t3-final-state-raw.txt`
+:11-:16）；④通用纪律（status≠effect 只认读回；R2 attempt-1「status 0x1 但 Disputed」活例
+`_r2-adversarial-raw.txt:6`（D-T4-5 校正后行号）；两段 `agreed` 重复回放 ≠ 重复裁决——
+`w1b2-r3-e2-committee.md` :87-:89）；⑤L1/L0 时的降级验收形态（按 §3.4 原文，注明本轮 L2 已
+达成、未触发）。
+
+**T5.3 反馈收集表**（→ #6）：四维结构（任务陈述口径）：任务理解（含两道信任模型理解题：委员会
+认证从哪来 / 裁决能否被单点篡改——全案 §5 既有题面）/ 操作顺畅度（每步 1-5 分行项，对应操作
+手册六节）/ 结果可信度（判据可复核性：console 行与读回勾稽是否亲眼可见）/ 开放意见（自由栏）。
+纯表单，不虚构「示例反馈」。
+
+**T6.3 `_commit-plan.md` 增补**（→ #8，文末追加 §6）：R3 提交序列（依赖序：先 lyquid 后
+agents/scripts 后 experiments 后证据）：
+- **R3-C1 lyquid**：`lyquid/src/committee_certified.rs`（新）+ `lyquid/src/lib.rs`（M，R3 增量；
+  依赖 R1-C1/R2-C5 先行提交，否则 lib.rs 一笔带入三轮主题——沿 §5 既有提醒口径）。
+- **R3-C2 agents/scripts R3 面**：`agents/common/rpc.py` + `scripts/demo.py` 的 R3 增量
+  （flow_committee/--instance/容器通道助手；依赖 R3-C1 的方法面）。
+- **R3-C3 D-T3-1 行为修复**：`scripts/demo.py` 修复 hunk 单独成提交（行为修复非重构，提交
+  信息点明 —— R2-C6「行为修正」先例口径）；排在 R3-C2 之后。
+- **R3-C4 experiments**：`experiments/evm-contrast/` 三件套（Escrow.sol/foundry.toml/
+  run-contrast.sh）。
+- **R3-C5 B3 文档**：`docs/b3-user-test/` 三件。
+- **R3-C6 证据**：`w1b2-r3-e2-committee.md`、`r3-t4-contrast-report.md`、
+  `_r3-t1-*/_r3-t3-*/_r3-t4-*` 全部原始日志、`_r3-t6-regression-raw.txt`、
+  `implementation.md`/`plan.md`/`_commit-plan.md` **最终态**——三份轮文档被多轮改写，只能以
+  最终态入库，从 R1-C4/R2-C7 的文件清单**移列**至本组（在 §6 里显式声明移列，C4/C7 描述保留
+  时点语义）；`_r2-t0-frozen-baseline.txt`/`_r2-t0-sim-baseline-raw.txt` 已在 R2-C7，不重复。
+- **不入库/归档**：`_pre-task-snapshot-r3.patch`（恢复凭据，沿 C8/R1-不入库处置）、
+  `_plan-prev-*`/`_implementation-prev-*` 备份、`_probe_*`、`_collab/`（沿 R1-C5 归档建议）。
+- **覆盖表（硬性）**：执行时 fresh `git status --porcelain` 逐行归组（C1–C8 + R3-C1..C6 +
+  不入库），表行数 = 状态行数，零未归属；`_r1-*`/`_r2-*` 已在 C4/C7 清单者标「已归组」，两清单
+  之外的遗留件（如 `_w1b1-*`）显式归「归档」组。§3 壳归属说明补一句：R3 轮壳仍零修改、只读复跑。
+- 同时收录 D-T3-1 修复 = R3-C3（上文），文末保留「未执行任何 git commit」声明。
+
+**T6.4 implementation.md 合并增量与偏离表**（→ #9，**只追加/改状态格，不删任何原文段落**）：
+1. §5 文末追加「**5.13 R3 各阶段偏离总表**」：21 条索引 = T2 §5-1..12（在位）+ T3 D-T3-1/D-T3-2
+   （§7.3）+ T4 D-T4-1..7（§8.4）+ 本轮新增（D-T5-1 演示脚本不在任务面 / D-T6-1 壳通道实况），
+   每条一行：编号 + 一句话 + 原文位置指针；**原文不搬移不删改**；D-T3-1 行加注「已于 R3-T6 修复
+   （行为修复，见 §9）」。
+2. §3 门禁表：G5 行状态更新为已交付（指向 §9 与 #4-#6）；G6 行更新为回归三件套已跑
+   （40/40 + sim IDENTICAL + 冻结门，指向 §9）。
+3. §6 未尽清单：#3（T4）/#4（T5）/#5/#6（T6）状态核销（改状态列，原文字保留）；#2「对抗流
+   node 复跑」维持**未执行**并补原因（本任务授权面无链写实跑）→ 去向改为「后续/用户安排」。
+4. 文末追加「**## 9. §R3-T5+T6 执行实现说明**」：产物清单（#4-#9 + md5）、实跑命令摘要
+   （T6.0-T6.2 全部）、勾稽关系（sim 逐字/40 计数/冻结 md5/commit 覆盖表行数）、偏离登记
+   （D-T5-1、D-T6-1、D-T3-1 修复登记：行为修复非重构，验证口径与诚实边界）、G5+G6 门禁
+   状态表。
+5. **不丢条目自检**：合并前后 `grep -c` 偏离编号（12+2+7+新增）与 §6 行数逐条对账，写入 §9。
+
+**T6.5 收尾自检**（→ #7 尾部 / §9）：重跑 T6.0 冻结门四件套（md5 四 OK、三文件 diff 空、
+assessor +5、committee_certified.rs md5 与 E2_AVG_NUM 不变）；`git status --porcelain` 与
+T6.0 记数对照（新增仅本轮 6+ 产物）；`git log --oneline -1` 仍 `dc78d2f`（未 commit/add/push）；
+三文档引用回验（仲裁 R1-2，**分域**）：①**操作手册** —— ≥5 处 `文件:行号` grep 回验，且**手册内
+全部 demo.py 引用逐条 grep（不抽样）**、逐一核对为修复后行号（或函数锚点名，§2 编号基准）；
+②**通过判据** —— 所引 console 原文行（`_r3-t3-console-raw.txt` :24/:31/:32-35/:30/:36/:38）
+**全部逐一回验**；③**反馈收集表** —— 只查四维齐备 + 无虚构示例反馈，不设 `文件:行号` 指标
+（与 G5-c 对齐）。三域回验结果**逐文档记入 #7 尾部**。
+
+## 4. 逐文件改动点
+
+- **#1 plan.md**：本方案覆盖写（已执行；旧件 → #2）。
+- **#2 _plan-prev-r3t5t6-backup.md**：已建（md5 `a7eb173c…` 一致，见 §0）。
+- **#3 scripts/demo.py（D-T3-1 行为修复，13 行替换 :622-623（修复前病灶行）、净 +11 行，
+  其后行号整体 +11 位移，两处病灶一次闭环）**：
+  现 :622-623（修复前病灶行；`node.faucet(alice, 10_000)` + `before = snapshot()`）替换为：
+  ```python
+  pre_tap = node.balance_of(alice)
+  node.faucet(alice, 10_000)
+
+  def faucet_landed():
+      bal = node.balance_of(alice)
+      if bal - pre_tap >= 10_000:
+          return True, bal
+      return False, bal  # 读路径滞后（pending），继续等
+
+  tapped = wait_for(node, faucet_landed, timeout_s=15.0, interval_s=1.0,
+                    what="faucet read-back")
+  print(f"[committee] faucet read-back OK: alice {pre_tap} -> {tapped} (+{tapped - pre_tap})")
+  before = snapshot()
+  ```
+  要点：`pre_tap` 在**发交易前**读（无未决写，确定值）；`>=` 而非 `==`（单笔 faucet 原子落账，
+  链上恰一次已由 `_r3-t3-final-state-raw.txt:24-26` 证明）；复用 `wait_for`（pending/硬失配语义
+  可区分、仅 node 路径）；打印行与 arm 读回 OK（demo.py 修复前 :662 / 修复后 :673）同风格。
+  **:692-696（修复前）/ 修复后 :703-707 断言本体零改动**
+  ——其根因（stale baseline）已由读回确认消除；`before/after_fund/after` 语义不变（before 语义
+  从「faucet 前旧值」修正为「faucet 落账后基线」，这正是缺陷本义）。**登记为行为修复非重构**
+  （implementation.md §9 + `_commit-plan.md` R3-C3）。改动全部位于 node-only `flow_committee`
+  内 → sim 代码路径零触碰（§3-T6.1-3 逐字门预期不变）。
+- **#4 docs/b3-user-test/操作手册.md**（新建）：§3-T5.1 六节结构 + 附录指针；中文；「无仓库
+  上下文的组外用户可照跑」标准自足（全案 §5 纪律）；每步 = 命令 + 预期输出（引实录行）+ 常见
+  错误；头部注明证据基线日期与实例（已终态，用户复刻需自行部署新实例——部署节即为此提供命令）。
+  **D-T5-1 登记**：全案 §5 的「演示脚本.md」不在本任务三件之列，按任务陈述交付；其动线要点
+  （console 画面讲解）并入操作手册第④节一段。
+- **#5 docs/b3-user-test/通过判据.md**（新建）：§3-T5.2 五部分；每条判据带 `文件:行号`。
+- **#6 docs/b3-user-test/反馈收集表.md**（新建）：§3-T5.3 四维表单（Markdown 表格，含填写说明）。
+- **#7 _r3-t6-regression-raw.txt**（新建）：头部（日期/HEAD `dc78d2f`/纪律声明）+ 四段
+  （T6.0 冻结门与环境 / T6.1 修复摘要（修复前后相关行摘录 + py_compile + selftest + sim diff
+  原始输出 + node-only rc=1）/ T6.2 壳 test result 三行（通道+完整命令行）/ T6.5 收尾）。
+- **#8 _commit-plan.md**：文末追加 §6 R3 序列 + 覆盖表（§3-T6.3 规格）；§1 现状块不动（历史
+  快照，勘误先例保留原文）；「再次声明未执行 git commit」收尾。
+- **#9 implementation.md**：§3-T6.4 四处改动（5.13 总表 / §3 状态格 / §6 状态列 / 追加 §9），
+  原文段落零删除。
+
+## 5. 风险与回退（编号登记，执行员逐条知晓）
+
+- **R1 修复后 sim 逐字 diff 非空**：即 abort 排查——修复只允许在 `flow_committee` node 路径内
+  （`wait_for` docstring 明言仅 node 路径）；**绝不为凑一致修改基线件或 sim 代码**；若定位到
+  意外波及（不应发生），回退 = 将 demo.py 修复区段还原至修复前状态（`git diff` 可逆；锚定 =
+  #7「修复前后相关行摘录」+ T6.0 修复前 md5，§2 编号基准）并升级仲裁。
+- **R2 壳宿主通道执行时损坏**（规划期 2026-10-30 实跑通过 40/40，但以执行时点为准）：fallback
+  容器通道，**零文件改动**：① `docker cp` verify_core → multi-tools:/tmp/tb-vc；② 因
+  `#[path]` 为 Windows 绝对形（§1-5），Linux 下解析为相对路径，须在容器内**重建同名目录形**：
+  `mkdir -p "/tmp/tb-vc/src/F:/canvus auto/downloads/202609CS5298/trustbridge/lyquid/src"` 与
+  `"/tmp/tb-vc/tests/F:/canvus auto/downloads/202609CS5298/trustbridge/lyquid/tests"`，并把
+  types/core/committee/assessor 四件与两测试件 docker cp 到对应位置；③ 宿主↔容器 md5 勾稽
+  （10 件逐一 MATCH，`MSYS_NO_PATHCONV=1` 前缀）；④ `docker exec -w /tmp/tb-vc multi-tools
+  cargo test --lib --tests` → 40/40。若该映射法仍失败 → **如实登记未能复跑并升级**（壳在
+  仓库外，不得为跑通而修改壳的任何文件——#[path] 字符串属壳本体）。
+- **R3 D-T3-1 修复无端到端重验**：如实登记（§2 诚实红线）；不得为「验证修复」擅自部署新实例
+  或对既有实例发交易（任务授权面 = 无实跑部署；deal-1 已终态、重触发违反单次纪律）。
+- **R4 三文档引用行号漂移/虚构**：撰写约束 = 只用本轮勘察实读行号，**demo.py 引用 = T6.1
+  修复后重读行号**（§2 编号基准规则，或函数锚点名）；T6.5 分域回验（操作手册 ≥5 处 + 手册内
+  demo.py 引用全量核对修复后行号；通过判据 console 行全量回验；反馈表不设行号指标）；发现
+  漂移即改文档不改证据。
+- **R5 implementation 合并丢条目**：只追加不搬移；§9 记合并前后对账（偏离编号 grep 计数 +
+  §6 行数）；任何需要改写原文的诉求 → 改为追加注记 + 指针，不删除。
+- **R6 提交覆盖表遗漏**：以执行时 fresh `git status --porcelain` 生成，行数对账（§3-T6.3
+  「覆盖表（硬性）」判据 + §6-G6-d）；本轮新增产物（#2/#4-#7）全部入表。
+- **R7 对抗流 node 复跑**（全案 §7.5-2 排向 T6）不在本任务授权面（无链写实跑）：在
+  implementation.md §6-#2 与 §9 如实登记为遗留（去向：后续阶段/用户安排），不静默丢弃、
+  不假跑。
+- **R8 回归日志写入方式**：禁 `{ … } >> $LOG 2>&1` 块内 `tee /dev/stderr`（D-T3-2 截断教训，
+  已在 /tmp 复现）；统一直接重定向或分段追加。
+- **R9 共享环境副作用**：本轮全程无链写、无 warp、无容器重启；devnet 只读使用（`docker ps`、
+  壳测试、只读 grep）。若发现容器 Down：登记并升级，不自行重启。
+
+## 6. 阶段收口门禁 G5+G6（全部实跑取证）
+
+| 门 | 判据 |
+|---|---|
+| G5-a | 三文档在 `docs/b3-user-test/` 在档；操作手册命令序列与实录逐字一致（抽查回验 ≥5 处 `文件:行号`，且手册内全部 demo.py 引用逐条核对为修复后行号/函数锚点）；无虚构输出、无未来事件 |
+| G5-b | 通过判据的 L2/L1/L0 口径与 `_plan-prev-r3-backup.md` §3.4 一致；L2 验收清单每条引 console 原文行（:24/:31/:32-35/:30/:36/:38） |
+| G5-c | 反馈收集表四维齐备（任务理解/操作顺畅度/结果可信度/开放意见），无虚构示例反馈 |
+| G6-a | `python scripts/demo.py --selftest` → SELFTEST OK；`--sim --flow all` 与 `_r2-t0-sim-baseline-raw.txt` **diff 无输出（IDENTICAL）**；`--sim --flow committee` rc=1 门控行为不变（#7 在档） |
+| G6-b | 壳 `cargo test --lib --tests` → **33+5+2 = 40/40**（宿主或容器通道，完整命令行与 test result 三行入 #7；容器通道含 md5 勾稽 10/10） |
+| G6-c | 冻结门复验：三文件 `git diff --stat` 空 + `md5sum -c _r2-t0-frozen-baseline.txt` 4×OK + `assessor.rs +5` 在场 + `committee_certified.rs` md5 `83e358ee…` 不变 + `E2_AVG_NUM=4` 不变 |
+| G6-d | `_commit-plan.md` §6 覆盖表行数 = 执行时 `git status --porcelain` 行数，零未归属；R3 序列含 R3-C1..C6 + 不入库组；D-T3-1 修复收录为 R3-C3 |
+| G6-e | implementation.md：5.13 总表 21+ 条可 grep；§3 G5/G6 状态格、§6 状态列已核销；§9 在档；合并前后条目对账记录在 §9；§0-§8 原文段落零删除 |
+| G6-f | 未执行任何 git commit/add/push（`git log --oneline -1` 仍 `dc78d2f`）；devnet 零链写零重启；新增文件仅 §0 清单 + 表内登记件 |

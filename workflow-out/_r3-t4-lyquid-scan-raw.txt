@@ -1,0 +1,392 @@
+# T4.5 Lyquid 两实例只读链扫取数——执行员，2026-10-30 12:09:35 +0800
+# 工作根目录: trustbridge/
+# 实例: R2 Lyquid-tldda6zqdhab2kdysepcqxx73uvm3sxz7wbaa @ 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351
+#       R3 Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa @ 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+# endpoint: http://node1:10087/api （JSON-RPC；根路径 404，本件 §0 现场复核）
+# 通道: 容器 multi-tools 内 python3，直接 urllib POST；只读方法 eth_blockNumber / eth_getBlockByNumber(full) / eth_getTransactionReceipt
+# 只读声明: 本脚本不调用任何 eth_sendTransaction / eth_sendRawTransaction / cast send；不发交易。
+
+########## 0. endpoint 与块高现场探测 ##########
+$ curl -s -X POST -H 'Content-Type: application/json' --data '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}' http://node1:10087/api
+{"jsonrpc":"2.0","id":1,"result":"0x194"}
+$ 同请求打根路径 http://node1:10087/ （HTTP 状态码）
+404
+
+########## 1. 链扫脚本原文（容器路径 /tmp/t4-lyquid-scan.py；宿主原件 %LOCALAPPDATA%\Temp\t4-lyquid-scan.py） ##########
+$ md5sum /tmp/t4-lyquid-scan.py   （容器） / md5sum <宿主原件>
+  container: ce03e3c059a4fee357127f7a64ed6be3  /tmp/t4-lyquid-scan.py
+  host:      ce03e3c059a4fee357127f7a64ed6be3 */c/Users/lenovo/AppData/Local/Temp/t4-lyquid-scan.py
+
+#!/usr/bin/env python3
+# T4.5 Lyquid 只读取数：扫描两实例在共享链上的全部交易（含 to=null 的创建交易）。
+# 只调用 eth_blockNumber / eth_getBlockByNumber / eth_getTransactionReceipt；不发交易。
+# 数据源只读；endpoint 为 JSON-RPC 的 /api 路径（根路径 404，T4.5 现场实证）。
+import json
+import sys
+import urllib.request
+
+EP = "http://node1:10087/api"
+R3 = "0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589"
+R2 = "0xfd6f7a6a5c21a3f503ebae7a473639974379c351"
+INST = {R3: "R3", R2: "R2"}
+
+# selector -> 方法名（来源：workflow-out/w1b2-s4-rpc.md:66-79 固化的 cast sig 表；
+# apply_committee_verdict 由容器内 `cast sig "apply_committee_verdict(string,uint8,string[])"` 实算并交叉校验）
+SEL = {
+    "0xb540def8": "faucet(string,uint128)",
+    "0xbd827024": "create_deal(string,string,uint128,uint16,string,string,uint64,uint8)",
+    "0x73451f65": "fund(string)",
+    "0xb1fecd5a": "notarize(string,string,string,string)",
+    "0x7ecc9d46": "submit_deliverable(string,string)",
+    "0xad932b5c": "complete(string)",
+    "0x786cfc8f": "claim_timeout(string)",
+    "0x0b4f3f3d": "cancel(string)",
+    "0xa48ab911": "open_dispute(string,string)",
+    "0x15df3c73": "committee_config(string[],uint32)",
+    "0xec78f86e": "deal_info(string)",
+    "0x16417010": "evidence_entries_json(string)",
+    "0x3e6b4459": "balance_of(string)",
+    "0x4704839a": "due_deals(uint64)",
+    "0xa32974e3": "apply_committee_verdict(string,uint8,string[])",
+    "0x": "(empty calldata / plain transfer)",
+}
+
+
+def rpc(method, params):
+    payload = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
+    req = urllib.request.Request(EP, data=payload, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as f:
+        r = json.load(f)
+    if "error" in r:
+        raise RuntimeError("%s -> %s" % (method, r["error"]))
+    return r["result"]
+
+
+head = int(rpc("eth_blockNumber", []), 16)
+print("endpoint=%s  eth_blockNumber=%s (dec %d)" % (EP, hex(head), head))
+print("scan_range=0..%d (inclusive)  instances: R3=%s R2=%s" % (head, R3, R2))
+
+rows = []
+creations = []
+null_to_seen = 0
+for n in range(0, head + 1):
+    b = rpc("eth_getBlockByNumber", [hex(n), True])
+    if not b:
+        print("WARN block %d returned null" % n, file=sys.stderr)
+        continue
+    txs = b.get("transactions") or []
+    for tx in txs:
+        to = tx.get("to")
+        h = tx["hash"]
+        sel = (tx.get("input") or "0x")[:10].lower()
+        if to in (None, ""):
+            null_to_seen += 1
+            rc = rpc("eth_getTransactionReceipt", [h])
+            ca = (rc.get("contractAddress") or "").lower()
+            if ca in INST:
+                creations.append({
+                    "inst": INST[ca], "block": n, "hash": h, "frm": tx.get("from", ""),
+                    "ca": ca, "gas": int(rc.get("gasUsed") or "0x0", 16),
+                    "status": rc.get("status"), "sel": sel,
+                    "method": SEL.get(sel, "unknown(%s)" % sel),
+                })
+        elif to.lower() in INST:
+            rc = rpc("eth_getTransactionReceipt", [h])
+            rows.append({
+                "inst": INST[to.lower()], "block": n, "hash": h, "frm": tx.get("from", ""),
+                "to": to, "gas": int(rc.get("gasUsed") or "0x0", 16),
+                "status": rc.get("status"), "sel": sel,
+                "method": SEL.get(sel, "unknown(%s)" % sel),
+            })
+
+print("null_to_txs_total=%d  creation_txs_to_instances=%d  instance_calls=%d"
+      % (null_to_seen, len(creations), len(rows)))
+print()
+print("===== 创建交易（to=null，receipt.contractAddress ∈ {R2,R3}）=====")
+print("inst\tblock\thash\tfrom\tcontractAddress\tgasUsed\thex\tstatus\tselector\tmethod")
+for c in sorted(creations, key=lambda x: x["block"]):
+    print("%s\t%d\t%s\t%s\t%s\t%d\t0x%x\t%s\t%s\t%s"
+          % (c["inst"], c["block"], c["hash"], c["frm"], c["ca"], c["gas"], c["gas"], c["status"], c["sel"], c["method"]))
+print()
+print("===== 实例地址交易（to ∈ {R2,R3}）=====")
+print("inst\tblock\thash\tfrom\tgasUsed\thex\tstatus\tselector\tmethod")
+for r in sorted(rows, key=lambda x: x["block"]):
+    print("%s\t%d\t%s\t%s\t%d\t0x%x\t%s\t%s\t%s"
+          % (r["inst"], r["block"], r["hash"], r["frm"], r["gas"], r["gas"], r["status"], r["sel"], r["method"]))
+print()
+print("===== 汇总 =====")
+for name, key in (("R2", "R2"), ("R3", "R3")):
+    cr = [c for c in creations if c["inst"] == key]
+    rs = [r for r in rows if r["inst"] == key]
+    allx = cr + rs
+    gas = sum(x["gas"] for x in allx)
+    blocks = sorted(set(x["block"] for x in allx))
+    print("%s: 创建交易 %d 笔；调用交易 %d 笔；合计 %d 笔；gasUsed 合计 %d (0x%x)；块范围 %s..%s"
+          % (name, len(cr), len(rs), len(allx), gas, gas,
+             blocks[0] if blocks else "-", blocks[-1] if blocks else "-"))
+    if cr:
+        dep = cr[0]
+        print("   %s 部署: block %d tx %s gasUsed %d (0x%x) contractAddress %s"
+              % (name, dep["block"], dep["hash"], dep["gas"], dep["gas"], dep["ca"]))
+        if rs:
+            last = max(rs, key=lambda x: x["block"])
+            print("   %s 部署→最后一笔实例交易块跨度: %d -> %d = %d 块（最后一笔 block %d tx %s %s）"
+                  % (name, dep["block"], last["block"], last["block"] - dep["block"],
+                     last["block"], last["hash"], last["method"]))
+print()
+print("===== per-instance 方法分布 =====")
+for name in ("R2", "R3"):
+    print("[%s]" % name)
+    counts = {}
+    for x in rows:
+        if x["inst"] == name:
+            counts.setdefault(x["method"], []).append(x["block"])
+    for m in sorted(counts):
+        bs = counts[m]
+        print("  %-62s n=%d blocks=%s" % (m, len(bs), ",".join(str(i) for i in bs)))
+
+########## 2. 链扫全量输出（含 to=null 创建交易行） ##########
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools python3 /tmp/t4-lyquid-scan.py
+endpoint=http://node1:10087/api  eth_blockNumber=0x194 (dec 404)
+scan_range=0..404 (inclusive)  instances: R3=0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589 R2=0xfd6f7a6a5c21a3f503ebae7a473639974379c351
+null_to_txs_total=17  creation_txs_to_instances=2  instance_calls=136
+
+===== 创建交易（to=null，receipt.contractAddress ∈ {R2,R3}）=====
+inst	block	hash	from	contractAddress	gasUsed	hex	status	selector	method
+R2	199	0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	0xfd6f7a6a5c21a3f503ebae7a473639974379c351	3707457	0x389241	0x1	0x60806040	unknown(0x60806040)
+R3	327	0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589	3843041	0x3aa3e1	0x1	0x60806040	unknown(0x60806040)
+
+===== 实例地址交易（to ∈ {R2,R3}）=====
+inst	block	hash	from	gasUsed	hex	status	selector	method
+R2	201	0xae6698c721a6ca98ec07ac310ad4efedefb249bb63e8f42ee4cec84c84c1c83b	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37748	0x9374	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	202	0x796ae342024ac561fc91ca3605512ce15cb40ad1900da498c76822e0621126ea	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	203	0xc32f3cf0240206f18c063313c180710d271dce0f540fc49870534f480e9bc555	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	204	0xfd61a3c54677581656869c7729cf73d46afd6a86ae4760c4d0b2470d0de580c9	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47918	0xbb2e	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	205	0xee74dd7911d312f7b441bf7a76ebb5a0dda3a38a43a2caadbc9d2f60169ac207	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	206	0x05df12f8d726362b57553fd19499c2536e9fe2c71e728f8f72bd942469bcfdbe	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+R2	207	0xc50545bcae88b5dd4e1582256f652e438f369b8498d5e6a4c1b8bac87f772e41	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35996	0x8c9c	0x1	0x786cfc8f	claim_timeout(string)
+R2	208	0xc1b94ce3d885df7f56c63dbdeb1bdc6df0541d2d561a7beca20a1dbd14bac736	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47918	0xbb2e	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	209	0x0cd3c839f6a24890da1c609fda6c30e2c11ddc609791d6e41487e1b5577ff9a2	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	210	0x4d91f59ee8e3d219ec9a13ed09c80c494f9ba08bef2b329a1d42b64a742c3fba	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+R2	211	0x9e76bee0ec2bf1aebe23ed6953d71d9226ac288c44785860caaa5302616b2b83	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47918	0xbb2e	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	212	0xf7d14de71fab0fe436bfe3996ae8a90f7ece21a353e281c3981fac6cbde7ec3c	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	213	0x79615ea052e08cfd2e62922dbbb28538f99fe701483d34878809d09ca417ccbc	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+R2	214	0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	35996	0x8c9c	0x1	0x786cfc8f	claim_timeout(string)
+R2	215	0x0ff4f14ff1dd438cb81a4b886a0ec65a2120a31125c64d6daf2da633737e2abe	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35996	0x8c9c	0x1	0x786cfc8f	claim_timeout(string)
+R2	216	0x0792a62ce5deff76b0039b55c072cb65ab05741c99e26d071957ba21b03add3e	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	42775	0xa717	0x1	0x15df3c73	committee_config(string[],uint32)
+R2	217	0x10d1e377b75e2211730f2d04e6734b04558ccfb7191db4010cffb5893d1dbba9	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	218	0x192d3e0f68173a401d782fadf39d855cb7081b5a5323958c3bc0e3ec37135ea6	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	219	0x6da879a297f11bd7b879df833bc1c20cc6142073ef86c7cbb48e1e9c3a566618	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	220	0xefe89fce85a365a0715f52bff7104a05f3deeb7c8a5e95963d4ac8aba858b922	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	221	0xacf9b182f976c2afe2e58d6f834ae7f7097fa3cd7241781e2be4509be7f8dfc3	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	222	0xffae842fbf97a626dbdc25700ff31a0a2b96984071ad8800df796080812568e4	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	223	0xa779d01bb682044a08bfa09864ac3839299cdafd566177dc0ae6893eb4b1a18e	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	224	0x3df9ac27807f4b2d1826fbeb3eac2d33be80f10881d5b3303fc5f3868bacac9d	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R2	225	0x9bdde2706831bc13d57b2bede4a3c280c8318cb0acedb2ac855cdd6a001d88f2	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43073	0xa841	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	226	0x741ecaf29c8e9b544257d59eee89247f9a2b19fc40f5bcf0fed0f0fc11bd76ed	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	42775	0xa717	0x1	0x15df3c73	committee_config(string[],uint32)
+R2	227	0xc14713c170b8d4b807439142a9d390fcc0830ddfe39220315a53eff67a8d8c47	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	228	0xc66ee2487e6bfd7e55c6184744e3fa6ea7f612607a27b32281d8dda173102aca	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	229	0x6a6c8bb70ddbfe936878e44da6fbed03b61c5f2f664d10581a59b45e8832bd6d	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	230	0x432ae74b5d36e0d4aac192fc585677ae563fc416de53c3661162044933d4afc3	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	231	0x29b180366e437d7b6cf63c2a2a000e4b9e5da59db01edc6328745d4e3fed2068	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	232	0x869cff870fc285207cb44a135243fa912b5d73e3b0b0f62ea3b41e16cfd00c55	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	233	0x359541e576f885300a961343736deef194269db8adcce472195d3f2406159b1c	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	234	0x5e4d55365b3d02a658f509d8c1316109cb140239466b5b21c38f8affff4e5dbd	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R2	235	0x4f4bc26d1e8ac0db8d0324b42a351e888fe3c541103804621fc3f2156e2ee37f	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43061	0xa835	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	236	0xf6e8f28c0db62441ddb6024d80dd62be3870a26a2a1ec2a19c461a9f7a4464aa	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	42775	0xa717	0x1	0x15df3c73	committee_config(string[],uint32)
+R2	237	0x783be38e7f7589696d801b752ead34d2464b3055b0685d6e6ada1c0c527bc71c	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	238	0xc3a33502efe0bb28c270a32c6fc79d7f5444b6f8ec5ba84bc0514e95257b357a	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	239	0x9c7ef8b7a5a714d13b61655490668328d9ae28bd64bbe0460705da51fd2d238b	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	240	0x8bf2507e2a1df174b0da3d0567bfa7f5153538be2ee27206bb0ec25075d697ac	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	241	0x6620196caa0b2dd57f3d55936b9ab62dd70c3cb02f65a99b0d92cd3b566a892e	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	242	0x184f79594836018c19a3dbf686121028c5d57813cc5bcbc5b1d7ffab08066925	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	243	0x029192769c069822098ef2fd59cbca8c07db387b392dee3eac52d8ce1cf26186	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	244	0xa5619a0f28d68b9c8a312b4f41c9b13ce2a6ea7dd3862bb00587c845ce85a48b	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R2	245	0xcdbb266053bbf51fe675aad9f9f85336912e6bfb63aad21c1892d8f77bb3ff7c	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43061	0xa835	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	246	0xaaabb6372b5d862c18bcf848f2fe6f403a56836f510d224b6c658cc5f79eb33b	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	247	0xef9d64c92961e4db03218270c19c8849a2a2412f8fe0651985c02c6bcfaff0de	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	248	0xc0f69d04b47d24770487bbe792d2c91381b9dd3c495f71c76a9cac44ba4dfd27	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	249	0x6dd68c4ebc5485019e4c3622f753cce0ddbee2fd0558d23170cdd769c210e3ec	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	250	0x7d72b06fcfb3e364c7e125847c9890f65920d194d17e1b14eddbeb75a5a2416b	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	251	0xb237d86c85588abdd3ce606110515c89b82b04bf770e728febe7d4a50442b511	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	252	0xc272e9ed65cf12706d46830c2b2471806dcbcf17872c20a2ba0fd5a86bb29121	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R2	253	0x2a824626ba93b8559fa76c6bc5697e20052fd36a22ef2e400b708324a82be7da	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43049	0xa829	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	254	0x1e526cfe5e7ecfaa408b06f59bc033a44d0c854262d657644bfe7a7d66ce3e57	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	255	0x1e69fc059d289eafa532be43e3bcafd388a708051b265a9fd4aca7238213b17b	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	256	0x636f1b7d083dc254ab373395a3734cf6552912e4b514a3109d071c5704b6eca0	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	257	0x8e0974e46b28f4006b86f7e384dd51c7aacb1f6cf82c984141558c7a71845a15	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	258	0x27ea681c063d9b23f14ae1b8bb3e2f334d6a03faec6adffe479963b754f4663c	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	259	0x91513aaf92538b20b2251a3e179f677fb70471b7e0615e41599297d6f51760cd	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	260	0xd6383292e2352aab1dc467a19a9a7d7906b30d4f6e478a21d7b563655e360e6a	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R2	261	0xbb9a93ab3d127eb9a9c7dc1480a89142721cf777cb79d57af81f9fe797c9dfa9	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43061	0xa835	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	262	0x5bb5e6ac3ab12fb2ad9946545489bd31d0f23fc9c32ecd4adb91f36eba8ab718	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43061	0xa835	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	263	0xc6308b56229aebb228b1f4aef5fc70cafc81fab7cc76fbc45fdaf9b0a87472d5	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	42775	0xa717	0x1	0x15df3c73	committee_config(string[],uint32)
+R2	264	0x4f0efd3cfcd6043cd3f6c09bb68141e4abf484d020469c467d19881b8155c512	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	265	0xa63af9007d8b6bb1ca5e895ef6429438baa90e0f90a082e73cc5373210c19442	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	266	0x31776b142792d0ffd7330de5c56aeea2fb01a92fef387150ab683a6275029a36	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	267	0x7f82118d0a518bf2b63ec5ab6005a07052ff90ff3b2f36d103ed524e02752754	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	268	0xabe1a0106624a3a956dd76d2e0316f6cbd342fc8837164014d993a6aca642414	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0x73451f65	fund(string)
+R2	269	0xb64ca1cb23032e5525534e549d1d71bf2858f228bfc4796e0e11dc642dbdb59c	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	270	0x464f1a1560d3cc2ef82452971801a46f04ae5edfd869102f1f672a0c097ceaef	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	271	0x3764fd9c30c11bec8a7f0132ad96f3cc1952e7600a0b28ac13b31b801061cf1e	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38871	0x97d7	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	272	0x83b53934b742b4c093476093a5a5c1571f95e6cc19b22273d702978965749aee	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44215	0xacb7	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	273	0xedeea6f3a03d7ed8ddd14f163a7999db98554d4fd0f8e572789c77f35cb7ceee	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35925	0x8c55	0x1	0xad932b5c	complete(string)
+R2	274	0x2255b7b31795ec1d3e498d42fdbb3ce4e460a218bba67bd9b437a6ec452f4244	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	42775	0xa717	0x1	0x15df3c73	committee_config(string[],uint32)
+R2	275	0xe7256b1d7622537123de4252888de23894a7739062412580916683969159ce9b	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	276	0x05d6748081b294765076f9b22049ba3c51622df139a7b7fc94388c68254880c0	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	277	0x60b13c32cdabedb0531e2b02d468c4ba4d9bf6926eb2bc418e96a7dd6b86f2ce	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	278	0x4a70aa67212940e6f1500e44896a2da369a6f619b4ed362bbcd1c09ee4c82fd0	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	279	0x8a722ac5f68604a0b7ffe8e1566567194c49090a45afec450eed4fc56558b86f	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0x73451f65	fund(string)
+R2	280	0x58c3b00e60d1bab382860b4403de4ce2f8816c0666d626419b8be41b9c719a98	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	281	0xbc10ef2656ac1803d945086e669c39efc9d6b8e6409da8a4f45d93835a03e1f5	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	282	0x0c4780eaf652301b8c373d709575ad5a477f4c330f9b71399d8ce704c9c67ed0	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38883	0x97e3	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	283	0x9fc44542c4790d8029e8896ab797a4c25e877105807317ab1ff049173b7df22e	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	284	0xebd0b36f2ab14589d604ade1f9b4f0e3e8a7bec066087338fcbb95911041daa7	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0xad932b5c	complete(string)
+R2	285	0xd54c4e2a2cfa517eae8c38eea046b49c38f515eb1f2bcdf1f9caac9ec09df2da	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	286	0xa93523d94b9c8ab5d6a48610ebecd94ba215f65f4428cd9d2ae4663d5a89367c	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47918	0xbb2e	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	287	0x1e9017bdedf8fceb6a22884d4b665593f58679f83188d2bf6ae075b5d720b682	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0x73451f65	fund(string)
+R2	288	0x2378323a7cea9b68df65457ed7ecde99ee6a54a9180b698954238e0d8ca03da8	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+R2	289	0xf05d43d5cb814919fd09e95659c1a8ab322e0280fdb42ea56961603308b7366a	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+R2	290	0x7f545272b0f7db6427d14e045f2b70a614aceb293ec75f4652525c079f014fa6	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	36008	0x8ca8	0x1	0x786cfc8f	claim_timeout(string)
+R2	291	0xfed1e5abb06a253e81fe9e475eebbc9dcc7bb46b9ed4906cf15618915aceb161	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37460	0x9254	0x1	0xb540def8	faucet(string,uint128)
+R2	292	0x40fd3fd740b5556ee0359cc313c3fe5c46389113effdb063ec88df79674eb456	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	293	0x2623c06b5dde5decd53e211851c3f0be459c8e9b51af730b33d37e6dcd094974	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	294	0x8b6099a2716b3cbfd6e645a98b26b553ff763e22f6fc1d71aa95a31afe3a7ad9	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	295	0x0c2fc8c5216ce71ba00e656d15e92d941b99b66dfb9374a754b175abff4a9626	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0x73451f65	fund(string)
+R2	296	0x1015e5e2fb40828322c37f196adb507fe032f7e58eb8d7da3fc6a8f3720fe17e	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38883	0x97e3	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	297	0xbe0f651405db36ba3a07953b5e520f939610548f70f557e2c239a29c1f12a713	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	298	0xd373319d0836f3a556a110e693ca8269a3b8f14d7eed47a041df7b459aae9d45	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38895	0x97ef	0x1	0xa48ab911	open_dispute(string,string)
+R2	299	0xc0f3a6acfac8f8f37314a8aa1c000574bba1f51199691063a5dbda2278b680ac	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43073	0xa841	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	300	0x85519d8804f3cfbc53ff87f9baa88e27c7df73998b2609f418526777b7ca26fc	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	301	0x20b7ef9406ea81b67c5cd29c3386812d0735f6a4a67a9634d81e2b8217a8717b	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	302	0x6e30271841f7c3ab18f697c41b6ecd49a6ceac711124f50df627d062111acebc	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	303	0x24a5aca39e686ab6bd9051fa201fa6f0e8006851445eb1b382b804001bf34aae	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0x73451f65	fund(string)
+R2	304	0x53c7caa9c3094182d1eee399f6aed61862b17e5ecd051222d67924b5726d1c22	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38883	0x97e3	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	305	0x22915da2dc3ae51c1b49d3a3cedcda11be566d9626a043e18264d95d9b72c274	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	306	0x909cc349a08f313f2d5d5c0387029c42dea75c16e067df6e8a912f4a11e6c11d	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38895	0x97ef	0x1	0xa48ab911	open_dispute(string,string)
+R2	307	0xe9f512d8205719c6a74ec6fc059bdbf0abca7e618359a6cd5295244db6e588a3	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43061	0xa835	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	308	0x00241c8b6b2e2bad5afbbcebd466e65bc1334c4717ee8fcc3909abeaf46d0f8c	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47930	0xbb3a	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R2	309	0x0411e8852dcff7b1db413939c22c3b282b99ddac02b0908098fa2a31e3baa666	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	310	0x0a33525591bf240c19adfd3b7de7dab6f1334bc466268f7a6043542a026b6d59	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	311	0x82091d51c703f8082eab00c6891701a2490b4acfe2af83c6342908e53ddc0df9	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	35937	0x8c61	0x1	0x73451f65	fund(string)
+R2	312	0x209c36acd1f4ca4cfade38ad63d411359ebe51bd1f43843e61b7d6037f552c85	0x3c44cdddb6a900fa2b585dd299e03d12fa4293bc	38883	0x97e3	0x1	0x7ecc9d46	submit_deliverable(string,string)
+R2	313	0x3f6a348d20f1832ac654781def433933eb162236abe4b9a1660ca61ebc2f25a9	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44227	0xacc3	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R2	314	0xd0d0774839dd0b7aeab2b72aa11d051fc73460f1d441b97aa73e6f45772ad557	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38895	0x97ef	0x1	0xa48ab911	open_dispute(string,string)
+R2	315	0xde0ce9a48cb756927bec195a746eb83cea37ede6da9cb7d224de6433a410db06	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	43073	0xa841	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+R2	319	0x58dbcaaa46b1abd253764b3601987b91d99c1eda05935dfe9d78deb8f8ebc7c3	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	41547	0xa24b	0x1	0x9771a522	unknown(0x9771a522)
+R2	320	0xc0a9a6dd05bb4f26aa731fab2e744a6b50a6a890f4ef60c98564bc93a498740f	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	54199	0xd3b7	0x1	0xeddfc069	unknown(0xeddfc069)
+R2	321	0xe7dd33fc29e1d7a95cbf6f1a5a7e413edc4b4a022f136a4cf1a324013933d851	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	51426	0xc8e2	0x1	0xeddfc069	unknown(0xeddfc069)
+R2	322	0xf4b4b562f4b64b200411b51990c551b4ed005207337ee5cad901c4833d39afd7	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	50560	0xc580	0x1	0xeddfc069	unknown(0xeddfc069)
+R2	323	0x6da4a3a4514f20c2dc2dd111bd30d5523ab823b1ba307bb94c08404fa1923720	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	34842	0x881a	0x1	0x0d8712ee	unknown(0x0d8712ee)
+R2	324	0xaa6eafee177bf4a670ad26d5d39f58480d559acd25a5eec53edc92e3dbb7b0e6	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	50468	0xc524	0x1	0xeddfc069	unknown(0xeddfc069)
+R2	325	0x136d9ae95b87da64e70d2e112808171021da156f6faed837078230d112801127	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	51438	0xc8ee	0x1	0xeddfc069	unknown(0xeddfc069)
+R2	326	0xdca60e995de617be0b948e5d10a12f0662dbd541c24c09488df6140057c20e9e	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	53999	0xd2ef	0x1	0xeddfc069	unknown(0xeddfc069)
+R3	329	0x639a31306fe6c507d6ac5b5a6a4b20e470f498f9b70b8715abd3e1cb566357ef	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	46454	0xb576	0x1	0x15df3c73	committee_config(string[],uint32)
+R3	330	0x6da2c2a3822eacc11898f9c51008e43397ca206ef28a0b753bffa235558aed7d	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	41580	0xa26c	0x1	0xcd9cc3c8	unknown(0xcd9cc3c8)
+R3	331	0xc406f0b56f0646221753f2122baf8124413fc40b94f4a289dce46272941a1909	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	58457	0xe459	0x1	0xeddfc069	unknown(0xeddfc069)
+R3	332	0x52ebf5bd528f7515eb555e83bd89f940b5c6fd22f5b32dd0304fedcab822639f	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	55358	0xd83e	0x1	0xeddfc069	unknown(0xeddfc069)
+R3	333	0x5a22bd8dfcf4470e5fd9cc4430adbbdf956a245f4a4c190480802d5051d24352	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37438	0x923e	0x1	0xb540def8	faucet(string,uint128)
+R3	334	0xa352794726b07f7a32294236bd991013b89acada2c0b415a53f267ff2f1038b1	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	47908	0xbb24	0x1	0xbd827024	create_deal(string,string,uint128,uint16,string,string,uint64,uint8)
+R3	335	0x5bd6187952962b8e15bf2391238365c17ad0102afd8bf8391a41a0acb7e96f5f	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44193	0xaca1	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R3	336	0xda29bd4761d5c9914be609c8353857a153808121149029271d408e7b8641b871	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	44193	0xaca1	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R3	337	0x26540383b2cfd0b0fa2a422b4c9ffa7ef8d23729143f60efd2ebc4068910eec3	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	36014	0x8cae	0x1	0x73451f65	fund(string)
+R3	338	0xa9e6d7fc9e4df326b4f8c0bbc7fba45268d95c4196262ed9603a48303acfd8e8	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	44193	0xaca1	0x1	0xb1fecd5a	notarize(string,string,string,string)
+R3	339	0xbcf15e77f5964158a979aae8d58a15d3736c9cc98b3e50384135718a5fa606b2	0x70997970c51812dc3a010c7d01b50e0d17dc79c8	38883	0x97e3	0x1	0xa48ab911	open_dispute(string,string)
+R3	340	0x3739bfe923c5f015bb3c95a8849370b8076b0db78e2f468af8449f93a1c01c79	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	38208	0x9540	0x1	0x8b7acf91	unknown(0x8b7acf91)
+R3	341	0x7a9f9b4fe2670abee518738c88705e2d324a6c58883aa28d693c92b9a560fe9a	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	52489	0xcd09	0x1	0xeddfc069	unknown(0xeddfc069)
+
+===== 汇总 =====
+R2: 创建交易 1 笔；调用交易 123 笔；合计 124 笔；gasUsed 合计 8852628 (0x871494)；块范围 199..326
+   R2 部署: block 199 tx 0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda gasUsed 3707457 (0x389241) contractAddress 0xfd6f7a6a5c21a3f503ebae7a473639974379c351
+   R2 部署→最后一笔实例交易块跨度: 199 -> 326 = 127 块（最后一笔 block 326 tx 0xdca60e995de617be0b948e5d10a12f0662dbd541c24c09488df6140057c20e9e unknown(0xeddfc069)）
+R3: 创建交易 1 笔；调用交易 13 笔；合计 14 笔；gasUsed 合计 4428409 (0x439279)；块范围 327..341
+   R3 部署: block 327 tx 0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297 gasUsed 3843041 (0x3aa3e1) contractAddress 0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589
+   R3 部署→最后一笔实例交易块跨度: 327 -> 341 = 14 块（最后一笔 block 341 tx 0x7a9f9b4fe2670abee518738c88705e2d324a6c58883aa28d693c92b9a560fe9a unknown(0xeddfc069)）
+
+===== per-instance 方法分布 =====
+[R2]
+  apply_committee_verdict(string,uint8,string[])                 n=10 blocks=201,225,235,245,253,261,262,299,307,315
+  claim_timeout(string)                                          n=4 blocks=207,214,215,290
+  committee_config(string[],uint32)                              n=5 blocks=216,226,236,263,274
+  complete(string)                                               n=2 blocks=273,284
+  create_deal(string,string,uint128,uint16,string,string,uint64,uint8) n=14 blocks=204,208,211,218,228,238,246,254,265,276,286,292,300,308
+  faucet(string,uint128)                                         n=14 blocks=202,203,206,210,213,217,227,237,264,275,285,288,289,291
+  fund(string)                                                   n=14 blocks=205,209,212,221,231,241,249,257,268,279,287,295,303,311
+  notarize(string,string,string,string)                          n=34 blocks=219,220,223,229,230,233,239,240,243,247,248,251,255,256,259,266,267,269,270,272,277,278,280,281,283,293,294,297,301,302,305,309,310,313
+  open_dispute(string,string)                                    n=8 blocks=224,234,244,252,260,298,306,314
+  submit_deliverable(string,string)                              n=10 blocks=222,232,242,250,258,271,282,296,304,312
+  unknown(0x0d8712ee)                                            n=1 blocks=323
+  unknown(0x9771a522)                                            n=1 blocks=319
+  unknown(0xeddfc069)                                            n=6 blocks=320,321,322,324,325,326
+[R3]
+  committee_config(string[],uint32)                              n=1 blocks=329
+  create_deal(string,string,uint128,uint16,string,string,uint64,uint8) n=1 blocks=334
+  faucet(string,uint128)                                         n=1 blocks=333
+  fund(string)                                                   n=1 blocks=337
+  notarize(string,string,string,string)                          n=3 blocks=335,336,338
+  open_dispute(string,string)                                    n=1 blocks=339
+  unknown(0x8b7acf91)                                            n=1 blocks=340
+  unknown(0xcd9cc3c8)                                            n=1 blocks=330
+  unknown(0xeddfc069)                                            n=3 blocks=331,332,341
+
+########## 3. 两笔创建交易完整收据原文（cast receipt --json，报告引用以本段为准） ##########
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools cast receipt 0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda --rpc-url http://node1:10087/api --json   # R2 创建
+{"status":"0x1","cumulativeGasUsed":"0x389241","logs":[{"address":"0xfd6f7a6a5c21a3f503ebae7a473639974379c351","topics":["0x5d6cfd0bc7828ef42c4df1be3308d4c56a91df628f3d4bdcb081d175856ed4f7"],"data":"0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008098b40bf8a733783e5b5768f37c0557ebf075c0fcf088aaa75c9b077fa2e42d1700000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","blockHash":"0x7a7c9f4835086e52f2916e370ae1c8241e815499036f388e009996b0394700ca","blockNumber":"0xc7","blockTimestamp":"0x6ae36829","transactionHash":"0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda","transactionIndex":"0x0","logIndex":"0x0","removed":false},{"address":"0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0","topics":["0x5d6cfd0bc7828ef42c4df1be3308d4c56a91df628f3d4bdcb081d175856ed4f7"],"data":"0x000000000000000000000000000000000000000000000000000000000000002100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000fd6f7a6a5c21a3f503ebae7a473639974379c35100000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000046d61696e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000872656769737465720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000104ad527a590000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008098b40bf8a733783e5b5768f37c0557ebf075c0fcf088aaa75c9b077fa2e42d1700000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023687474703a2f2f72656769737472793a383030302f6c7971756964733a6c6174657374000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","blockHash":"0x7a7c9f4835086e52f2916e370ae1c8241e815499036f388e009996b0394700ca","blockNumber":"0xc7","blockTimestamp":"0x6ae36829","transactionHash":"0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda","transactionIndex":"0x0","logIndex":"0x1","removed":false}],"logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040200000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000080000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000400000000000000000","type":"0x0","transactionHash":"0xaabbe98ac5153f0fdaa1a5c7952063f7c19a9fb815492fe2e5bb56ca47fdabda","transactionIndex":"0x0","blockHash":"0x7a7c9f4835086e52f2916e370ae1c8241e815499036f388e009996b0394700ca","blockNumber":"0xc7","gasUsed":"0x389241","effectiveGasPrice":"0x3b9aca08","blobGasPrice":"0x1","from":"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266","to":null,"contractAddress":"0xfd6f7a6a5c21a3f503ebae7a473639974379c351","blockTimestamp":1793288233}
+
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools cast receipt 0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297 --rpc-url http://node1:10087/api --json   # R3 创建
+{"status":"0x1","cumulativeGasUsed":"0x3aa3e1","logs":[{"address":"0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589","topics":["0x5d6cfd0bc7828ef42c4df1be3308d4c56a91df628f3d4bdcb081d175856ed4f7"],"data":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d279597460300000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","blockHash":"0x9af80ea5b56d10958701c1b4dde7a56c820427ecf88193d9e078e079d6c13077","blockNumber":"0x147","blockTimestamp":"0x6ae4062e","transactionHash":"0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297","transactionIndex":"0x0","logIndex":"0x0","removed":false},{"address":"0x9fe46736679d2d9a65f0992f2272de9f3c7fa6e0","topics":["0x5d6cfd0bc7828ef42c4df1be3308d4c56a91df628f3d4bdcb081d175856ed4f7"],"data":"0x000000000000000000000000000000000000000000000000000000000000002300000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000087006e75a5b6be9d1bbf61ac8cd84f05d914058900000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000046d61696e00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000872656769737465720000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000104ad527a5900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000080ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d279597460300000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000023687474703a2f2f72656769737472793a383030302f6c7971756964733a6c6174657374000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","blockHash":"0x9af80ea5b56d10958701c1b4dde7a56c820427ecf88193d9e078e079d6c13077","blockNumber":"0x147","blockTimestamp":"0x6ae4062e","transactionHash":"0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297","transactionIndex":"0x0","logIndex":"0x1","removed":false}],"logsBloom":"0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000040200008000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000000000400000000000000000","type":"0x0","transactionHash":"0xc789080c0ecd0a7be0a440b9506a916491cc82ec914ccd5523999abd677af297","transactionIndex":"0x0","blockHash":"0x9af80ea5b56d10958701c1b4dde7a56c820427ecf88193d9e078e079d6c13077","blockNumber":"0x147","gasUsed":"0x3aa3e1","effectiveGasPrice":"0x3b9aca08","blobGasPrice":"0x1","from":"0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266","to":null,"contractAddress":"0x87006e75a5b6be9d1bbf61ac8cd84f05d9140589","blockTimestamp":1793328686}
+
+########## 4. 与既有证据对拍（逐条给 文件:行号） ##########
+
+# c1  R3 创建交易 hash / block / gasUsed 与 plan §1-5 规划期复验值一致：
+     scan: block 327 hash 0xc789080c…f297 gasUsed 0x3aa3e1 (=3843041) contractAddress 0x87006e75…0589
+     plan.md:34 记录同值 -> 判定 MATCH
+# c2  R2 创建交易同项：
+     scan: block 199 hash 0xaabbe98a…abda gasUsed 0x389241 (=3707457) contractAddress 0xfd6f7a6a…c351
+     plan.md:34 记录同值 -> 判定 MATCH
+# c3  R3 faucet 单笔证明（plan 记 _r3-t3-final-state-raw.txt:27；本次 grep 实取该文件第 25 行）：
+     既有证据 25:  block=333 tx=0x5a22bd8dfcf4470e5fd9cc4430adbbdf956a245f4a4c190480802d5051d24352 from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 agent=0x70997970C51812dc3A010C7d01b50e0d17dc79C8 amount=10000
+     scan     R3	333	0x5a22bd8dfcf4470e5fd9cc4430adbbdf956a245f4a4c190480802d5051d24352	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37438	0x923e	0x1	0xb540def8	faucet(string,uint128)
+     -> hash/block 一致：MATCH
+# c4  R3 终态读回块高（_r3-t3-final-state-raw.txt:4 'block_number = 341'）与 scan 最后一笔 R3 交易所在块：
+     既有证据 4:block_number = 341
+     scan     R3	341	0x7a9f9b4fe2670abee518738c88705e2d324a6c58883aa28d693c92b9a560fe9a	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	52489	0xcd09	0x1	0xeddfc069	unknown(0xeddfc069)
+     -> 341 一致：MATCH（该块交易即认证回调，见 c5）
+# c5  R3 四节点认证回合（_r3-t3-console-raw.txt:30-31）与链上两块对位：
+     既有证据 30:e2_run_verdict_round: certified call submitted to the sequencing backend
+     既有证据 31:committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4) deal=deal-1 verdict=1
+     scan     R3	340	0x3739bfe923c5f015bb3c95a8849370b8076b0db78e2f468af8449f93a1c01c79	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	38208	0x9540	0x1	0x8b7acf91	unknown(0x8b7acf91)
+     scan     R3	341	0x7a9f9b4fe2670abee518738c88705e2d324a6c58883aa28d693c92b9a560fe9a	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	52489	0xcd09	0x1	0xeddfc069	unknown(0xeddfc069)
+     -> console 的 certified call 提交与 block 341 回调交易同一时间线；e2_arm（console:15）对位 block 340：MATCH（说明见 §5 说明 2）
+# c6  R2 keeper 双笔（_r2-keeper-loop-raw.txt:27-28）：
+     既有证据 27:block 213: from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 (keeper) selector=0xb540def8 -> faucet(nudge) (OK) hash=0x79615ea052e08cfd2e62922dbbb28538f99fe701483d34878809d09ca417ccbc gasUsed=0x923c
+     既有证据 28:block 214: from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 (keeper) selector=0x786cfc8f -> claim_timeout (OK) hash=0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02 gasUsed=0x8c9c
+     scan     R2	213	0x79615ea052e08cfd2e62922dbbb28538f99fe701483d34878809d09ca417ccbc	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37436	0x923c	0x1	0xb540def8	faucet(string,uint128)
+     scan     R2	214	0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	35996	0x8c9c	0x1	0x786cfc8f	claim_timeout(string)
+     -> block 213 faucet 0x923c、block 214 claim_timeout 0x8c9c，hash 与 gasUsed 全一致：MATCH
+# c7  R2 P2 探针交易（plan 归因更正对象：_r2-deploy-raw.txt:752-768，status 0x1 但方法未生效）：
+     既有证据 762:logs                 [{"address":"0xfd6f7a6a5c21a3f503ebae7a473639974379c351","topics":["0x5d6cfd0bc7828ef42c4df1be3308d4c56a91df628f3d4bdcb081d175856ed4f7"],"data":"0x000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000020000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb9226600000000000000000000000000000000000000000000000000000000000000c000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000046d61696e0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000176170706c795f636f6d6d69747465655f7665726469637400000000000000000000000000000000000000000000000000000000000000000000000000000000c4a32974e30000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000096465616c2d6e6f70650000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000","blockHash":"0x95fdd199ea828e05b51b1e8424adf2c89f99fd0556b511172bc658f5a44d728e","blockNumber":"0xc9","blockTimestamp":"0x6ae3683e","transactionHash":"0xae6698c721a6ca98ec07ac310ad4efedefb249bb63e8f42ee4cec84c84c1c83b","transactionIndex":"0x0","logIndex":"0x0","removed":false}]
+     既有证据 766:transactionHash      0xae6698c721a6ca98ec07ac310ad4efedefb249bb63e8f42ee4cec84c84c1c83b
+     scan     R2	201	0xae6698c721a6ca98ec07ac310ad4efedefb249bb63e8f42ee4cec84c84c1c83b	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	37748	0x9374	0x1	0xa32974e3	apply_committee_verdict(string,uint8,string[])
+     -> 该 tx gasUsed=37748（0x9374）确认不是部署 gas（部署为 block 199 的 3707457）：MATCH（与 plan §1-5 更正一致）
+# c8  R2 最后一笔实例交易所在块（plan:32 复核 block 326 含 to=R2 交易）：
+     scan     R2	326	0xdca60e995de617be0b948e5d10a12f0662dbd541c24c09488df6140057c20e9e	0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266	53999	0xd2ef	0x1	0xeddfc069	unknown(0xeddfc069)
+# c9  R2 终态快照块 315（_r2-final-state-raw.txt:4）仅作参考读数点：
+     既有证据 4:block_number = 315
+     -> 本件对 R2 的「部署→最后实例交易块跨度」采用链扫实取终点 326（不写死 315）
+
+########## 5. 说明（口径与未识别项，如实登记） ##########
+1) 扫描判据：to ∈ {R2,R3} 的调用交易 + to==null 且 receipt.contractAddress ∈ {R2,R3} 的创建交易。
+   本链块 0..404 中 to=null 交易共 17 笔，其中落地为两实例的创建交易 2 笔（即 c1/c2），其余 15 笔为其他合约创建，未列入。
+2) selector 映射来源：_r3 常量表 workflow-out/w1b2-s4-rpc.md:66-79 + 容器内 cast sig 实算。以下三个 selector 在本仓库
+   Rust 源码与既存 selector 表中均无法对应到方法名，如实标为未识别，不猜测：
+     0xeddfc069  9 笔（R2 320,321,322,324,325,326；R3 331,332,341），调用者均为 anvil#0；
+                 其中 R3 341 与 console 行 `certified call submitted to the sequencing backend`（_r3-t3-console-raw.txt:30）
+                 及紧接着的 committee_verdict_certified 日志（:31）同回合；calldata 首字为 0x20 偏移数组（len=1），
+                 形如「签名者集 + 目标调用」的认证调用信封，但方法名未能确证。
+     0x9771a522  1 笔（R2 block 319）；0x0d8712ee 1 笔（R2 block 323）。同为 anvil#0 调用、status 0x1。
+   已确认映射：0xcd9cc3c8 = e2_configure(bytes32[],uint16)（R3 block 330，对位 console:5）；
+     0x8b7acf91 = e2_arm(string)（R3 block 340，对位 console:15）。
+3) gasUsed 全部取自 eth_getTransactionReceipt（脚本内读取），与 cast receipt 同源。
+
+# 生成时刻 2026-10-30 12:09:40 +0800

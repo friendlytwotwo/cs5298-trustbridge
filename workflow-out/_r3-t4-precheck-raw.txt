@@ -1,0 +1,123 @@
+# T4.0 前置核验原始输出（执行员，2026-10-30 12:02:17 +0800）
+# 工作根目录: trustbridge/
+
+$ docker ps
+CONTAINER ID   IMAGE                                     COMMAND                   CREATED      STATUS        PORTS                                             NAMES
+848dda2bd63d   ghcr.io/lyquor-labs/lyquor-tools:v0.8.1   "sleep infinity"          5 days ago   Up 15 hours                                                     multi-tools
+f961416e5b03   ghcr.io/lyquor-labs/lyquor-node:v0.8.1    "/usr/local/bin/lyqu…"   5 days ago   Up 15 hours   0.0.0.0:10087->10087/tcp, [::]:10087->10087/tcp   multi-node1-1
+c281dd2a971b   ghcr.io/lyquor-labs/lyquor-node:v0.8.1    "/usr/local/bin/lyqu…"   5 days ago   Up 15 hours   0.0.0.0:13087->10087/tcp, [::]:13087->10087/tcp   multi-node4-1
+30dc8282affa   ghcr.io/lyquor-labs/lyquor-node:v0.8.1    "/usr/local/bin/lyqu…"   5 days ago   Up 15 hours   0.0.0.0:11087->10087/tcp, [::]:11087->10087/tcp   multi-node2-1
+35a9570ae3f6   ghcr.io/lyquor-labs/lyquor-node:v0.8.1    "/usr/local/bin/lyqu…"   5 days ago   Up 15 hours   0.0.0.0:12087->10087/tcp, [::]:12087->10087/tcp   multi-node3-1
+fbbfca43d618   registry:3                                "/entrypoint.sh /etc…"   5 days ago   Up 15 hours   0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp       multi-registry-1
+2866894e72b9   ghcr.io/foundry-rs/foundry:v1.7.1         "anvil --host 0.0.0.…"   5 days ago   Up 15 hours   8545/tcp                                          multi-anvil-1
+
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools sh -lc 'which forge cast jq python3'
+/usr/local/bin/forge
+/usr/local/bin/cast
+/usr/bin/jq
+/usr/bin/python3
+  rc=0
+
+$ forge --version (容器内)
+forge Version: 1.7.1
+Commit SHA: 4072e48705af9d93e3c0f6e29e93b5e9a40caed8
+Build Timestamp: 2026-05-08T08:41:30.980047569Z (1778229690)
+Build Profile: dist
+
+$ md5sum lyquid/src/*.rs lyquid/Cargo.toml lyquid/Cargo.lock   # 冻结面基线快照 A（Lyquid 源）
+4df7cda64e7e9eb4483c0b8be64068aa *lyquid/src/assessor.rs
+c5f660a13d5c18b5798bfb675fa8729e *lyquid/src/committee.rs
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+4ae54a4717daf35284ffe76d0ebd0b32 *lyquid/src/core.rs
+382576388eee813ac427806847641a09 *lyquid/src/lib.rs
+f842d432143365261e012336d89dc678 *lyquid/src/timeout.rs
+f33e334a2c256da6f2cf08927add165e *lyquid/src/types.rs
+08f94560a1f0a231088055ad834974ee *lyquid/Cargo.toml
+8fd42c893acfa252b3cb2d579d8587a2 *lyquid/Cargo.lock
+
+$ md5sum experiments/evm-contrast/*   # 冻结面基线快照 B（EVM 对照三件套）
+a0dc82822b327d38bb13b07080f85872 *experiments/evm-contrast/Escrow.sol
+640194e587e96f8a6cc90983c70e8a55 *experiments/evm-contrast/foundry.toml
+8b0a3454e4139f65000a5ad40b928482 *experiments/evm-contrast/run-contrast.sh
+
+$ md5sum workflow-out/_plan-prev-r3t4-backup.md workflow-out/plan.md   # 方案备份勾稽（plan §0-#12）
+cf15233b3ad4db7b7248dddd8467ee3f *workflow-out/_plan-prev-r3t4-backup.md
+a7eb173cab74ccd8c4a873d0ad9a8d56 *workflow-out/plan.md
+
+# 冻结面基线快照同时留存独立文件，供 T4.9 逐字节对拍：
+$ md5sum lyquid/src/*.rs lyquid/Cargo.toml lyquid/Cargo.lock experiments/evm-contrast/* > workflow-out/_r3-t4-baseline-md5.txt
+4df7cda64e7e9eb4483c0b8be64068aa *lyquid/src/assessor.rs
+c5f660a13d5c18b5798bfb675fa8729e *lyquid/src/committee.rs
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+4ae54a4717daf35284ffe76d0ebd0b32 *lyquid/src/core.rs
+382576388eee813ac427806847641a09 *lyquid/src/lib.rs
+f842d432143365261e012336d89dc678 *lyquid/src/timeout.rs
+f33e334a2c256da6f2cf08927add165e *lyquid/src/types.rs
+08f94560a1f0a231088055ad834974ee *lyquid/Cargo.toml
+8fd42c893acfa252b3cb2d579d8587a2 *lyquid/Cargo.lock
+a0dc82822b327d38bb13b07080f85872 *experiments/evm-contrast/Escrow.sol
+640194e587e96f8a6cc90983c70e8a55 *experiments/evm-contrast/foundry.toml
+8b0a3454e4139f65000a5ad40b928482 *experiments/evm-contrast/run-contrast.sh
+
+########## T4.9 收尾自检（2026-10-30 12:14:23 +0800） ##########
+
+$ md5sum -c workflow-out/_r3-t4-baseline-md5.txt   # 冻结面与 T4.0 基线逐字节对拍
+lyquid/src/assessor.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/committee_certified.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/lib.rs: OK
+lyquid/src/timeout.rs: OK
+lyquid/src/types.rs: OK
+lyquid/Cargo.toml: OK
+lyquid/Cargo.lock: OK
+experiments/evm-contrast/Escrow.sol: OK
+experiments/evm-contrast/foundry.toml: OK
+experiments/evm-contrast/run-contrast.sh: OK
+  rc=0
+
+$ git status --porcelain -- lyquid experiments   # 冻结面 git 状态（与 plan §1-7 记录的 R3 交付态一致，非本轮所为）
+ M lyquid/src/assessor.rs
+ M lyquid/src/lib.rs
+?? experiments/
+?? lyquid/src/committee_certified.rs
+
+$ git log -1 --format='%h %ci %s'   # 本轮未产生任何提交
+dc78d2f 2026-10-29 21:10:13 +0800 W1-B2 closure evidence: probe A-H loop -> keeper Refunded proof, S4 RPC decision gate, shell rebaseline 40/40
+
+$ git status --porcelain | grep -E '_r3-t4|r3-t4-contrast'   # 本轮新增文件（全部在 workflow-out/ 下）
+?? workflow-out/_r3-t4-baseline-md5.txt
+?? workflow-out/_r3-t4-build-raw.txt
+?? workflow-out/_r3-t4-code-size-raw.txt
+?? workflow-out/_r3-t4-evidence-recheck-raw.txt
+?? workflow-out/_r3-t4-flows-raw.txt
+?? workflow-out/_r3-t4-gas-raw.txt
+?? workflow-out/_r3-t4-lyquid-scan-raw.txt
+?? workflow-out/_r3-t4-md5-raw.txt
+?? workflow-out/_r3-t4-precheck-raw.txt
+?? workflow-out/_r3-t4-run1-superseded-flows-raw.txt
+?? workflow-out/_r3-t4-run1-superseded-gas-raw.txt
+?? workflow-out/_r3-t4-run2-superseded-flows-raw.txt
+?? workflow-out/_r3-t4-run2-superseded-gas-raw.txt
+?? workflow-out/r3-t4-contrast-report.md
+
+$ ls -la workflow-out/_r3-t4-* workflow-out/r3-t4-contrast-report.md
+-rw-r--r-- 1 lenovo 197121   719 Oct 30 12:02 workflow-out/_r3-t4-baseline-md5.txt
+-rw-r--r-- 1 lenovo 197121  1284 Oct 30 12:02 workflow-out/_r3-t4-build-raw.txt
+-rw-r--r-- 1 lenovo 197121  4602 Oct 30 12:10 workflow-out/_r3-t4-code-size-raw.txt
+-rw-r--r-- 1 lenovo 197121 11358 Oct 30 12:11 workflow-out/_r3-t4-evidence-recheck-raw.txt
+-rw-r--r-- 1 lenovo 197121  3692 Oct 30 12:04 workflow-out/_r3-t4-flows-raw.txt
+-rw-r--r-- 1 lenovo 197121  2327 Oct 30 12:04 workflow-out/_r3-t4-gas-raw.txt
+-rw-r--r-- 1 lenovo 197121 52053 Oct 30 12:10 workflow-out/_r3-t4-lyquid-scan-raw.txt
+-rw-r--r-- 1 lenovo 197121  5013 Oct 30 12:04 workflow-out/_r3-t4-md5-raw.txt
+-rw-r--r-- 1 lenovo 197121  5710 Oct 30 12:14 workflow-out/_r3-t4-precheck-raw.txt
+-rw-r--r-- 1 lenovo 197121  3637 Oct 30 12:02 workflow-out/_r3-t4-run1-superseded-flows-raw.txt
+-rw-r--r-- 1 lenovo 197121  2327 Oct 30 12:02 workflow-out/_r3-t4-run1-superseded-gas-raw.txt
+-rw-r--r-- 1 lenovo 197121  3692 Oct 30 12:03 workflow-out/_r3-t4-run2-superseded-flows-raw.txt
+-rw-r--r-- 1 lenovo 197121  2327 Oct 30 12:03 workflow-out/_r3-t4-run2-superseded-gas-raw.txt
+-rw-r--r-- 1 lenovo 197121 25781 Oct 30 12:13 workflow-out/r3-t4-contrast-report.md
+
+# 自检判定：
+  GT4-e 冻结面零改动: md5 -c 12/12 OK -> PASS
+  GT4-e 未 commit/add/push: 本轮只读 git 查询（status/log），log 头仍为既有提交 -> PASS
+  本轮新增/修改全部落在 workflow-out/ -> PASS

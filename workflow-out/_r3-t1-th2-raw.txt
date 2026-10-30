@@ -1,0 +1,39 @@
+# T1 step2-4: bytes32 convert + probe_configure(th=2) + advance/poll/finalize - 2026-10-30T02:05:13Z
+bytes32[] fresh convert: [0xa9373057a9b750277dd1df0c20f9a8fc66c1efb472a28a213830023dce4b98fe,0x4eca21e3b3b00ff1481e7c78939ae2acb3815c6c968f2237acfae35993305d7b,0xd15cb394c5e2a9828c8d0436be0da0657f8bc5b086f217fb933941d24a06b9eb,0x7434b1441da7152a1732ae8488057df0d4fe8bddda15955f6b3fb53023bef0fe]
+--- probe_configure(bytes32[], uint16=2) cast send ---
+status= 0x1 block= 319 tx= 0x58dbcaaa46b1abd253764b3601987b91d99c1eda05935dfe9d78deb8f8ebc7c3
+--- advance (cast call, S2-proven channel) ---
+true
+--- poll dest_epoch_info ---
+1
+0xbe4341ae55010247a0f9d3c898f4b0b25242d11b68725bb9f11000cf2c1db7fd
+5
+0x040020a9373057a9b750277dd1df0c20f9a8fc66c1efb472a28a213830023dce4b98fe01204eca21e3b3b00ff1481e7c78939ae2acb3815c6c968f2237acfae35993305d7b0220d15cb394c5e2a9828c8d0436be0da0657f8bc5b086f217fb933941d24a06b9eb03207434b1441da7152a1732ae8488057df0d4fe8bddda15955f6b3fb53023bef0fe02
+--- finalize (cast call) ---
+true
+--- dest_epoch_info after finalize ---
+1
+0xbe4341ae55010247a0f9d3c898f4b0b25242d11b68725bb9f11000cf2c1db7fd
+5
+0x040020a9373057a9b750277dd1df0c20f9a8fc66c1efb472a28a213830023dce4b98fe01204eca21e3b3b00ff1481e7c78939ae2acb3815c6c968f2237acfae35993305d7b0220d15cb394c5e2a9828c8d0436be0da0657f8bc5b086f217fb933941d24a06b9eb03207434b1441da7152a1732ae8488057df0d4fe8bddda15955f6b3fb53023bef0fe02
+# T1 th2: console capture + probe_run_round (cast call channel) - 2026-10-30T02:05:46Z
+--- probe_run_round (cast call) ---
+true
+--- console tail (signers/verdict/aggregate lines) ---
+apply_verdict: deal=deal-5 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=1]
+apply_verdict: deal=deal-6 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+apply_verdict: deal=deal-7 verdict=0 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+apply_verdict: deal=deal-8 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+apply_verdict: deal=deal-4 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=2]
+apply_verdict: deal=deal-12 verdict=2 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+apply_verdict: deal=deal-13 verdict=0 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+apply_verdict: deal=deal-14 verdict=1 misconduct=[0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC=3]
+probe_configure: staged committee of 4 nodes threshold=2 (dest epoch advance/finalize required to activate)
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_run_round: certified call submitted to the sequencing backend
+probe_on_certified: ctx.cert.signers RAW = [0, 2] (type Vec<SignerID>=Vec<u32>, len=2)
+probe_on_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+probe_on_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+probe_on_certified: payload(round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia ts_ms=1793325951381) recorded; probe_rounds=1
+--- console full line count: 315

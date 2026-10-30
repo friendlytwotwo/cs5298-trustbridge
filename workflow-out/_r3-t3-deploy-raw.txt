@@ -1,0 +1,629 @@
+# R3 T3: E2 committee demo — T3.0 precheck + T3.1 deploy transcript
+# ORIGINAL RUN: T3.0 at 2026-10-30T02:49:04Z; deploy at 2026-10-30T02:51:26Z; baseline HEAD dc78d2fb (working tree = T2 delivered state)
+#
+# >>> TRANSCRIPT DAMAGE + REBUILD NOTE (honest, root cause reproduced) <<<
+# The first write of this file was truncated by my own shell pattern: in the TARGET step I used
+#   TARGET=$(... | tee /dev/stderr | ...)   inside a "{ ... } >> $LOG 2>&1" block.
+# On this host (Git Bash/MSYS) `tee /dev/stderr` opens the redirect target BY PATH, truncating
+# it: reproduced in /tmp -> { printf a; x=$(echo hi | tee /dev/stderr); } >> t1.txt 2>&1
+# left t1.txt holding only "hi" (the earlier bytes were wiped). Only the TARGET section onward survived.
+# REBUILD RULE: every block below is marked either
+#   [RE-RUN <ts>]  = command executed live now (read-only / same bytes; nothing deployed twice)
+#   [QUOTED]       = verbatim lines captured from THIS session original output, NOT re-executed
+#                    (the deploy command is deliberately NOT re-run: a second deploy would create
+#                     a second instance and pollute the T3 evidence chain).
+
+########## T3.0 PRECHECK (zero-source-change self-proof) [RE-RUN 2026-10-30T02:55:16Z] ##########
+
+# command: docker ps --format "{{.Names}} {{.Status}}"
+multi-tools Up 14 hours
+multi-node1-1 Up 14 hours
+multi-node4-1 Up 14 hours
+multi-node2-1 Up 14 hours
+multi-node3-1 Up 14 hours
+multi-registry-1 Up 14 hours
+multi-anvil-1 Up 14 hours
+[exit=0]
+
+# command: md5sum -c workflow-out/_r2-t0-frozen-baseline.txt
+lyquid/src/types.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/assessor.rs: OK
+md5sum: WARNING: 1 line is improperly formatted
+[exit=0]
+
+# command: git diff --stat -- lyquid/src/{types,core,committee,assessor}.rs
+warning: in the working copy of 'lyquid/src/assessor.rs', LF will be replaced by CRLF the next time Git touches it
+ lyquid/src/assessor.rs | 5 +++++
+ 1 file changed, 5 insertions(+)
+[exit=0]
+
+# command: git status --short lyquid/
+ M lyquid/src/assessor.rs
+ M lyquid/src/lib.rs
+?? lyquid/src/committee_certified.rs
+[exit=0]
+
+# DECLARATION: main path changes NO lyquid source. Pre-registered exceptions only:
+#   - scripts/demo.py DEFAULT_INSTANCE one-line backfill (plan #3, after deploy)
+#   - lyquid/src/committee_certified.rs E2_AVG_NUM 4->1 ONLY if L1 fallback (#9, not triggered: L2)
+# Frozen four (types/core/committee/assessor) untouched this round: md5 gate above = 4x OK
+# (identical result before the original deploy — same tree, same gate).
+
+########## T3.1 DEPLOY NEW INSTANCE ##########
+
+# [QUOTED] commands (original run 2026-10-30T02:50Z, container copy still in place and md5-identical — see RE-RUN block):
+#   docker exec multi-tools rm -rf /tmp/tb-lyquid                                   -> exit 0
+#   MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-lyquid               -> exit 0
+#   MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools shaker deploy \n#       -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws \n#       --private-key 0xac0974...ff80 Cargo.toml      (full key = ANVIL0_KEY, agents/common/rpc.py:97; redacted per R2 precedent)
+
+# [QUOTED] original md5 cross-check result (host vs container, 9/9):
+#   MATCH src/assessor.rs 4df7cda6... | src/committee.rs c5f660a1... | src/committee_certified.rs 83e358ee...
+#   MATCH src/core.rs 4ae54a47... | src/lib.rs 38257638... | src/timeout.rs f842d432... | src/types.rs f33e334a...
+#   MATCH Cargo.toml 08f94560... | Cargo.lock 8fd42c89...   => ALL MATCH (9/9, committee_certified.rs included)
+#   (live re-verification of the same container copy below)
+
+# [QUOTED] original cargo check (forced recompile: touch src/*.rs first):
+#   Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.72s   ; exit 0 ; 33 warnings
+#   only `error:` line = ldk template noise: invalid character `{` in package name: `{{project-name}}` (known harmless, R2 same)
+
+# [QUOTED] original shaker deploy output, verbatim post-build tail (2026-10-30T02:51:26Z):
+warning: `trustbridge` (lib) generated 34 warnings
+    Finished `release` profile [optimized] target(s) in 8.00s
+2026-10-30T02:51:25.949760Z  INFO ThreadId(01) shaker::build: Built trustbridge with LDK 0.8.1
+2026-10-30T02:51:26.181657Z  INFO ThreadId(01) shaker: Pushed image hash sha256:ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d2795974603 to http://registry:8000/lyquids:latest
+2026-10-30T02:51:26.181726Z  INFO ThreadId(01) shaker: Deploying from pinned OCI reference http://registry:8000/lyquids@sha256:ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d2795974603
+2026-10-30T02:51:26.222530Z  INFO ThreadId(01) shaker::deploy: trustbridge.image_hash = sha256:ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d2795974603
+2026-10-30T02:51:26.222584Z  INFO ThreadId(01) shaker::deploy: trustbridge.os_version = 0.8
+2026-10-30T02:51:26.251996Z  INFO ThreadId(01) shaker::deploy: trustbridge.address = 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+Status: created
+Lyquid ID: Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+Contract: 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+Platform Version: 0.8
+2026-10-30T02:51:26.477248Z  INFO ThreadId(01) shaker::deploy: trustbridge.lyquid_id = Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+2026-10-30T02:51:26.477478Z  INFO ThreadId(01) shaker: created Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa => 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+[deploy exit=0]
+
+########## T3.1 md5 CROSS-CHECK + cargo check [RE-RUN 2026-10-30T02:55:29Z] ##########
+# against the SAME container copy /tmp/tb-lyquid that was compiled and deployed (no second cp: cp bytes would be trivially equal).
+
+# command: md5sum lyquid/src/*.rs lyquid/Cargo.toml lyquid/Cargo.lock   (host)
+4df7cda64e7e9eb4483c0b8be64068aa *lyquid/src/assessor.rs
+c5f660a13d5c18b5798bfb675fa8729e *lyquid/src/committee.rs
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+4ae54a4717daf35284ffe76d0ebd0b32 *lyquid/src/core.rs
+382576388eee813ac427806847641a09 *lyquid/src/lib.rs
+f842d432143365261e012336d89dc678 *lyquid/src/timeout.rs
+f33e334a2c256da6f2cf08927add165e *lyquid/src/types.rs
+08f94560a1f0a231088055ad834974ee *lyquid/Cargo.toml
+8fd42c893acfa252b3cb2d579d8587a2 *lyquid/Cargo.lock
+
+# command: MSYS_NO_PATHCONV=1 docker exec multi-tools sh -c "md5sum /tmp/tb-lyquid/src/*.rs /tmp/tb-lyquid/Cargo.toml /tmp/tb-lyquid/Cargo.lock"   (container)
+4df7cda64e7e9eb4483c0b8be64068aa  /tmp/tb-lyquid/src/assessor.rs
+c5f660a13d5c18b5798bfb675fa8729e  /tmp/tb-lyquid/src/committee.rs
+83e358ee5d14587306a056e9567df437  /tmp/tb-lyquid/src/committee_certified.rs
+4ae54a4717daf35284ffe76d0ebd0b32  /tmp/tb-lyquid/src/core.rs
+382576388eee813ac427806847641a09  /tmp/tb-lyquid/src/lib.rs
+f842d432143365261e012336d89dc678  /tmp/tb-lyquid/src/timeout.rs
+f33e334a2c256da6f2cf08927add165e  /tmp/tb-lyquid/src/types.rs
+08f94560a1f0a231088055ad834974ee  /tmp/tb-lyquid/Cargo.toml
+8fd42c893acfa252b3cb2d579d8587a2  /tmp/tb-lyquid/Cargo.lock
+
+# per-file comparison:
+  MATCH    src/assessor.rs            4df7cda64e7e9eb4483c0b8be64068aa
+  MATCH    src/committee.rs           c5f660a13d5c18b5798bfb675fa8729e
+  MATCH    src/committee_certified.rs 83e358ee5d14587306a056e9567df437
+  MATCH    src/core.rs                4ae54a4717daf35284ffe76d0ebd0b32
+  MATCH    src/lib.rs                 382576388eee813ac427806847641a09
+  MATCH    src/timeout.rs             f842d432143365261e012336d89dc678
+  MATCH    src/types.rs               f33e334a2c256da6f2cf08927add165e
+  MATCH    Cargo.toml                 08f94560a1f0a231088055ad834974ee
+  MATCH    Cargo.lock                 8fd42c893acfa252b3cb2d579d8587a2
+# result: ALL MATCH (9/9, committee_certified.rs included)
+
+# command: MSYS_NO_PATHCONV=1 docker exec multi-tools sh -c "touch /tmp/tb-lyquid/src/*.rs" && MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown
+[touch exit=0]
+error: invalid character `{` in package name: `{{project-name}}`, the first character must be a Unicode XID start character (most letters or `_`)
+ --> ../../usr/local/cargo/git/checkouts/ldk-b72281d44a8ce511/fd575e8/lyquid-template/Cargo.toml:2:8
+  |
+2 | name = "{{project-name}}"
+  |        ^^^^^^^^^^^^^^^^^^
+   Compiling trustbridge v0.1.0 (/tmp/tb-lyquid)
+warning: unused doc comment
+   --> src/lib.rs:277:1
+    |
+277 | / /// Devnet-only faucet so the demo can mint internal-ledger tokens.
+278 | | /// TODO(W2): gate behind a DEMO flag; listed in the report's trust-assumption
+279 | | /// table as a demo-only trust hole.
+    | |_-----------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+   --> src/lib.rs:293:1
+    |
+293 | / /// Broker creates a deal from an accepted assessment (see assessor.rs for the
+294 | | /// instance->network two-step). The timeout must be estimate-derived.
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:355:1
+    |
+355 | /// Buyer escrows the full amount (internal ledger debit + state transition).
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:394:1
+    |
+394 | / /// Append-only communication notarization. Anyone may submit; entries are
+395 | | /// sequenced per deal. This is the fulfillment evidence the committee rules on.
+396 | | /// 裁决时的证书根由本日志条目折叠派生（core::evidence_root，经 apply_committee_verdict 单点读取）。
+    | |_---------------------------------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:431:1
+    |
+431 | /// Buyer-consented settlement of a submitted deal.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:451:1
+    |
+451 | / /// Permissionless timeout claim — the on-chain guard half of the
+452 | | /// "off-chain trigger; on-chain guard" pattern (watcher: timeout.rs).
+    | |_---------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:466:1
+    |
+466 | /// Buyer cancels a deal that has no submitted evidence yet.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:500:1
+    |
+500 | / /// Apply a committee verdict. The certificate is re-validated against the
+501 | | /// on-chain committee config; `Malicious` bumps the misconduct log.
+502 | | /// Production path: verdict arrives via oracle certified call — see committee.rs.
+503 | | ///
+...   |
+517 | | /// （路线② 认证回调用同一个 helper）。本函数保留 wire 形态、Committee 地址门
+518 | | /// 与 caller∈signers 检查——路线①语义零变化（G2 sim 零回退 + G3 对抗流复跑）。
+    | |_-----------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:584:1
+    |
+584 | / /// W1-B2（R1#1 明文豁免，唯一一处签名微调）：返回面 `u128` -> `U128`——裸
+585 | | /// u128 无 EthAbiType（ethabi.rs:218-281，仅 U8..U64 + U64/U128/U256 包装），
+586 | | /// 先例 = faucet/create_deal 的 amount 边界转换（本文件上方同款注释）。
+587 | | /// rpc.py 按 uint128 解码，keeper/demo 断言口径不变。
+    | |_-----------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:594:1
+    |
+594 | / /// Advisory-only listing of deals past their timeout at the CALLER-supplied
+595 | | /// `now`. The parameter cannot move funds: the only guard on money movement
+596 | | /// is `claim_timeout`, which re-derives time via `current_slot` — a forged
+597 | | /// `now` at most perturbs this informational list. Signature kept identical
+598 | | /// to the FakeNode mirror (rpc.py `due_deals(now)`); stage-four alignment.
+    | |_--------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/lib.rs:609:1
+    |
+609 | / /// Instance-side assessment (R1: export = eth restored in the 4×string wire
+610 | | /// shape): assess a buyer brief with the LLM and return the report JSON STRING.
+611 | | /// The caller (broker) then submits `create_deal` with the returned estimate
+612 | | /// values — the documented two-step commit; nothing here touches consensus
+...   |
+632 | | /// whoever can read the chain anyway — a documented demo trust hole, to be
+633 | | /// moved behind instance config in W2'. Do NOT log the key.
+    | |_-----------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/timeout.rs:25:1
+   |
+25 | / /// Instance watcher body: fetch due deals via the network getter and submit
+26 | | /// claims for each. Ledger effects are zero when the guard rejects — safe to
+27 | | /// re-run, safe to run on every node.
+   | |_-------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s1_timer.rs:26:1
+   |
+26 | / /// Arm a one-shot timer on THIS node's instance: resets the instance
+27 | | /// counters, remembers registration wall-clock, and registers
+28 | | /// `TriggerMode::Once(delay_ms)`. Non-view (cast send channel).
+   | |_---------------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s1_timer.rs:46:1
+   |
+46 | / /// Control group for experiment (c): periodic firing via `Recurrent`.
+47 | | /// Arms without resetting the instance counters so successive periods are
+48 | | /// observable as increments.
+   | |_----------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s1_timer.rs:59:1
+   |
+59 | / /// Trigger target. Instance-local bookkeeping first, then the consensus
+60 | | /// observation via the A-grade cross-call (timeout.rs:52-59 form). The
+61 | | /// `fired_at_ms` param matches the trigger input encoding exactly (decode is
+62 | | /// by serde field name, primitives/src/lib.rs:478-486).
+   | |_-------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s1_timer.rs:78:1
+   |
+78 | / /// Consensus-side fire record — the exactly-once judging domain.
+79 | | /// Sequenced on the shared anvil backend; replayed identically by all nodes.
+   | |_----------------------------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s1_timer.rs:90:1
+   |
+90 | / /// Baseline step for every experiment round: zero the consensus counters
+91 | | /// (cast send reachable). Kept as its own network method instead of folding
+92 | | /// into `probe_arm` so the reset is itself a consensus fact one can point at
+93 | | /// in the archived transcript.
+   | |_------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s1_timer.rs:104:1
+    |
+104 | / /// Network-domain report — the pollable observation primitive for the a/b/c
+105 | | /// rounds. SPIKE(W1-B1): instance-method printlns are NOT relayed by the
+106 | | /// v0.8.1 node console (probe_arm/probe_get_report stay silent while network
+107 | | /// printlns flow; live-tested, archived in w1b1-s1-timer.md) — so every
+108 | | /// console observation MUST ride a network method. This one prints the
+109 | | /// consensus counters (the judging domain) as one JSON line.
+    | |_------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s1_timer.rs:122:1
+    |
+122 | / /// Full report in one println (instance + network domains) — single console
+123 | | /// fetch per poll. `LyquidResult<()>` return: cast send carries it fine
+124 | | /// (W1-A fund precedent); observation is via console, not return value.
+125 | | /// Note (SPIKE above): only the network half of this line is console-visible
+126 | | /// on node v0.8.1; kept for parity with the plan and future node fixes.
+    | |_-----------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> src/probe/s2_oracle.rs:56:1
+   |
+56 | / /// Stage the certification committee + threshold. Only lands in oracle
+57 | | /// STAGING (`StateVar::initialize`, source.rs:540-544) — activation is the
+58 | | /// host-driven two-phase epoch advance/finalize (T4 step 3).
+59 | | /// ABI face: `probe_configure(bytes32[],uint16)`; caller must be the deploy
+60 | | /// key (anvil#0) or the creator guard rejects the call.
+   | |_-------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s2_oracle.rs:155:1
+    |
+155 | / /// Core observation point: the certified network callback. Prints the RAW
+156 | | /// `ctx.cert.signers` (Vec<SignerID>, SignerID=u32: primitives/src/oracle.rs:65,130-136)
+157 | | /// and the `ctx.signer_node_id(u64)` mapping (price-feed:401-406 mirror,
+158 | | /// CertifiedContextImpl::signer_node_id runtime/mod.rs:560), then records
+159 | | /// both into network state.
+    | |_---------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s2_oracle.rs:192:1
+    |
+192 | / /// Drive one certification round: `propose_and_certify` (protocol.rs:514-522)
+193 | | /// + `submit_certified_call!` (price-feed:451-473 mirror). Returns false when
+194 | | /// the oracle produced nothing (inactive/staging-only, or aggregate None).
+    | |_--------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s2_oracle.rs:225:1
+    |
+225 | / /// Wrap `StateVar::set_threshold` (source.rs:591-595). False when the oracle
+226 | | /// epoch is still 0 (source.rs:268-271) — must run AFTER activation.
+227 | | /// SPIKE(W1-B1): plan §④ specified `instance(export = eth)`; landed as
+228 | | /// `network(export = eth)` because instance-method printlns are not
+...   |
+231 | | /// `StateVar::set_threshold`'s ctx param is unconstrained (`_ctx: &mut T`),
+232 | | /// so the network context satisfies it.
+    | |_---------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s2_oracle.rs:244:1
+    |
+244 | / /// Network-domain oracle observation dump — the console-visible twin of
+245 | | /// `probe_config` (which stays instance-side for parity; its println is NOT
+246 | | /// relayed by node v0.8.1, see the probe_net_report SPIKE). Prints the same
+247 | | /// set: current/staging config, source-side get_epoch, and the DEST-side
+...   |
+255 | | /// SOURCE-side current.epoch which stays 0 until finalize (source.rs:289-291,
+256 | | /// 409) — never use it as the advance wait condition.
+    | |_-----------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/probe/s2_oracle.rs:283:1
+    |
+283 | / /// Observation dump: current/staging oracle config, source-side get_epoch,
+284 | | /// and the DEST-side epoch info via the host API `lyquor_api::fetch_oracle_info`
+285 | | /// (runtime/mod.rs:322; the same channel the platform's own
+286 | | /// `validate_finalize_epoch` uses to observe the destination before voting —
+...   |
+292 | | /// `probe_net_config` for live observation; this method remains the
+293 | | /// same-shaped instance twin for future node versions.
+    | |_------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: trailing semicolon in macro used in expression position
+   --> src/probe/s2_oracle.rs:177:21
+    |
+177 |             None => lyquid::println!("probe_on_certified: signer {} -> <unmapped>", signer_id),
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
+    = note: `#[warn(semicolon_in_expressions_from_non_local_macros)]` (part of `#[warn(future_incompatible)]`) on by default
+    = note: this warning originates in the macro `lyquid::println` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+warning: unused doc comment
+   --> src/committee_certified.rs:105:1
+    |
+105 | / /// 配置认证委员会 + 阈值（镜像 probe_configure，落 `cert_verdict` 主题）。
+106 | | /// 仅入 oracle **staging**（`StateVar::initialize`，source.rs:540-544）——
+107 | | /// 激活 = 平台内置 advance/finalize 两阶段（dest_epoch 是等待条件，P5）。
+108 | | ///
+109 | | /// ABI 面 `e2_configure(bytes32[],uint16)`（`Vec<NodeID>` = bytes32[]，S2 实证）；
+110 | | /// **调用通道 = cast send**（见模块头通道纪律）。守卫 `eth_guard = creator`：
+111 | | /// creator = 部署钥 anvil#0（P4；S2 §2 同款先例）。
+    | |_---------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:148:1
+    |
+148 | / /// arm：选择「委员会下一轮裁哪一单」。
+149 | | ///
+150 | | /// 写 **network 域** `e2_armed_deal`（共识持久、全节点可见）——经 NodeClient
+151 | | /// `_send`（eth_sendTransaction）**单次发送即全体节点生效**，无需每节点 arm
+...   |
+158 | | /// 全体节点的 propose。读回断言口径：`e2_net_config()` 的 `armed_deal`
+159 | | /// （console 回显行仅作 transcript 佐证，不作断言载体）。
+    | |_---------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:176:1
+    |
+176 | / /// 观测 dump：**arm 读回的唯一断言载体** + oracle 配置面（advance/finalize 的
+177 | | /// 等待条件面）。返回 JSON 串（`_ABI` 返回面冻结为 string，终裁条款 2；先例
+178 | | /// deal_info 的 JSON getter）。字段至少含 `armed_deal`（未 arm = 空串）
+179 | | /// 与 current/staging 的 threshold/committee/epoch、源侧 get_epoch、dest
+...   |
+189 | | /// 在 eth_call 上恒 FuncNotFound，`deal_info` 等 `&_` getter 正常路由）。arm
+190 | | /// 读回断言走 NodeClient `call("e2_net_config()")`，故必须落在可路由面。
+    | |_------------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:227:1
+    |
+227 | / /// 每节点独立检视（两阶段 propose，**字面名** = 平台宏契约，ldk
+228 | | /// syntax.rs:470；改名即无法路由 oracle 机制）。
+229 | | ///
+230 | | /// 读 armed deal + network `evidence_log[deal_id]` + `deals[deal_id]`
+...   |
+236 | | /// fail-closed：未 arm / deal 不存在 / 非 Disputed → Err（该节点不出提案）。
+237 | | /// Malicious 不由形状派生，路线① 保留其入口（两条路线互补）。
+    | |_-------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:279:1
+    |
+279 | / /// 两阶段聚合（**字面名** = 平台宏契约，ldk syntax.rs:447）。
+280 | | ///
+281 | | /// 语义（诚实优先）：
+282 | | /// - inputs < avg_num → None（等更多提案；平台在后续响应到达时再调）；
+...   |
+286 | | ///   input: encode_by_fields!(deal_id, verdict_code), target }`——字段名即
+287 | | ///   回调解码契约（P6）。
+    | |_-------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:338:1
+    |
+338 | / /// **cert 门控的资金路径**：认证回调（`probe_on_certified` 的生产化）。
+339 | | ///
+340 | | /// 平台在进入函数体**之前**已按 dest epoch 的 oracle 配置校验证书；函数体内
+341 | | /// 把 `ctx.cert.signers`（RAW `Vec<SignerID>` = u32，primitives/src/oracle.rs:65）
+...   |
+352 | | /// 取证（console，node1）：RAW signers、逐节点映射、verdict、deal_id，以及
+353 | | /// helper 的 `apply_verdict: … misconduct=[…]` 累计视图。
+    | |_---------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> src/committee_certified.rs:393:1
+    |
+393 | / /// 单次认证回合驱动（镜像 probe_run_round s2_oracle.rs:195-223）：
+394 | | /// `propose_and_certify` + `submit_certified_call!`。
+395 | | ///
+396 | | /// **仅 node1 单次触发**（propose 经 UPC 广播自带全节点提案，protocol.rs:312/:316）；
+397 | | /// **禁多次触发**：首回合裁决已把 deal 推离 Disputed，core.rs:199 门必败。
+398 | | /// **通道 = cast call**（S2 §3/§4 实证：cast send status 1 但内层提交静默丢失）。
+399 | | /// 返回 false = oracle 未激活 / aggregate 拒证（无内层调用产生）。
+    | |_------------------------------------------------------------------^
+    |   |
+    |   rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: `trustbridge` (lib) generated 33 warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.45s
+[cargo-check exit=0]
+
+########## TARGET DERIVATION (clause 6) [RE-RUN 2026-10-30T02:55:46Z — same as original 02:51:3xZ value] ##########
+# command: MSYS_NO_PATHCONV=1 docker exec multi-tools shaker to-hex Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc
+
+# ASSERTION (clause 6): TARGET=0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc ; non-zero=yes ; != contract(0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589)=yes
+
+########## T3.1 SUMMARY ##########
+# instance = Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+# contract = 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+# target   = 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc (shaker to-hex; non-zero and != contract -> OK)
+# deploy exit = 0; deploy image = sha256:ccf7498b21638dff3a2d01b054c64d7dbb2c36922fa5072520590d2795974603 (LDK 0.8.1); deployed source tree md5-identical to host (9/9) and cargo-check green on both runs
+
+########## T3.2 DEFAULT_INSTANCE BACKFILL ##########
+# scripts/demo.py:87  DEFAULT_INSTANCE = "" -> "Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa" (one line, plan #3)
+# (no shell test gate triggered: this is a Python constant consumed only by flow_committee; --flow all sequence excludes committee)
+
+########## TRANSCRIPT SCOPE NOTE (applies to the [QUOTED] deploy block) ##########
+# The ~460 lines of compile warnings above the quoted deploy tail were lost with the truncation and
+# are NOT reproduced (they carried no decision content: 34 warnings, only the known ldk-template
+# `{{project-name}}` error line). Everything decision-bearing is present: deploy command line,
+# image hash, lyquid id, contract address, created line, exit 0.
+
+########## T3.6 CLOSING SELF-CHECK [2026-10-30T02:56:40Z] ##########
+# command: md5sum -c workflow-out/_r2-t0-frozen-baseline.txt
+lyquid/src/types.rs: OK
+lyquid/src/core.rs: OK
+lyquid/src/committee.rs: OK
+lyquid/src/assessor.rs: OK
+md5sum: WARNING: 1 line is improperly formatted
+[exit=0]
+
+# command: md5sum lyquid/src/committee_certified.rs   (E2_AVG_NUM untouched; original md5 83e358ee…)
+83e358ee5d14587306a056e9567df437 *lyquid/src/committee_certified.rs
+
+# command: sed -n 91p lyquid/src/committee_certified.rs
+const E2_AVG_NUM: u16 = 4;
+
+# command: git status --short lyquid/   (identical to T2 delivered state; no new lyquid edits this phase)
+ M lyquid/src/assessor.rs
+ M lyquid/src/lib.rs
+?? lyquid/src/committee_certified.rs
+
+# command: git log --oneline -1   (no commit made by this phase)
+dc78d2f W1-B2 closure evidence: probe A-H loop -> keeper Refunded proof, S4 RPC decision gate, shell rebaseline 40/40
+
+# command: ls -la workflow-out/_r3-t3-*
+-rw-r--r-- 1 lenovo 197121  4472 Oct 30 10:51 workflow-out/_r3-t3-committee-raw.txt
+-rw-r--r-- 1 lenovo 197121  5431 Oct 30 10:53 workflow-out/_r3-t3-console-raw.txt
+-rw-r--r-- 1 lenovo 197121 33895 Oct 30 10:56 workflow-out/_r3-t3-deploy-raw.txt
+-rw-r--r-- 1 lenovo 197121  2203 Oct 30 10:54 workflow-out/_r3-t3-final-state-raw.txt

@@ -1,0 +1,125 @@
+# T4.4 EVM 侧独立复核（逐笔 receipt 对拍 + 终态读回）——执行员，2026-10-30 12:06:19 +0800
+# 契约地址（canonical run-3）: 0x976C214741b4657bd99DFD38a5c0E3ac5C99D903    RPC（容器内网）: http://anvil:8545
+# 复核通道: 容器内 cast receipt/cast call 独立读取，不复用脚本输出；JSON 解析用容器内 jq。
+# 宿主侧无 jq（which jq -> not found），故对拍循环在容器内执行——这一点本身也在下方留证。
+
+########## 〇、复核输入与归档件同一性 ##########
+$ md5sum workflow-out/_r3-t4-gas-raw.txt    # 宿主归档件
+  3f49b7358d2c11b4972580270ca2c141 *workflow-out/_r3-t4-gas-raw.txt
+$ cat workflow-out/_r3-t4-gas-raw.txt | MSYS_NO_PATHCONV=1 docker exec -i multi-tools sh -c 'mkdir -p /tmp/t4recheck && cat > /tmp/t4recheck/gas-raw.txt'
+  rc=0
+$ MSYS_NO_PATHCONV=1 docker exec multi-tools md5sum /tmp/t4recheck/gas-raw.txt   # 容器侧复核输入
+  3f49b7358d2c11b4972580270ca2c141  /tmp/t4recheck/gas-raw.txt
+  判定: 两行 md5 相同 => 下方逐笔复核的输入字节 = 归档件（宿主 md5 3f49b7358d2c11b4972580270ca2c141）
+
+########## 一、逐笔 receipt 对拍（gas-raw 行 vs 链上 receipt） ##########
+$ MSYS_NO_PATHCONV=1 docker exec -i multi-tools bash -s < <容器内对拍脚本>
+#   label                          raw.status   rcpt.status  raw.gas    rcpt.gas   gasOK    block    to/contractAddress
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+1   deploy                         (deploy)     0x1          0x1d8a88   0x1d8a88   OK       0x180    create:0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+2   committee:committeeConfig      0x1          0x1          0x3e436    0x3e436    OK       0x181    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+3   normal:createDeal              0x1          0x1          0x37562    0x37562    OK       0x182    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+4   normal:fund                    0x1          0x1          0x7fc9     0x7fc9     OK       0x183    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+5   normal:notarize(acceptance)    0x1          0x1          0x21b58    0x21b58    OK       0x184    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+6   normal:submitDeliverable       0x1          0x1          0xd303     0xd303     OK       0x185    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+7   normal:complete                0x1          0x1          0xe2fe     0xe2fe     OK       0x186    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+8   timeout:createDeal             0x1          0x1          0x33296    0x33296    OK       0x187    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+9   timeout:fund                   0x1          0x1          0x7fc9     0x7fc9     OK       0x188    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+10  timeout:claimTimeout           0x1          0x1          0xa6f3     0xa6f3     OK       0x18a    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+11  adv:createDeal                 0x1          0x1          0x33296    0x33296    OK       0x18b    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+12  adv:fund                       0x1          0x1          0x7fc9     0x7fc9     OK       0x18c    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+13  adv:notarize(acceptance)       0x1          0x1          0x21b58    0x21b58    OK       0x18d    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+14  adv:submitDeliverable(forged)  0x1          0x1          0xd303     0xd303     OK       0x18e    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+15  adv:notarize(dispute)          0x1          0x1          0x1d880    0x1d880    OK       0x18f    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+16  adv:openDispute                0x1          0x1          0xcfaa     0xcfaa     OK       0x190    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+17  adv:applyVerdict(3-of-4)       0x1          0x1          0x16d5e    0x16d5e    OK       0x191    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+18  adv2:createDeal                0x1          0x1          0x33296    0x33296    OK       0x192    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+19  adv2:fund                      0x1          0x1          0x7fc9     0x7fc9     OK       0x193    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+20  adv2:openDispute               0x1          0x1          0xcf04     0xcf04     OK       0x194    0x976c214741b4657bd99dfd38a5c0e3ac5c99d903
+
+对拍汇总: 笔数=20  gasUsed 一致=20/20  status 一致=20/20
+decimal 合计: 全部交易 gasUsed 总计 = 3982905
+deploy block = 384 (0x180)；最后一笔交易 block = 404 (0x194)；跨度 = 20 块
+
+########## 二、终态读回（判据=读回状态，非 status 位） ##########
+
+$ cast call $ADDR "dealCounter()(uint256)"
+  dealCounter = 4
+
+$ cast call $ADDR "stateOf(uint256)(uint8)" 1..4   # 0=None 1=Qualified 2=Funded 3=Delivered 4=Disputed 5=Settled 6=Refunded
+  deal-1 stateOf=5 -> Settled
+  deal-2 stateOf=6 -> Refunded
+  deal-3 stateOf=6 -> Refunded
+  deal-4 stateOf=4 -> Disputed
+
+$ cast call $ADDR "dealInfo(uint256)" 1..4   # (uint8 stateCode, bytes32 deliverableDigest, uint64 deadlineTs, uint256 evidenceCount)
+  deal-1 dealInfo=0x0000000000000000000000000000000000000000000000000000000000000005071419c816c1b1378d33170e94253899f2cc12fa393bece0fb6c21d50b5e3d14000000000000000000000000000000000000000000000000000000006ae417800000000000000000000000000000000000000000000000000000000000000001 
+  deal-2 dealInfo=0x00000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006ae417810000000000000000000000000000000000000000000000000000000000000000 
+  deal-3 dealInfo=0x000000000000000000000000000000000000000000000000000000000000000699d8e8b9285f5a266f9b9d671dea1940d49d8cacf40766d59103288e6903f496000000000000000000000000000000000000000000000000000000006ae418130000000000000000000000000000000000000000000000000000000000000002 
+  deal-4 dealInfo=0x00000000000000000000000000000000000000000000000000000000000000040000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006ae418140000000000000000000000000000000000000000000000000000000000000000 
+
+$ cast call $ADDR "rolesOf(uint256)" 1..4   # (buyer, seller, broker)
+  deal-1 rolesOf=0x00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c80000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266 
+  deal-2 rolesOf=0x00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c80000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266 
+  deal-3 rolesOf=0x00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c80000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266 
+  deal-4 rolesOf=0x00000000000000000000000070997970c51812dc3a010c7d01b50e0d17dc79c80000000000000000000000003c44cdddb6a900fa2b585dd299e03d12fa4293bc000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266 
+
+$ cast call $ADDR "amountOf(uint256)" 1..4   # (amount, feeBps)
+  deal-1 amountOf=0x0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000000c8 
+  deal-2 amountOf=0x0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000000c8 
+  deal-3 amountOf=0x0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000000c8 
+  deal-4 amountOf=0x0000000000000000000000000000000000000000000000000de0b6b3a764000000000000000000000000000000000000000000000000000000000000000000c8 
+
+########## 三、委员会 / 违约金 / 代码尺寸 ##########
+
+  committeeSize() = 4
+  threshold()     = 3
+  committeeMembers(0) = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+  committeeMembers(1) = 0x70997970C51812dc3A010C7d01b50e0d17dc79C8
+  committeeMembers(2) = 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC
+  committeeMembers(3) = 0x90F79bf6EB2c4f870365E785982E1f101E93b906
+  isCommitteeMember(deployer) = true
+  isCommitteeMember(comm3)    = true
+  misconduct(seller) = 0
+  misconduct(buyer)  = 0
+  deployer()         = 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+  cast codesize      = 8709
+
+########## 四、余额（终态读回时点） ##########
+
+  balance(0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266) = 9999990642387141827332
+  balance(0x70997970C51812dc3A010C7d01b50e0d17dc79C8) = 9993993001074348023693
+  balance(0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC) = 10002937518143941044951
+  balance(0x90F79bf6EB2c4f870365E785982E1f101E93b906) = 9999999591224997138575
+
+########## 五、负对照独立复核（同一签名集重放到 deal-4） ##########
+
+# 签名来源: _r3-t4-flows-raw.txt:36（run-3 对 deal-3 的 3-of-4 签名）
+  复用签名: buyer=0x5a7c522619698c09... seller=0x3d1b778ae7625f99... committee4=0xfc917febfdbb8be5...
+$ cast send --rpc-url http://anvil:8545 --private-key <anvil#4> 0x976C214741b4657bd99DFD38a5c0E3ac5C99D903 "applyVerdict(uint256,uint8,bytes[])" 4 1 "[sig1,sig2,sig3]"
+  replay rc=1 （非零 = 签名集绑定 deal/root，重放被拒；期望值）
+  replay output: Error: Failed to estimate gas: server returned an error response: error code 3: execution reverted: non-member signer, data: "0x08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000116e6f6e2d6d656d626572207369676e6572000000000000000000000000000000": Error("non-member signer")
+  deal-4 读回 stateOf=4 （应保持 4 Disputed，未被重放改变）
+
+########## 六、复核结论（对照 plan §3-T4.4 预期） ##########
+
+| 项 | 预期（plan §3-T4.4） | 读回实测 | 判定 |
+|---|---|---|---|
+| deal-1（正常流） | Settled=5 | 5 | PASS |
+| deal-2（超时流） | Refunded=6 | 6 | PASS |
+| deal-3（争议流） | Refunded=6 | 6 | PASS |
+| deal-4（负对照） | Disputed=4（重放不改状态） | 4 | PASS |
+| 重放 rc | ≠0 | 1 | PASS |
+| misconduct(seller) | 0（NotFulfilled 不加罚） | 0 | PASS |
+| 逐笔 receipt 对拍 | gasUsed/status 全一致 | 20/20 + 20/20（本件第一节） | PASS |
+| 运行时字节码 | 与 _r3-t4-flows-raw.txt:22 的 runtimeBytecodeBytes=8709 一致 | 8709 | PASS |
+
+# 判级口径：以上终态为 cast call 读回值；status 0x1 仅表示交易执行未回滚，不作为方法成功判据。
+
+########## 七、补充：三地址 EVM 字节码尺寸（同一 anvil 链，2026-10-30 12:11:22 +0800 现场读取） ##########
+$ cast codesize <addr> --rpc-url <其链 endpoint>
+  Escrow 实例 0x976C214741b4657bd99DFD38a5c0E3ac5C99D903 (anvil:8545)        = 8709
+  R3 Lyquid 实例 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 (node1:10087/api) = 16846
+  R2 Lyquid 实例 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351 (node1:10087/api) = 16219
+  注：Lyquid 实例字节码为平台运行时封装（含 VM 解释面），与 Escrow.sol 的编译产物不同质，不作等价比较；
+      本项仅补数据完整性。Escrow 侧同值已由 _r3-t4-flows-raw.txt:22（runtimeBytecodeBytes=8709）复核。

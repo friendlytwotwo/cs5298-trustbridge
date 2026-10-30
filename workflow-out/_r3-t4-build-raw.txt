@@ -1,0 +1,24 @@
+# T4.2 forge build 复验原始输出——执行员，2026-10-30 12:02:31 +0800
+# 工作根目录: trustbridge/（容器内 /tmp/tb-evm = 宿主 experiments/evm-contrast/ 的逐字节副本，T4.1 已 3/3 MATCH）
+
+$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-evm multi-tools forge build
+Compiling 1 files with Solc 0.8.37
+Solc 0.8.37 finished in 282.56ms
+Compiler run successful!
+warning[block-timestamp]: usage of `block.timestamp` in a comparison may be manipulated by validators
+    ╭▸ Escrow.sol:204:17
+    │
+204 │         require(block.timestamp <= deadline(dealId), "deadline passed");
+    │                 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │
+    ╰ help: https://book.getfoundry.sh/reference/forge/forge-lint#block-timestamp
+
+warning[block-timestamp]: usage of `block.timestamp` in a comparison may be manipulated by validators
+    ╭▸ Escrow.sol:227:17
+    │
+227 │         require(block.timestamp >= deadline(dealId), "deadline not reached");
+    │                 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    │
+    ╰ help: https://book.getfoundry.sh/reference/forge/forge-lint#block-timestamp
+
+EXIT_CODE=0

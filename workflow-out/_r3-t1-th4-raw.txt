@@ -1,0 +1,30 @@
+# T1 th4: bump_threshold(4) + re-activate + run_round - 2026-10-30T02:06:55Z
+--- probe_bump_threshold(4) cast send ---
+status= 0x1 block= 323
+--- advance ---
+true
+--- poll dest_epoch (expect 2, change_count=6) ---
+2
+0x47c715dfbd2122744832fc43c4437588452f4d40a0e45b79cee70bbcd1c38b4a
+1
+--- finalize ---
+true
+# T1 th4: console capture + run_round - 2026-10-30T02:06:58Z
+--- probe_run_round (cast call) ---
+true
+--- console on_certified/aggregate lines ---
+probe_run_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=1)
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_aggregate: aggregated round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_run_round: certified call submitted to the sequencing backend
+probe_on_certified: ctx.cert.signers RAW = [0, 2] (type Vec<SignerID>=Vec<u32>, len=2)
+probe_on_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+probe_on_certified: signer 2 -> Node-2folhfgf4kuyfdenaq3l4dnamv7yxrnqq3zbp64thfa5esqgxhv6wzqa
+probe_on_certified: payload(round=1 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia ts_ms=1793325951381) recorded; probe_rounds=1
+probe_run_round: node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia starting propose_and_certify (avg_num=1)
+probe_aggregate: aggregated round=2 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_aggregate: aggregated round=2 node=Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia from 1 input(s)
+probe_run_round: certified call submitted to the sequencing backend
+probe_on_certified: ctx.cert.signers RAW = [0, 1, 2, 3] (type Vec<SignerID>=Vec<u32>, len=4)
+probe_on_certified: signer 0 -> Node-ve3tav5jw5ico7or34gcb6ni7rtmd35uokriuijygabd3tsltd7fj6ia
+probe_on_certified: signer 1 -> Node-j3fcdy5twah7csa6pr4jhgxcvszycxdms2hsen5m7lrvtezqlv52cqaa

@@ -1,0 +1,28 @@
+# R3 T3.5 final-state reconciliation — independent of the demo transcript (2026-10-30T02:53:34Z)
+# command: python - <<PY  (NodeClient read-only snapshot against instance Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa @ 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589)
+
+block_number = 341
+deal_info(deal-1) = {"amount": 1000, "buyer": "0x70997970C51812dc3A010C7d01b50e0d17dc79C8", "deadline_slot": 637, "id": "deal-1", "seller": "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC", "state": "Refunded", "timeout_slots": 300}
+balance_of(alice) = 10000
+balance_of(bob) = 0
+balance_of(broker) = 0
+evidence_entries(deal-1).len = 3
+e2_net_config = {"armed_deal": "deal-1", "current": {"committee": 4, "epoch": 1, "threshold": 4}, "dest": {"change_count": 5, "epoch": 1}, "get_epoch": 1, "staging": {"committee": 4, "threshold": 4}}
+  PASS  deal_info.state == Refunded  (actual='Refunded')
+  PASS  alice == faucet baseline 10000 (fund 1000 escrowed, full refund)  (actual=10000)
+  PASS  bob unchanged == 0  (actual=0)
+  PASS  broker unchanged == 0  (actual=0)
+MISCONDUCT VIEW: no getter (lib.rs:781 prints only) -> console line 'apply_verdict: deal=deal-1 verdict=1 misconduct=[]' is the evidence (see _r3-t3-console-raw.txt:36)
+FINAL-STATE CHECK: PASS
+[py exit=0]
+
+########## T3.5 SUPPLEMENT: faucet single-call proof (chain scan, 2026-10-30T02:54:12Z) ##########
+# purpose: prove alice=10000 is exactly ONE faucet(10_000) with no double faucet -> the demo
+#  transcript stale baseline (before={"alice":0}) is a read-path race, not an accounting error.
+# command: python - <<PY  (eth_getBlockByNumber full-tx scan 0..head, selector b540def8 = faucet(string,uint128))
+scan range: blocks 0..341 (full transactions)
+faucet(string,uint128) calls to this instance in blocks 0..341: 1
+  block=333 tx=0x5a22bd8dfcf4470e5fd9cc4430adbbdf956a245f4a4c190480802d5051d24352 from=0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 agent=0x70997970C51812dc3A010C7d01b50e0d17dc79C8 amount=10000
+RESULT: exactly 1 faucet call(s), recipient=alice, amount=10000 each -> alice baseline = 10000
+        (fund 1000 escrowed -> 9000 read at after_fund; NotFulfilled verdict -> full refund -> 10000; bob/broker untouched)
+[py exit=0]

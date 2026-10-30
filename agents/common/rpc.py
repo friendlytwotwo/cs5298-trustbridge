@@ -33,12 +33,25 @@ Two transports, one interface:
                SOURCE OF TRUTH for deal semantics is the Rust `core` module +
                its tests; FakeNode deliberately mirrors, and demo.py prints a
                banner saying so.
+
+R3（路线② E2）新增面：
+  * `get_node_ids()` — 宿主 HTTP GetNodeInfo ×4（端口梯 {10087,11087,12087,
+    13087} → node1..4）→ NodeID 显示串 + bytes32（S2 §1 b32 换算逐行镜像）。
+    NodeID 标识节点而非实例（同 devnet 跨实例稳定，换 devnet 必变），故禁硬编码。
+  * `docker_exec()` / `docker_exec_cast()` — 宿主子进程助手：cast 与 shaker 命令
+    只能进容器执行（宿主无 forge/cast，anvil 无宿主端口映射，plan §2-2/§2-3）；
+    `e2_configure` 的 cast send、oracle advance/finalize 的 cast call、
+    run_round 的 cast call、`shaker to-hex`/`shaker console` 全走此通道。
+  * `_ABI` 三行：e2_arm(string) / e2_run_verdict_round() / e2_net_config()
+    （selector 由容器内 `cast sig` 实取）。**e2_configure 无此行**——`bytes32[]`
+    不在编码器支持集，编码器零扩展（终裁冻结条款 1），该调用走 cast send。
 """
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import time
 from dataclasses import dataclass, field
 
@@ -64,6 +77,24 @@ DEFAULT_SENDER = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"
 BROKER_ADDR = DEFAULT_SENDER            # anvil#0（create_deal/faucet/committee_config 发送方）
 ALICE_ADDR = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"  # anvil#1 = buyer（B-① 双 sender 已验）
 BOB_ADDR = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"    # anvil#2 = seller（sender 首验 = R1 demo，D6）
+
+# R3（路线② E2）通道常量 —— 依据 plan §2 规划期实证 + 本轮容器实测：
+#   * 端口梯 {10087,11087,12087,13087} → node1..node4（容器内恒 10087，
+#     w1b1-topology.md §4）；宿主的 4×GetNodeInfo 与容器内 nodeN:10087 共用本表。
+#   * 宿主无 cast/forge、anvil 无宿主端口映射（plan §2-2/§2-3）⇒ cast/shaker
+#     命令一律 `docker exec multi-tools ...`（docker_exec 通道）。
+#   * anvil#0 私钥 = 部署钥 = creator，供 cast send（S2 §2：部署与 cast send
+#     同钥，`eth_guard = creator` 依赖）。注意：module docstring 的「Python 侧
+#     从不持有私钥」描述的是 eth JSON-RPC 写通道（节点 dev signer 按 from 签）；
+#     本钥仅出现在容器 cast send 命令行，与既有 shaker deploy 命令同款，
+#     是 devnet 公开确定性密钥，不是生产凭据。
+NODE_PORTS: tuple[int, ...] = (10087, 11087, 12087, 13087)
+NODE_HOST = os.environ.get("TB_NODE_HOST", "127.0.0.1")
+_GET_NODE_INFO_PATH = "/lyquor.node.v1.NodeService/GetNodeInfo"
+
+CONTAINER = os.environ.get("TB_CONTAINER", "multi-tools")
+DEFAULT_RPC_URL = os.environ.get("TB_RPC_URL", "http://node1:10087/api")
+ANVIL0_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 # Selector + wire-type table. Source: `cast sig "<sig>"` in the multi-tools
 # container, 2026-10-25 (w1b2-s4-rpc.md §B-⓪); faucet/fund/create_deal bytes
@@ -107,12 +138,28 @@ _ABI: dict[str, tuple[str, tuple[str, ...], str | None]] = {
         ("string",) * 4,
         "string",
     ),
+    # R3 路线②（E2）：selector 由容器内 `cast sig` **实取**（2026-10-30，本轮）：
+    #   e2_arm(string)            → 0x8b7acf91
+    #   e2_run_verdict_round()    → 0x368e198c
+    #   e2_net_config()           → 0x2b5d6a4a
+    # 返回面：e2_arm/e2_run_verdict_round = bool，e2_net_config = string（冻结，
+    # 终裁条款 2；_decode_ret 已支持 string）。e2_run_verdict_round 的**执行通道
+    # 是 cast call**（S2 通道纪律），此行供 selector/签名面冻结与交叉核对。
+    "e2_arm(string)": ("8b7acf91", ("string",), "bool"),
+    "e2_run_verdict_round()": ("368e198c", (), "bool"),
+    "e2_net_config()": ("2b5d6a4a", (), "string"),
 }
 
 # R2 路线①（R1 的排除注记已被取代）：apply_committee_verdict 的结构体 wire 参数
 # （CommitteeCertWire）在 ldk v0.8.1 无 EthAbiType（plan R3），故 lib.rs 已把它扁平化
 # 为 (string,uint8,string[]) 并 eth 导出——上一行的 selector 即实取冻结值。对抗流自
 # R2 起在真 devnet 上跑（不再是「仅 sim」形态）。
+#
+# R3 路线②排除口径：**e2_configure(bytes32[],uint16) 不进本表**——bytes32[] 不在
+# 编码器支持集（见下方 codec 注记），demo 经 docker_exec_cast 以 cast send 调用
+# （S2 probe_configure 同形实证；selector 0xcd9cc3c8 仅存档于本注记）。默认禁止
+# NodeClient 直发；唯一许可路径 = 先扩 _enc_value/_is_dynamic 支持 bytes32/bytes32[]
+# 且与容器内 `cast calldata` 逐字节对照通过（终裁冻结条款 1）。
 
 
 class NodeError(RuntimeError):
@@ -138,6 +185,9 @@ class TxError(RuntimeError):
 # ---------------------------------------------------------------------------
 # Minimal Ethereum-ABI codec (pure stdlib; covers exactly the _ABI type set:
 # string / uint8..uint128 / bool / string[] — no tuples, no nested arrays).
+# R3 覆盖注记：**仍无 bytes32/bytes32[]**（e2_configure 走 cast send 通道，
+# 本编码器零扩展 = 终裁冻结条款 1；_enc_value 对集外类型抛 unsupported ABI
+# type，_is_dynamic 仅识 string/string[]）。
 # ---------------------------------------------------------------------------
 
 
@@ -226,6 +276,140 @@ def _decode_ret(t: str, hexdata: str):
 def _sig_types(sig: str) -> tuple[str, ...]:
     inner = sig[sig.index("(") + 1:sig.index(")")]
     return tuple(t for t in inner.split(",") if t)
+
+
+# ---------------------------------------------------------------------------
+# R3（路线② E2）：容器通道助手 + 四端点 NodeID
+# ---------------------------------------------------------------------------
+# 通道事实（plan §2）：宿主无 cast/forge、anvil 无宿主端口映射，故一切
+# cast/shaker 子命令都在 multi-tools 容器内执行；宿主侧只剩 GetNodeInfo 的
+# HTTP 直连（get_node_ids）。Git Bash 会把容器内绝对路径改写成 Windows 路径
+#（w1b1-topology.md §6），故子进程环境强制 MSYS_NO_PATHCONV=1。
+
+
+def docker_exec(*argv: str, timeout: float = 120.0, check: bool = True) -> subprocess.CompletedProcess:
+    """`docker exec <CONTAINER> <argv...>`（宿主执行，捕获文本输出）。
+
+    `check=True` 时非零退出抛 RuntimeError（附 stdout/stderr 原文）；
+    `check=False` 供 `shaker console` 这类「流式命令 + 到点收尾」用：超时被
+    转成 `CompletedProcess(returncode=124, stdout=<已捕获输出>)`（与宿主
+    `timeout 60 docker exec …` 先例同语义），而不是把 TimeoutExpired 抛给调用方。
+    """
+    cmd = ["docker", "exec", CONTAINER, *argv]
+    env = dict(os.environ, MSYS_NO_PATHCONV="1")
+    try:
+        cp = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                            errors="replace", timeout=timeout, env=env)
+    except subprocess.TimeoutExpired as e:
+        def _txt(v):
+            if v is None:
+                return ""
+            return v if isinstance(v, str) else v.decode("utf-8", "replace")
+        out, err = _txt(e.stdout), _txt(e.stderr)
+        if check:
+            raise RuntimeError(
+                f"docker exec {CONTAINER} {' '.join(argv)} timed out after {timeout}s\n"
+                f"stdout: {out}\nstderr: {err}") from e
+        return subprocess.CompletedProcess(cmd, 124, out, err)
+    if check and cp.returncode != 0:
+        raise RuntimeError(
+            f"docker exec {CONTAINER} {' '.join(argv)} failed rc={cp.returncode}\n"
+            f"stdout: {cp.stdout}\nstderr: {cp.stderr}")
+    return cp
+
+
+def docker_exec_cast(*args: str, timeout: float = 180.0) -> str:
+    """`docker exec <CONTAINER> cast <args...>` → stdout（失败即抛）。
+
+    R3 用途（plan §3.6）：e2_configure 的 **cast send**、oracle
+    advance/finalize 与 e2_run_verdict_round 的 **cast call**。
+    """
+    return docker_exec("cast", *args, timeout=timeout).stdout
+
+
+def _cast_bool(out: str) -> bool:
+    """parse a `cast call … returns (bool)` stdout ("true"/"false")."""
+    val = out.strip().lower()
+    if val not in ("true", "false"):
+        raise RuntimeError(f"expected cast bool output, got {out!r}")
+    return val == "true"
+
+
+def shaker_to_hex(instance: str, *, timeout: float = 120.0) -> str:
+    """`shaker to-hex <实例名>` → TARGET（LVM 域地址，advance/finalize 的 address 参数）。
+
+    TARGET 由**实例名**推导，与实例合约地址（--contract）不同域；plan §3.6-3
+    要求断言非零且 ≠ --contract（先例 w1b1-s2-oracle.md:22）。
+    """
+    out = docker_exec("shaker", "to-hex", instance, timeout=timeout).stdout
+    for line in reversed(out.splitlines()):
+        line = line.strip()
+        if line.startswith("0x") and len(line) == 42:
+            return line
+    raise RuntimeError(f"shaker to-hex {instance}: no 0x-address in output: {out!r}")
+
+
+def shaker_console(instance: str, *, endpoint: str = "ws://node1:10087/ws",
+                   timeout: float = 60.0) -> subprocess.CompletedProcess:
+    """`shaker console <实例名> --endpoint ws://node1:10087/ws`（取证源 = node1）。
+
+    返回 CompletedProcess（不抛）：console 是流式命令，外层 `timeout` 收尾时
+    rc=124 属正常（R1/R2 先例 `_r1-console-fund-raw.txt` / `_r2-adversarial-console-raw.txt`）。
+    **必须用实例名**（`Lyquid-…`），不是合约地址（implementation.md:204 命令形态）。
+    """
+    return docker_exec("shaker", "console", instance, "--endpoint", endpoint,
+                       timeout=timeout, check=False)
+
+
+def node_id_to_bytes32(node_id: str) -> str:
+    """NodeID 显示串 → oracle 委员会 bytes32（demo.sh:199-212 换算段逐行镜像）。
+
+    去 `Node-` 前缀 → upper → 补 `=` 至 8 倍数 → base32 解码 → 35 字节校验 →
+    取前 32 字节 → 0x hex。S2 §1 已逐字节双重验证（GetNodeInfo ×4 换算值 ==
+    激活后 full config 中的 4 个 bytes32）。
+    """
+    import base64
+
+    s = node_id[5:] if node_id.startswith("Node-") else node_id
+    s = s.upper()
+    s += "=" * ((8 - len(s) % 8) % 8)
+    raw = base64.b32decode(s)
+    if len(raw) != 35:
+        raise RuntimeError(f"NodeID {node_id!r}: expected 35 decoded bytes, got {len(raw)}")
+    return "0x" + raw[:32].hex()
+
+
+def _get_node_info(port: int, *, host: str = NODE_HOST, timeout: float = 10.0) -> dict:
+    """宿主 HTTP GetNodeInfo（w1b1-topology.md:150-160 形态）。"""
+    import urllib.request
+
+    url = f"http://{host}:{port}{_GET_NODE_INFO_PATH}"
+    req = urllib.request.Request(url, data=b"{}", headers={"content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - devnet localhost
+        return json.loads(resp.read().decode())
+
+
+def get_node_ids(ports: tuple[int, ...] = NODE_PORTS, *, host: str = NODE_HOST) -> list[dict]:
+    """四端点轮询 GetNodeInfo → [{node, port, node_id, bytes32}]（node1..4 顺序）。
+
+    **同源对齐**（plan §3.3）：返回的 `node_id` 显示串喂 escrow 的
+    `committee_config`，`bytes32` 喂 oracle 的 `e2_configure`——两域成员/阈值
+    同值，映射闭环 = oracle signer_id → signer_node_id → NodeID 串 ∈ 成员集。
+    NodeID 标识节点而非实例：同 devnet 跨实例稳定，**换 devnet 必变**，禁硬编码。
+    任一端口不可达即抛（fail-closed：3/4 节点的委员会不是「四节点委员会」）。
+    """
+    out: list[dict] = []
+    for idx, port in enumerate(ports, start=1):
+        try:
+            body = _get_node_info(port, host=host)
+        except Exception as e:  # noqa: BLE001 - re-raised with endpoint context
+            raise RuntimeError(f"GetNodeInfo failed on node{idx} (port {port}): {e}") from e
+        nid = (body.get("nodeId") or {}).get("value") or ""
+        if not nid.startswith("Node-"):
+            raise RuntimeError(f"GetNodeInfo node{idx} (port {port}): unexpected payload {body!r}")
+        out.append({"node": f"node{idx}", "port": port, "node_id": nid,
+                    "bytes32": node_id_to_bytes32(nid)})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +658,95 @@ class NodeClient:
                          (brief_json, base_url, api_key, model),
                          frm=self._addr(sender or self.sender))
         return json.loads(raw)
+
+    # -- R3（路线② E2）面 ---------------------------------------------------
+    # 通道分工（plan §3.6）：arm / net_config 走 eth JSON-RPC（本类）；configure
+    # 走 cast send、run_round 走 cast call（NodeClient 的 docker_exec_cast 通道），
+    # 与 S2 实证同形。
+
+    def e2_arm(self, deal_id, *, sender: str | None = None) -> bool:
+        """arm 待裁 deal（network 域 `e2_armed_deal`，**单次发送全节点生效**）。
+
+        门 = creator（部署钥 anvil#0），故 sender 必须落在 #0；写入效果由
+        `e2_net_config().armed_deal` 读回断言（status=="0x1" ≠ 方法 Ok，
+        模块 docstring 的固有限制）。
+        """
+        self._send("e2_arm(string)", (deal_id,), sender)
+        return True
+
+    def e2_net_config(self) -> dict:
+        """oracle 配置 + armed_deal 的 JSON dump（**arm 读回断言载体**）。
+
+        返回 dict：{armed_deal, current:{threshold,committee,epoch},
+        staging:{threshold,committee}, get_epoch, dest:{epoch,change_count}}。
+        """
+        return json.loads(self._view("e2_net_config()", (), frm=self._addr(None)))
+
+    def e2_configure_cast(self, node_bytes32: list[str], threshold: int, *,
+                          rpc_url: str = DEFAULT_RPC_URL, private_key: str = ANVIL0_KEY,
+                          timeout: float = 180.0) -> str:
+        """`e2_configure(bytes32[],uint16)` —— **cast send 通道**（默认禁止编码器直发）。
+
+        `node_bytes32` = GetNodeInfo NodeID 的 bytes32 形（`get_node_ids()` 第 4 列）。
+        S2 probe_configure 同形（w1b1-s2-oracle.md §2）：status 1 + console
+        `staged committee of N nodes`。返回 cast 原始 stdout。
+        """
+        array = "[" + ",".join(node_bytes32) + "]"
+        return docker_exec_cast(
+            "send", self.contract, "e2_configure(bytes32[],uint16)", array, str(int(threshold)),
+            "--private-key", private_key, "--rpc-url", rpc_url, timeout=timeout)
+
+    def e2_run_verdict_round(self, *, rpc_url: str = DEFAULT_RPC_URL,
+                             timeout: float = 180.0) -> bool:
+        """单次认证回合（**cast call**；**严禁 cast send**——S2 §3/§4 实证内层静默丢失）。
+
+        返回 false = oracle 未激活 / aggregate 拒证（无内层 certified call 产生）。
+        **只在 node1 调一次**：propose 经 UPC 广播自带全节点提案；多次触发时首回合
+        裁决已把 deal 推离 Disputed（core.rs:199 门必败）。
+        """
+        out = docker_exec_cast(
+            "call", "--rpc-timeout", "30", "--rpc-url", rpc_url, self.contract,
+            "e2_run_verdict_round() returns (bool)", timeout=timeout)
+        return _cast_bool(out)
+
+    # -- 平台内置 oracle 通道（advance/finalize/dest epoch；不占方法清单） --
+    # 依据 S2 通道修正（w1b1-s2-oracle.md §3）：advance/finalize **必须 cast call**
+    # （cast send status 1 但内层提交丢失）；dest_epoch 是 advance→finalize 的
+    # 等待条件（get_epoch 在 finalize 前恒 0，勿用）。
+
+    def oracle_advance_epoch(self, topic: str, target: str, *,
+                             rpc_url: str = DEFAULT_RPC_URL, timeout: float = 180.0) -> bool:
+        out = docker_exec_cast(
+            "call", "--rpc-url", rpc_url, self.contract,
+            "__lyquor_oracle_advance_epoch(string,address,bool) returns (bool)",
+            topic, target, "false", timeout=timeout)
+        return _cast_bool(out)
+
+    def oracle_finalize_epoch(self, topic: str, target: str, *,
+                              rpc_url: str = DEFAULT_RPC_URL, timeout: float = 180.0) -> bool:
+        out = docker_exec_cast(
+            "call", "--rpc-url", rpc_url, self.contract,
+            "__lyquor_oracle_finalize_epoch(string,address,bool) returns (bool)",
+            topic, target, "false", timeout=timeout)
+        return _cast_bool(out)
+
+    def oracle_dest_epoch_info(self, topic: str, *, full: bool = False,
+                               rpc_url: str = DEFAULT_RPC_URL,
+                               timeout: float = 120.0) -> list[str]:
+        """`(uint64 epoch, bytes32 config_hash, uint32 change_count, bytes config)` → 行列表。"""
+        out = docker_exec_cast(
+            "call", "--rpc-url", rpc_url, self.contract,
+            "__lyquor_oracle_dest_epoch_info(string,bool) returns (uint64,bytes32,uint32,bytes)",
+            topic, "true" if full else "false", timeout=timeout)
+        return [ln.strip() for ln in out.splitlines() if ln.strip()]
+
+    def oracle_dest_epoch(self, topic: str, *, rpc_url: str = DEFAULT_RPC_URL,
+                          timeout: float = 120.0) -> int:
+        """dest epoch（advance 后轮询它；`>=1` 即 finalize 条件，P5）。"""
+        lines = self.oracle_dest_epoch_info(topic, rpc_url=rpc_url, timeout=timeout)
+        if not lines:
+            raise RuntimeError(f"dest_epoch_info({topic}): empty cast output")
+        return int(lines[0], 0)
 
 
 # ---------------------------------------------------------------------------

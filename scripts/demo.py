@@ -32,6 +32,17 @@ The three demo scenarios match PLAN §2:
   normal      offer -> assess -> deal -> fund -> accept -> deliver -> complete
   timeout     ... fund, seller stalls, watcher claims, buyer refunded
   adversarial ... deliver a FORGED doc, buyer disputes, committee verdict=Malicious
+
+R3（路线② E2）`--flow committee`（**node-only**，不进 `--flow all` 序列）：
+  env 断言（docker/cast + TARGET=`shaker to-hex <实例名>` 非零且 ≠ --contract）
+  → GetNodeInfo ×4（NodeID 制成员，禁硬编码）→ committee_config(NodeID×4) +
+  e2_configure(bytes32×4, 4)（**cast send 通道**）→ advance(cast call) →
+  dest_epoch poll → finalize(cast call) → 争议单（无交付 = 证据派生
+  NotFulfilled）→ e2_arm 一次 + e2_net_config 读回断言 armed_deal → node1 单次
+  e2_run_verdict_round（**cast call**，严禁 cast send）→ Refunded 读回 + 余额
+  勾稽 + console（取证源 node1）signers/aggregate/apply_verdict 行。
+  `--instance Lyquid-…` 必填（shaker console/to-hex 用实例名，不是地址）。
+  诚实红线：绝不以单签冒充四节点——L2/L1/L0 分级结论由 T3 实测登记（plan §3.4）。
 """
 
 from __future__ import annotations
@@ -50,7 +61,8 @@ from agents.common.protocol import (KIND_ACCEPTANCE, KIND_DELIVERABLE, KIND_DISP
                                     KIND_RECEIPT, KIND_REQUEST, envelope, digest, evidence_root,
                                     fnv1a64)
 from agents.common.rpc import (ALICE_ADDR, BOB_ADDR, BROKER_ADDR, DEFAULT_NODE, SLOT_MS,
-                               FakeNode, NodeClient)
+                               FakeNode, NodeClient, docker_exec, get_node_ids,
+                               shaker_console, shaker_to_hex)
 
 ALICE, BROKER, BOB = "agent-alice", "agent-broker", "agent-bob"
 # Committee: the nodes adjacent to the broker double as endorsement members
@@ -59,6 +71,21 @@ ALICE, BROKER, BOB = "agent-alice", "agent-broker", "agent-bob"
 # verdict under BROKER's identity with signers = COMMITTEE[:THRESHOLD].
 COMMITTEE = [BROKER, "node-1", "node-2", "node-3"]
 THRESHOLD = 3
+
+# --- R3（路线② E2）委员会流常量 -------------------------------------------
+# oracle 主题名（lib.rs `network oracle cert_verdict`；回调 group =
+# oracle::certified::cert_verdict::two_phase）。
+E2_TOPIC = "cert_verdict"
+# 认证域与成员域**阈值同值**（plan §3.3）：4 节点全数签署。T1 若登记降级值，
+# 改这里即可（阈值是调用参数，不需重新 deploy；avg_num 才是编码期常量）。
+E2_THRESHOLD = 4
+# `--instance` 缺省值：**T3 deploy 实录回填点**（plan §0-#4 / §3.6-7）。
+# 形态先例 `_r1-deploy-raw.txt:423-424`：`created Lyquid-ffy2ydso… => 0xF8e3…`。
+# shaker console / shaker to-hex 都必须用**实例名**（不是合约地址，
+# implementation.md:204）；未回填时 committee 流以明确错误退出（fail-closed，
+# 绝不猜测实例名）。
+DEFAULT_INSTANCE = "Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa"
+INSTANCE = DEFAULT_INSTANCE       # main() 由 --instance 覆盖
 
 # Read-after-write retry budget: on the devnet the eth_call read path can lag
 # one block behind the receipt (R0 measured; keeper.py:56-58 uses the same
@@ -115,6 +142,38 @@ def wait_state(node, deal_id, expected):
         time.sleep(READ_BACK_DELAY_S)
         info = node.deal_info(deal_id)
     return info
+
+
+def wait_for(node, predicate, timeout_s=30.0, interval_s=1.0, *, what="condition"):
+    """读回轮询（R5 口径）：**间隔递增**，预算内等到 predicate 完成。
+
+    `predicate()` 返回 `(done, value)`；`done=True` 即返回该 value；**可以抛
+    异常**表示硬失配（立即 abort，不等满预算）。超时抛 RuntimeError，消息带
+    last value 并注明「still pending, not a mismatch」——使「pending 到超时」
+    与「硬失配」两类失败语义可区分。仅 node 路径（flow_committee）使用，
+    sim 路径零改动。
+
+    为什么递增间隔：认证回调的内层 certified call 可能晚一块上链，且 4 节点
+    validate 轮本身有耗时（w1b1-s2-oracle.md:82 实测块推进）；固定 0.4s×5 的
+    读回预算（READ_BACK_ATTEMPTS）不够，同时不应高频抖动地 hammer 读路径。
+    节奏 = 1s, 2s, 4s（cap 4s）。
+    """
+    deadline = time.time() + timeout_s
+    attempt = 0
+    delay = interval_s
+    last = None
+    while True:
+        attempt += 1
+        done, last = predicate()
+        if done:
+            return last
+        if time.time() >= deadline:
+            raise RuntimeError(
+                f"[wait_for] {what}: timeout after {timeout_s}s "
+                f"({attempt} attempt(s), last={last!r}) — still pending, not a mismatch")
+        # 睡眠不越过预算（否则 4s 的递增间隔会把 1.5s 预算拖成 3s）
+        time.sleep(max(0.0, min(delay, deadline - time.time())))
+        delay = min(delay * 2, 4.0)
 
 
 def require_funds(node, buyer, amount=1_000):
@@ -466,18 +525,220 @@ def flow_adversarial_node(node):
           "counter value as after the Malicious verdict (no bump) — see console evidence")
 
 
+# ---------------------------------------------------------------------------
+# R3（路线② E2）：四节点委员会认证回合（node-only）
+# ---------------------------------------------------------------------------
+
+
+def _wait_dest_epoch(node, timeout_s=30.0, interval_s=1.0) -> int:
+    """advance 之后轮询 dest epoch（P5：**dest 面**才是 finalize 的等待条件）。
+
+    `get_epoch` 读源侧 current.epoch，finalize 前恒 0——绝不能用它做等待条件
+    （probe_net_config 注记）。"""
+    deadline = time.time() + timeout_s
+    epoch = 0
+    tries = 0
+    while time.time() < deadline:
+        tries += 1
+        epoch = node.oracle_dest_epoch(E2_TOPIC)
+        print(f"[committee]   dest_epoch poll #{tries} -> {epoch}", flush=True)
+        if epoch >= 1:
+            return epoch
+        time.sleep(interval_s)
+    raise RuntimeError(
+        f"[committee] dest_epoch stayed {epoch} after {timeout_s}s (advance did not land)")
+
+
+def flow_committee(node):
+    """R3 目标 A：四节点委员会认证（路线②）的单命令演示（node-only）。
+
+    步骤 = plan §3.6 的 1–7：env/TARGET 断言 → GetNodeInfo×4 → 双域同源配置
+    （escrow NodeID 成员域 + oracle bytes32 认证域）→ advance/finalize →
+    证据派生 NotFulfilled 的争议单 → arm（读回断言）+ node1 单次 run_round →
+    Refunded 读回 + 余额勾稽 + console 取证。
+
+    诚实边界：本函数只**驱动**回合；能否聚齐 4 提案 / 4 签（L2）由 T3 首跑
+    console 判定，不达时按 plan §3.4 预登记 fallback（avg_num=1 + 重新 deploy）
+    或 L0 三段式降级——**绝不以单签冒充四节点**。
+    """
+    banner("FLOW 4 — committee: 4-node oracle certification (route ②, E2)")
+    if not node_mode(node):
+        raise SystemExit(
+            "[committee] node-only flow: FakeNode has no oracle certification round; "
+            "rerun with --node <url> --contract <addr> --instance Lyquid-…")
+    instance = (INSTANCE or "").strip()
+    if not instance:
+        raise SystemExit(
+            "[committee] --instance <Lyquid-…> is required: shaker console / to-hex take the "
+            "instance NAME, not the contract address (T3 deploy 实录回填 DEFAULT_INSTANCE)")
+
+    # --- 1. env 断言（plan §3.6-1） -------------------------------------
+    cp = docker_exec("cast", "--version", check=False)
+    if cp.returncode != 0:
+        raise RuntimeError(
+            f"[committee] docker/cast unavailable (rc={cp.returncode}): {cp.stderr.strip()}")
+    target = shaker_to_hex(instance)
+    if int(target, 16) == 0 or target.lower() == node.contract.lower():
+        raise RuntimeError(
+            f"[committee] TARGET assertion failed: shaker to-hex {instance} -> {target}; "
+            f"contract={node.contract} (TARGET must be non-zero and != --contract)")
+    print(f"[committee] env: node={node.base_url} contract={node.contract} instance={instance}")
+    print(f"[committee] TARGET={target} (shaker to-hex {instance}) != contract={node.contract} -> OK")
+
+    nodes = get_node_ids()
+    node_ids = [n["node_id"] for n in nodes]
+    node_bytes32 = [n["bytes32"] for n in nodes]
+    for n in nodes:
+        print(f"[committee] {n['node']} port={n['port']} node_id={n['node_id']} bytes32={n['bytes32']}")
+
+    # --- 2. 双域同源配置（plan §3.3：两域阈值同值、成员同源） -----------
+    node.committee_config(node_ids, E2_THRESHOLD)
+    print(f"[committee] committee_config(NodeID×4, threshold={E2_THRESHOLD}) sent by broker "
+          f"(escrow 成员域)")
+    send_out = node.e2_configure_cast(node_bytes32, E2_THRESHOLD)
+    first_line = next((ln.strip() for ln in send_out.splitlines() if ln.strip()), "(no stdout)")
+    print(f"[committee] e2_configure(bytes32[]×4, {E2_THRESHOLD}) cast send -> {first_line} "
+          f"(console: staged committee of 4 nodes)")
+
+    # --- 3. advance → dest_epoch poll → finalize（cast call 通道） --------
+    adv = node.oracle_advance_epoch(E2_TOPIC, target)
+    print(f"[committee] __lyquor_oracle_advance_epoch({E2_TOPIC}, {target}) -> {adv}")
+    if not adv:
+        raise RuntimeError("[committee] advance_epoch returned false (staging/target mismatch)")
+    _wait_dest_epoch(node)
+    fin = node.oracle_finalize_epoch(E2_TOPIC, target)
+    print(f"[committee] __lyquor_oracle_finalize_epoch({E2_TOPIC}, {target}) -> {fin}")
+    if not fin:
+        raise RuntimeError("[committee] finalize_epoch returned false")
+    print(f"[committee] e2_net_config after activate: {node.e2_net_config()}")
+
+    # --- 4. 建争议单（主场景 = 证据派生 NotFulfilled：无交付） -----------
+    alice, broker, bob = role_ids(node)
+
+    def snapshot():
+        return {"alice": node.balance_of(alice), "bob": node.balance_of(bob),
+                "broker": node.balance_of(broker)}
+
+    node.faucet(alice, 10_000)
+    before = snapshot()
+    require_funds(node, alice, 1_000)
+    deal_id, _ = new_assessed_deal(node, alice, broker, bob, amount=1_000)
+    print(f"[committee] deal={deal_id} info={node.deal_info(deal_id)}")
+    call(node, "fund", deal_id, sender=alice)
+    funded = wait_state(node, deal_id, "Funded")
+    after_fund = snapshot()
+    print(f"[committee] deal={deal_id} state={funded['state']} "
+          f"(deliverable_digest=None -> check_evidence_shape=false -> NotFulfilled)")
+    reason = {"reason": "seller accepted escrow and never delivered"}
+    reason_digest = hashlib.sha256(json.dumps(reason, sort_keys=True).encode()).hexdigest()
+    notarize(node, deal_id, KIND_DISPUTE, reason, alice, bob)
+    call(node, "open_dispute", deal_id, reason_digest, sender=alice)
+    disputed = wait_state(node, deal_id, "Disputed")
+    print(f"[committee] deal={deal_id} state={disputed['state']} "
+          f"(evidence entries={len(node.evidence_entries(deal_id))})")
+
+    # --- 5. arm（network 域单发全节点生效）+ 读回断言 + node1 单次回合 --
+    # 读回纪律（仲裁修订 3）：e2_arm **只发一次**（plan §3.6-5「一次」），随后
+    # 轮询 e2_net_config 至 armed_deal == deal_id（预算 ~15s）。armed_deal 为空
+    # 或仍是 arm 前的旧值 = 读路径滞后（pending，继续等）；出现第三种值 = 硬失配，
+    # 立即 abort——**绝不重复 e2_arm**。
+    pre_arm = node.e2_net_config().get("armed_deal")
+    node.e2_arm(deal_id)
+
+    def arm_state():
+        cfg_ = node.e2_net_config()
+        armed = cfg_.get("armed_deal")
+        if armed == deal_id:
+            return True, cfg_
+        if armed == pre_arm:
+            return False, cfg_
+        raise RuntimeError(
+            f"[committee] arm mismatch (abort): e2_net_config.armed_deal={armed!r} "
+            f"!= {deal_id!r} and != pre-arm {pre_arm!r} — refusing to re-arm "
+            f"(plan §3.6-5: arm exactly once)")
+
+    cfg = wait_for(node, arm_state, timeout_s=15.0, interval_s=1.0, what="arm read-back")
+    print(f"[committee] e2_net_config after arm: {cfg}")
+    print(f"[committee] arm read-back OK: armed_deal == {deal_id} (pre-arm={pre_arm!r})")
+    round_ok = node.e2_run_verdict_round()
+    print(f"[committee] e2_run_verdict_round() -> {round_ok} "
+          f"(node1 single trigger; cast call channel — 禁多次触发)")
+    if not round_ok:
+        raise RuntimeError(
+            "[committee] run_round returned false (oracle inactive or aggregate refused) — "
+            "no certified call will land; inspect console before any retry")
+
+    # --- 6. 终态读回 + 余额勾稽（NotFulfilled = 全额退款、misconduct 不增） --
+    # 读回纪律（仲裁修订 3）：轮询至 Refunded，预算 ~30s（覆盖内层 certified call
+    # 晚块上链 + 4 节点 validate 轮）。state 停在 Disputed = pending，继续等；
+    # 出现其他终态（如 Settled）或超时才 abort——**绝不重触发 run_round**。
+    def terminal_state():
+        info = node.deal_info(deal_id)
+        st = info.get("state")
+        if st == "Refunded":
+            return True, info
+        if st == "Disputed":
+            return False, info
+        raise RuntimeError(
+            f"[committee] unexpected state {st!r} (expected Refunded; Disputed=pending, "
+            f"other state = abort; run_round is NOT retriggered)")
+
+    final = wait_for(node, terminal_state, timeout_s=30.0, interval_s=1.0,
+                     what="terminal Refunded")
+    after = snapshot()
+    print(f"[committee] final state={final['state']} balances after={after}")
+    if final["state"] != "Refunded":
+        raise RuntimeError(f"[committee] verdict did not reach Refunded: {final}")
+    if not (after["alice"] == before["alice"] and after["bob"] == before["bob"]
+            and after["broker"] == before["broker"]):
+        raise RuntimeError(
+            f"[committee] refund accounting mismatch: before={before} after_fund={after_fund} "
+            f"after={after} (NotFulfilled must refund the buyer and leave seller/broker untouched)")
+    print(f"[committee] refund check OK: alice {before['alice']} -> {after_fund['alice']} "
+          f"(after fund) -> {after['alice']} (after verdict); bob/broker unchanged")
+
+    # --- 7. console 取证段（取证源 = node1；实例名，不是地址） -----------
+    console = shaker_console(instance)
+    keys = ("e2_configure", "e2_net_config", "e2_arm", "e2_propose", "e2_aggregate",
+            "e2_run_verdict_round", "committee_verdict_certified", "apply_verdict")
+    lines = [ln.strip() for ln in console.stdout.splitlines() if any(k in ln for k in keys)]
+    print(f"[committee] console evidence (source=node1, rc={console.returncode}, "
+          f"{len(lines)} matching line(s)):")
+    for ln in lines:
+        print(f"  {ln}")
+    if not lines:
+        print("[committee] WARNING: no committee lines captured from console (replay window / relay); "
+              "re-run manually:\n"
+              f"  timeout 60 docker exec multi-tools shaker console {instance} "
+              f"--endpoint ws://node1:10087/ws")
+
+    banner("COMMITTEE FLOW SUMMARY")
+    print(f"  instance  = {instance}")
+    print(f"  contract  = {node.contract}")
+    print(f"  target    = {target} (shaker to-hex; != contract)")
+    print(f"  deal      = {deal_id} -> {final['state']}")
+    print("  signers   = see committee_verdict_certified lines above "
+          "(each must map to a real NodeID among committee_members)")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--node", default=DEFAULT_NODE, help="node base url, or 'sim'")
     p.add_argument("--sim", action="store_true", help="shorthand for --node sim")
     p.add_argument("--contract", default=None,
                    help="escrow Lyquid address (node mode; fallback = TB_CONTRACT)")
-    p.add_argument("--flow", choices=["normal", "timeout", "adversarial", "all"], default="all")
+    p.add_argument("--instance", default=DEFAULT_INSTANCE,
+                   help="Lyquid instance NAME (Lyquid-…); required for --flow committee "
+                        "(shaker console/to-hex take the name, not the contract address)")
+    p.add_argument("--flow", choices=["normal", "timeout", "adversarial", "committee", "all"],
+                   default="all")
     p.add_argument("--selftest", action="store_true",
                    help="pin evidence_root/fnv1a64 to the core.rs vectors, then exit")
     args = p.parse_args()
     if args.sim:
         args.node = "sim"
+    global INSTANCE
+    INSTANCE = (args.instance or "").strip()
 
     if args.selftest:
         # Pure stdlib, before any node/LLM/network construction.
@@ -494,12 +755,22 @@ def main():
     # not include the broker. Node mode configures the ADDRESS list: chain
     # identities are anvil addresses, and node-1..3 stay string placeholders
     # (members only — never called, they just fill the threshold).
-    committee = ([BROKER_ADDR] + COMMITTEE[1:]) if node_mode(node) else COMMITTEE
-    node.committee_config(committee, THRESHOLD)
+    # R3（仲裁修订 1：fail-closed 门控）：--flow committee **跳过**本默认配置——
+    # flow_committee 在 env/TARGET 断言之后才自行发 NodeID 制 committee_config
+    # （plan §3.6「先断言后写」序）；已核它不依赖本地址制集（在建单前整表覆盖）。
+    # FakeNode.committee_config 静默（rpc.py），故 sim 字面零变化（--flow all 仍走
+    # 本分支；`--flow committee --sim` 仍由 flow_committee 的 node-only 检查退出）。
+    # 修复前旧序会在 --instance 校验前先发一笔 committee_config tx（见 implementation.md §5-12）。
+    if args.flow != "committee":
+        committee = ([BROKER_ADDR] + COMMITTEE[1:]) if node_mode(node) else COMMITTEE
+        node.committee_config(committee, THRESHOLD)
 
-    flows = {"normal": flow_normal, "timeout": flow_timeout, "adversarial": flow_adversarial}
+    flows = {"normal": flow_normal, "timeout": flow_timeout,
+             "adversarial": flow_adversarial, "committee": flow_committee}
     if args.flow == "all":
         # R2 门控拆除：对抗流已上链，node 与 sim 的 all 序列一致。
+        # R3：committee 流是 node-only 且带 oracle 配置/activation 副作用，
+        # 不进 --flow all 序列（序列与全部 sim 代码路径零改动 = G2 逐字门前提）。
         seq = ["normal", "timeout", "adversarial"]
     else:
         seq = [args.flow]

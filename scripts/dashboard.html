@@ -684,7 +684,9 @@ function sendTx(base,from,C,data,sig){
     return poll();
   }).then(function(rc){
     var ok=rc.status==="0x1";
-    opsLog("回执 status="+rc.status+" block="+parseInt(rc.blockNumber,16)+" — status≠方法Ok，读回为证", ok?"":"err");
+    // 实测教训（2026-10-31，fund 不存在 deal）：status=0x1 只表示已排序，方法可能已回滚——
+    // 成功与否一律以下方读回为准（deal 状态 / 余额 / 新 deal 探测）。
+    opsLog("回执 status="+rc.status+" block="+parseInt(rc.blockNumber,16)+" —— 已排序≠方法成功，读回见下", ok?"cmd":"err");
     return rc;
   });
 }

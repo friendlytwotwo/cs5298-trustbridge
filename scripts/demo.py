@@ -60,7 +60,7 @@ from agents.common.llm import build_assessor_prompt, get_llm
 from agents.common.protocol import (KIND_ACCEPTANCE, KIND_DELIVERABLE, KIND_DISPUTE, KIND_OFFER,
                                     KIND_RECEIPT, KIND_REQUEST, envelope, digest, evidence_root,
                                     fnv1a64)
-from agents.common.rpc import (ALICE_ADDR, BOB_ADDR, BROKER_ADDR, DEFAULT_NODE, SLOT_MS,
+from agents.common.rpc import (ALICE_ADDR, BOB_ADDR, BROKER_ADDR, DEFAULT_NODE,
                                FakeNode, NodeClient, docker_exec, get_node_ids,
                                shaker_console, shaker_to_hex)
 
@@ -88,7 +88,7 @@ DEFAULT_INSTANCE = "Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa"
 INSTANCE = DEFAULT_INSTANCE       # main() 由 --instance 覆盖
 
 # Read-after-write retry budget: on the devnet the eth_call read path can lag
-# one block behind the receipt (R0 measured; keeper.py:56-58 uses the same
+# one block behind the receipt (R0 measured; keeper.py:69-70 uses the same
 # 5 x 0.4s). Final-state prints must not report a stale pre-transition state.
 READ_BACK_ATTEMPTS = 5
 READ_BACK_DELAY_S = 0.4
@@ -114,7 +114,7 @@ def read_back(node, deal_id, terminal=("Settled", "Refunded")):
 def read_back_funded(node, deal_id):
     """Post-fund read: wait until the read path shows Funded AND a deadline
     (the first deal_info after fund can still say Qualified/deadline=None —
-    R0 measured one-block lag; keeper.py:60-68 同款重试口径)."""
+    R0 measured one-block lag; keeper.py:73-81 同款重试口径)."""
     info = node.deal_info(deal_id)
     if not node_mode(node):
         return info
@@ -316,6 +316,13 @@ def flow_normal(node):
     call(node, "complete", deal_id, sender=alice)
 
     final = read_back(node, deal_id)
+    # R5 P1-3 (B1b): a complete whose Err was swallowed by the wire (status 0x1
+    # != method-Ok) must not end in a "final state=Settled" misreport. Node
+    # path asserts; sim's FakeNode.complete already raises on a bad transition.
+    if node_mode(node) and final.get("state") != "Settled":
+        raise RuntimeError(
+            f"{deal_id}: complete did not reach Settled (state={final.get('state')!r}) "
+            "— write likely swallowed on-chain (rpc.py status-0x1 caveat)")
     print(f"final state={final['state']} "
           f"balances: alice={node.balance_of(alice)} bob={node.balance_of(bob)} "
           f"broker={node.balance_of(broker)}")
@@ -356,6 +363,14 @@ def flow_timeout(node):
         for d in due:
             call(node, "claim_timeout", d)
         after = read_back(node, deal_id, terminal=("Refunded",))
+        # R5 P1-3 (B1a): read_back only prints — a silently failed claim
+        # (status 0x1 != method-Ok) must not print `final state=... (made
+        # whole)`. Fail closed on the node path.
+        if after.get("state") != "Refunded":
+            raise RuntimeError(
+                f"{deal_id}: timeout claim did not reach Refunded "
+                f"(state={after.get('state')!r}) — claim likely swallowed "
+                "on-chain; inspect keeper/console")
         print(f"final state={after['state']} alice={node.balance_of(alice)} "
               f"(made whole)")
     else:
@@ -413,7 +428,7 @@ def flow_adversarial_node(node):
     differ, so the transcript is the on-chain positive/negative control set of
     core.rs's verdict -> state/payout mapping (Fulfilled -> Settled,
     NotFulfilled/Malicious -> Refunded; misconduct bumps ONLY on Malicious,
-    core.rs:203-210).
+    core.rs:202-209).
 
     Self-contained funding (T6 总则): faucet 10_000 up front, and every fund is
     guarded by a balance read-back (>= 1_000). Malicious/NotFulfilled refund

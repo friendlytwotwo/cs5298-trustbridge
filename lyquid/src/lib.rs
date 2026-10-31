@@ -285,7 +285,7 @@ pub fn faucet(ctx: &mut _, to: AgentId, amount: U128) -> LyquidResult<()> {
     // 数值语义不变（native/call! 面不变，W1-B RPC 对齐以此为准）。
     let amount: u128 = amount.to::<u128>();
     let state = &mut *ctx.network;
-    credit(state, &to, amount);
+    credit(state, &to, amount)?;
     log!(faucet, &format!("faucet:{}:+{}", to, amount));
     Ok(())
 }
@@ -397,7 +397,7 @@ pub fn fund(ctx: &mut _, deal_id: DealId) -> LyquidResult<()> {
 #[method::network(export = eth)]
 pub fn notarize(ctx: &mut _, deal_id: DealId, from: AgentId, to: AgentId, payload_digest: Digest) -> LyquidResult<u64> {
     // 自署名强制（仲裁#3）：任何人可提交，但条目的 from 必须等于提交者本人
-    // ——`check_evidence_shape` 的 `e.from == deal.seller`（committee.rs:58）
+    // ——`check_evidence_shape` 的 `e.from == deal.seller`（committee.rs:66-74）
     // 因此成为可信的真归属，伪造 acceptance 条目被挡在共识入口。不收窄为
     // BuyerOrSeller：demo 流中 broker 本身就是合法作者（demo.py:57/58/69 的
     // from 分别为 ALICE/BROKER/BOB，broker.py:46/53 以 broker 为 from）。
@@ -547,6 +547,11 @@ pub fn committee_config(ctx: &mut _, members: Vec<AgentId>, threshold: u32) -> L
     require(Access::Broker, &ctx.caller, state, None)?;
     // TODO(W2): caller guard (broker/deployer only) — enforced above via
     // require(Access::Broker) until the real deployer identity exists.
+    // R5 P1-1 fail-closed: threshold == 0 would make the signer-count gate
+    // `signers.len() < threshold` (core.rs:245-247) vacuously pass — reject
+    // at config time, mirroring the e2 certified-domain guard
+    // (committee_certified.rs:119-123) and the "must be > 0" style above.
+    if threshold == 0 { return Err(lyquid_error("committee threshold must be > 0")); }
     state.committee_members.clear();
     for m in members {
         state.committee_members.insert(m, true);
@@ -685,9 +690,16 @@ fn debit(state: &mut __lyquid::NetworkState, agent: &AgentId, amount: u128) -> L
     Ok(())
 }
 
-fn credit(state: &mut __lyquid::NetworkState, agent: &AgentId, amount: u128) {
+fn credit(state: &mut __lyquid::NetworkState, agent: &AgentId, amount: u128) -> LyquidResult<()> {
     let bal = state.balances.get(agent).copied().unwrap_or(0);
-    state.balances.insert(agent.clone(), bal + amount);
+    // R5 P1-2: wasm release builds have no overflow checks — a second faucet
+    // near u128::MAX would wrap the balance and corrupt the ledger. Mirror
+    // debit's precheck symmetrically; escrow-path amounts can't reach this
+    // (apply_payout's debug_assert pins total <= escrowed), the reachable
+    // face is faucet-level absurd input only.
+    let new = bal.checked_add(amount).ok_or_else(|| lyquid_error("balance overflow"))?;
+    state.balances.insert(agent.clone(), new);
+    Ok(())
 }
 
 /// Apply a core Payout. Escrow was debited at `fund`; this moves funds out.
@@ -712,16 +724,16 @@ fn credit(state: &mut __lyquid::NetworkState, agent: &AgentId, amount: u128) {
 fn apply_payout(state: &mut __lyquid::NetworkState, p: &Payout, buyer: &AgentId, seller: &AgentId, broker: &AgentId, escrowed: u128) -> LyquidResult<()> {
     debug_assert!(p.total() <= escrowed, "payout exceeds escrow");
     if p.to_seller > 0 {
-        credit(state, seller, p.to_seller);
+        credit(state, seller, p.to_seller)?;
     }
     if p.fee_to_broker > 0 {
-        credit(state, broker, p.fee_to_broker);
+        credit(state, broker, p.fee_to_broker)?;
     }
     if p.refund_to_buyer > 0 {
-        credit(state, buyer, p.refund_to_buyer);
+        credit(state, buyer, p.refund_to_buyer)?;
     }
     if p.slash_to_treasury > 0 {
-        credit(state, &TREASURY.to_string(), p.slash_to_treasury);
+        credit(state, &TREASURY.to_string(), p.slash_to_treasury)?;
     }
     Ok(())
 }

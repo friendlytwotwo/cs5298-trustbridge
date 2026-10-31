@@ -16,8 +16,8 @@ node's ETH JSON-RPC API —
            then eth_getTransactionReceipt polling until `status == "0x1"`.
 The keeper calls `NodeClient._send` directly instead of the public
 `claim_timeout` wrapper: the wrapper drops the receipt and always returns True
-(rpc.py:330-337), while keeper needs the receipt's `transactionHash` for the
-refunded evidence file. `_send` (rpc.py:241-262) already asserts status=="0x1".
+(rpc.py:578-584), while keeper needs the receipt's `transactionHash` for the
+refunded evidence file. `_send` (rpc.py:464-485) already asserts status=="0x1".
 
 Measured caveat carried over from rpc.py: status=="0x1" means SEQUENCED, not
 method-Ok (a lyquid Err is swallowed by the platform, §A-1 note 3). Hence the
@@ -65,7 +65,7 @@ from agents.common.rpc import DEFAULT_NODE, NodeClient, NodeError, TxError  # no
 # Read-after-write retry budget: the read path can lag one block behind the
 # receipt (measured on the W1-B2 instance — the first deal_info read back after
 # `fund` still said Qualified; w1b2-claim-probe-evidence.txt §4). NodeClient's
-# own _poll_deal uses the same "consensus finality retry" idea (rpc.py:301-311).
+# own _poll_deal uses the same "consensus finality retry" idea (rpc.py:549-559).
 READ_BACK_ATTEMPTS = 5
 READ_BACK_DELAY_S = 0.4
 
@@ -145,10 +145,17 @@ def main() -> None:
     p.add_argument("--interval", type=int, default=20, help="poll interval seconds")
     p.add_argument("--once", action="store_true", help="run a single round and exit (evidence runs)")
     args = p.parse_args()
+    # R5 P1-4 fail-closed: interval <= 0 busy-loops (sleep(0)) or crashes
+    # (sleep of a negative), and an --deals string that parses to nothing
+    # would silently watch an empty set — reject both at the gate.
+    if args.interval <= 0:
+        p.error("--interval must be >= 1 (0/negative would busy-loop or crash)")
 
     node = NodeClient(args.node, contract=args.contract)
     if args.deals:
         deals = [d.strip() for d in args.deals.split(",") if d.strip()]
+        if not deals:
+            p.error("--deals parsed to an empty list; nothing to watch")
         print(f"[keeper] explicit deals: {deals}")
     else:
         deals = node.discover_deals()

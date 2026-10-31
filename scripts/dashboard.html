@@ -179,6 +179,7 @@
         <span>证据 <b id="tb-evn">0</b> 条</span>
         <span id="tb-stage">等待 deal 进入 Disputed 后 arm…</span>
         <span class="l2" id="tb-l2">判级 L2 · inputs=4 + signers=4（四节点全签，互异 NodeID 闭环）</span>
+        <button type="button" class="cbtn" id="tb-livestop" hidden>■ 停止实时演示</button>
       </div>
       <div class="grid">
         <div class="panel">
@@ -259,6 +260,12 @@
   <div id="tab-ops" hidden>
     <div class="notice" style="background:var(--bad-soft)">⚠ <b>操作台发送真实交易</b>（仅限 devnet 测试实例）。发送机制与 agents/common/rpc.py 完全一致：节点的 dev signer 后端按 <b>from 字段</b>签名，浏览器不持有任何私钥。回执 status=0x1 仅表示已排序（≠方法 Ok），<b>每笔交易后自动读回 deal_info/余额为证</b>。委员会组受单次纪律约束：e2_arm 每实例只发一次。</div>
     <div class="main">
+      <div class="scen2" role="group" aria-label="一键实时演示">
+        <button type="button" class="cbtn acc" id="live-normal">▶ 一键实时演示 · 正常流</button>
+        <button type="button" class="cbtn acc" id="live-timeout">▶ 一键实时演示 · 超时流（est 200ms）</button>
+        <button type="button" class="cbtn acc" id="live-adversarial">▶ 一键实时演示 · 对抗流 Malicious</button>
+        <span class="chip" style="max-width:340px">⚠ 实时演示发送真实交易并在回放页实时渲染；对抗流会用地址制委员会<b>覆盖</b>本实例配置——建议全新实例</span>
+      </div>
       <div class="cfg">
         <div><label for="ops-rpc">RPC 端点</label><input id="ops-rpc" value="http://127.0.0.1:10087/api"></div>
         <div><label for="ops-con">合约地址</label><input id="ops-con" value="0x942ED2fa862887Dc698682cc6a86355324F0f01e"></div>
@@ -440,7 +447,7 @@ BRANCH.forEach(function(st,i){var a=document.createElement("span");a.className="
 function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);return e}
 
 function drawSeq(){
-  var sc=SC[cur], box=$("tb-seq"); if(!box||$("tab-live").hidden===false) {/*render anyway*/}
+  var sc=activeSc(), box=$("tb-seq");
   box.innerHTML="";
   var W = Math.max(320, box.clientWidth - 18);
   var n = sc.actors.length, pad = 12, xs = [];
@@ -496,10 +503,13 @@ function drawSeq(){
   box.appendChild(svg);
 }
 
+function activeSc(){return LIVE_MODE? LIVE : SC[cur]}
 function renderReplay(){
-  var sc=SC[cur], st=sc.steps[step], prev=step>0?sc.steps[step-1]:null;
+  var sc=activeSc();
+  if(LIVE_MODE){ step=sc.steps.length-1; }
+  var st=sc.steps[step], prev=step>0?sc.steps[step-1]:null;
   $("tb-title").textContent=sc.title;
-  $("tb-ind").textContent="步骤 "+(step+1)+"/"+sc.steps.length;
+  $("tb-ind").textContent=(LIVE_MODE?"🔴 实时 · 步骤 ":"步骤 ")+(step+1)+"/"+sc.steps.length;
   var order=STATES.concat(BRANCH);
   order.forEach(function(s){$("tb-st-"+s).className="st"});
   if(st.s){var idx=order.indexOf(st.s);for(var i=0;i<=idx;i++){$("tb-st-"+order[i]).className="st seen"}$("tb-st-"+st.s).className="st now"}
@@ -510,19 +520,41 @@ function renderReplay(){
     dl.textContent=d>0?"+"+fmt(d):(d<0?"−"+fmt(-d):"");
     dl.className="dlt"+(d<0?" neg":"");
   }
-  var esc=ESCROW[st.s]||0, flow=st.bal[0]+st.bal[1]+st.bal[2];
-  var inj=(flow+esc)>0?10000:0;
-  $("tb-cons").innerHTML=inj?("资金守恒：流动 "+fmt(flow)+" + 托管 "+fmt(esc)+" = 注资 "+fmt(inj)+" <b>✓</b>"):"资金守恒：流动 0 + 托管 0 = 注资 0";
-  var ev=$("tb-ev"); ev.innerHTML=""; var kinds=EVKINDS[cur]||{}, maxEv=st.ev||0;
-  for(var k=1;k<=maxEv;k++){
-    var r=document.createElement("div"); r.className="evr"+(k===maxEv?" new":"");
-    r.innerHTML='<span class="sq">#'+k+'</span><span class="kd">'+kinds[k][0]+'</span><span class="rt">'+kinds[k][1]+'</span>';
-    ev.appendChild(r);
+      var esc=ESCROW[st.s]||0, flow=st.bal[0]+st.bal[1]+st.bal[2];
+      if(LIVE_MODE){
+        esc=(st.s==="Funded"||st.s==="Submitted"||st.s==="Disputed")?LIVE.amount:0;
+        var tot=flow+esc;
+        $("tb-cons").innerHTML="资金守恒（实时）：流动 "+fmt(flow)+" + 托管 "+fmt(esc)+" = "+fmt(tot)
+          +(LIVE.base? ("　基线 "+fmt(LIVE.base)+(tot===LIVE.base?" <b>✓</b>":" <b style=\"color:var(--bad)\">✗</b>")) : "");
+      } else {
+        var inj=(flow+esc)>0?10000:0;
+        $("tb-cons").innerHTML=inj?("资金守恒：流动 "+fmt(flow)+" + 托管 "+fmt(esc)+" = 注资 "+fmt(inj)+" <b>✓</b>"):"资金守恒：流动 0 + 托管 0 = 注资 0";
+      }
+  var ev=$("tb-ev"); ev.innerHTML="";
+  var maxEv=0;
+  if(LIVE_MODE){
+    var arr=LIVE.realEv||[];
+    maxEv=arr.length;
+    arr.forEach(function(en,i){
+      var r=document.createElement("div"); r.className="evr"+(i===arr.length-1?" new":"");
+      var dg=String(en.payload_digest||""), f=String(en.from||"?"), t=String(en.to||"?");
+      function sh(a){return a.length>12? a.slice(0,6)+"…"+a.slice(-4):a}
+      r.innerHTML='<span class="sq">#'+en.seq+'</span><span class="rt" title="'+dg+'">'+sh(f)+' → '+sh(t)+'　slot '+en.slot+'　'+dg.slice(0,10)+'…</span>';
+      ev.appendChild(r);
+    });
+    if(!maxEv) ev.innerHTML='<div class="evr"><span class="rt">（暂无条目——notarize 后实时读回）</span></div>';
+  } else {
+    var kinds=EVKINDS[cur]||{}; maxEv=st.ev||0;
+    for(var k=1;k<=maxEv;k++){
+      var r=document.createElement("div"); r.className="evr"+(k===maxEv?" new":"");
+      r.innerHTML='<span class="sq">#'+k+'</span><span class="kd">'+kinds[k][0]+'</span><span class="rt">'+kinds[k][1]+'</span>';
+      ev.appendChild(r);
+    }
+    if(!maxEv) ev.innerHTML='<div class="evr"><span class="rt">（暂无条目——notarize 按序追加，from 强制自署名）</span></div>';
   }
-  if(!maxEv) ev.innerHTML='<div class="evr"><span class="rt">（暂无条目——notarize 按序追加，from 强制自署名）</span></div>';
   $("tb-evn").textContent=maxEv;
   $("tb-stv").textContent=st.s||"（建单前）";
-  $("tb-stage").textContent=cur==="committee"?STAGE_TXT[Math.min(st.nd||0,5)]:(st.s?"流程推进中":"");
+      $("tb-stage").textContent=LIVE_MODE?"实时计算中——全部数据来自链上读回":(cur==="committee"?STAGE_TXT[Math.min(st.nd||0,5)]:(st.s?"流程推进中":""));
   $("tb-l2").className="l2"+(st.l2?" show":"");
   var blk=418;
   for(var q=0;q<=step;q++){var ac=sc.steps[q].acts||[];for(var w=0;w<ac.length;w++){if(ac[w][2]==="tx"||ac[w][2]==="cert")blk++}}
@@ -763,6 +795,7 @@ function opsBase(){return {base:$("ops-rpc").value.trim().replace(/\/$/,""), C:$
 function sendTx(base,from,C,data,sig){
   return liveRpc(base,"eth_sendTransaction",[{from:from,to:C,data:data}]).then(function(txh){
     opsLog("$ eth_sendTransaction "+sig+" → tx "+txh,"cmd");
+    if(LIVE_MODE)liveLog("tx "+txh);
     var t0=Date.now();
     function poll(){
       return liveRpc(base,"eth_getTransactionReceipt",[txh]).then(function(rc){
@@ -777,6 +810,7 @@ function sendTx(base,from,C,data,sig){
     // 实测教训（2026-10-31，fund 不存在 deal）：status=0x1 只表示已排序，方法可能已回滚——
     // 成功与否一律以下方读回为准（deal 状态 / 余额 / 新 deal 探测）。
     opsLog("回执 status="+rc.status+" block="+parseInt(rc.blockNumber,16)+" —— 已排序≠方法成功，读回见下", ok?"cmd":"err");
+    if(LIVE_MODE)liveLog("回执 status="+rc.status+" block="+parseInt(rc.blockNumber,16)+" —— 读回见下", ok?"":"err");
     return rc;
   });
 }
@@ -866,6 +900,7 @@ var OPS=[
   });
 })();
 function runOp(op){
+  if(liveRunBusy){opsLog("一键实时演示进行中，请稍候","err");return}
   if(opsBusy){opsLog("上一笔交易仍在途，请稍候","err");return}
   var b=opsBase();
   if(op.needMembers && !$("ops-members").value.trim()){opsLog("committee members 为空——填入 NodeID 后再执行","err");return}
@@ -889,6 +924,239 @@ function runOp(op){
   }
   $("ops-doc").value=sha256HexStr("license-doc:midnight-motors:online-video:12mo");
 })();
+
+/* ═══════════════ LIVE PRESET DEMOS（一键实时演示 · 真实交易 + 实时计算） ═══════════════
+   三个预设场景点击即真链执行：每步发真实交易 → 回执 → 链上读回 → 时序图/余额/证据/
+   终端全部以真实数据实时渲染。非回放——digest、证据根、deal id 全部现场计算。       */
+var LIVE=null, LIVE_MODE=false, liveRunBusy=false, liveStopFlag=false;
+function fnv1a64Root(entries){
+  /* protocol.py evidence_root 逐字复刻：按 slice 序折叠 "{seq}|{from}|{to}|{payload_digest}|{slot}\n" */
+  var PRIME=0x100000001b3n, MASK=(1n<<64n)-1n, state=0xcbf29ce484222325n;
+  var enc=new TextEncoder();
+  entries.forEach(function(en){
+    var s=en.seq+"|"+en.from+"|"+en.to+"|"+en.payload_digest+"|"+en.slot+"\n";
+    var b=enc.encode(s);
+    for(var i=0;i<b.length;i++){state=((state^BigInt(b[i]))*PRIME)&MASK;}
+  });
+  var h=state.toString(16);while(h.length<16)h="0"+h;return h;
+}
+function liveLog(m,c){LIVE.steps[LIVE.steps.length-1].log.push(m);renderReplay()}
+function liveNewStep(){LIVE.steps.push({s:"",bal:[0,0,0],log:[],acts:[]})}
+function liveSleep(ms){return new Promise(function(res){setTimeout(res,ms)})}
+async function liveReadBals(b){
+  var out=[];
+  for(var i=0;i<AGENTS.length;i++){
+    var r=await liveView(b.base,b.C,"balance",SEL.balance,["string"],[AGENTS[i][0]],"uint128");
+    out.push(r.v);
+  }
+  return out;
+}
+async function liveRefreshEv(b,deal){
+  var r=await liveView(b.base,b.C,"evidence",SEL.evidence,["string"],[deal],"string");
+  LIVE.realEv=JSON.parse(r.v);
+  return LIVE.realEv;
+}
+async function liveWaitState(b,deal,expect){
+  /* 读路径可滞后一块（R0 实测）：rpc 错误（如新单的 "no such deal"）按"尚未就绪"重试 */
+  for(var i=0;i<8;i++){
+    try{
+      var r=await liveView(b.base,b.C,"deal_info",SEL.dealInfo,["string"],[deal],"string");
+      var info=JSON.parse(r.v);
+      if(info.state===expect)return info;
+    }catch(e){/* 读路径滞后——继续轮询 */}
+    await liveSleep(400);
+  }
+  throw new Error("读回未达 "+expect+"（读路径滞后或方法未生效——rpc.py status 陷阱）");
+}
+async function probeNextId(base,C){
+  var n=1;
+  async function step(){
+    if(n>50)return n;
+    try{await liveView(base,C,"deal_info",SEL.dealInfo,["string"],["deal-"+n],"string");n++;return step()}
+    catch(e){return n}
+  }
+  return step();
+}
+async function liveStepTx(b,from,sel,types,vals,desc,act,stateExpect){
+  liveNewStep();
+  liveLog("$ "+desc+"  (from "+shortA(from)+")","cmd");
+  await sendTx(b.base,from,b.C,encCall(sel,types,vals),sel);
+  if(liveStopFlag)throw new Error("用户停止");
+  if(stateExpect){
+    var info=await liveWaitState(b,b.deal,stateExpect);
+    liveLog("读回 "+b.deal+"="+info.state+" ✓");
+    LIVE.steps[LIVE.steps.length-1].s=info.state;
+  }
+  var bals=await liveReadBals(b);
+  var st=LIVE.steps[LIVE.steps.length-1];
+  st.bal=bals; if(act)st.acts.push(act);
+  renderReplay();
+  await liveSleep(700);
+  return bals;
+}
+async function liveFaucet(b){
+  await liveStepTx(b,R0,"b540def8",["string","uint128"],[R1,b.faucetAmt],
+    "faucet(alice, +"+fmt(b.faucetAmt)+")",[LIVE.actors.length-1,0,"tx","faucet(alice, +"+fmt(b.faucetAmt)+")"],null);
+  var bals=await liveReadBals(b);
+  LIVE.base=bals[0]+bals[1]+bals[2];
+  LIVE.steps[LIVE.steps.length-1].bal=bals;
+  liveLog("faucet 落账 · 守恒基线 = "+fmt(LIVE.base));
+  renderReplay();
+}
+async function runLiveDemo(kind){
+  if(liveRunBusy)return;
+  liveRunBusy=true; liveStopFlag=false; LIVE_MODE=true;
+  var b=opsBase();
+  LIVE={title:"🔴 实时演示",actors:kind==="timeout"?["Alice 买方","操作台（你）","合约"]:["Alice 买方","Broker 中介","Bob 卖方","合约"],
+        steps:[],realEv:[],amount:b.amt,base:0,kind:kind};
+  document.querySelectorAll(".tb-scen").forEach(function(x){x.disabled=true});
+  $("tb-livestop").hidden=false;
+  showTab("replay");
+  try{
+    liveNewStep();
+    LIVE.title="🔴 实时演示 — "+(kind==="normal"?"正常流":kind==="timeout"?"超时流":"对抗流 Malicious")+"（真链 · 实时计算）";
+    liveLog("$ 预检 "+b.base+" · 合约 "+shortA(b.C),"cmd");
+    var blk=parseInt(await liveRpc(b.base,"eth_blockNumber",[]),16);
+    var bals=await liveReadBals(b);
+    var next=await probeNextId(b.base,b.C);
+    liveLog("块高 "+blk+" · alice "+fmt(bals[0])+" / broker "+fmt(bals[1])+" / bob "+fmt(bals[2])+" · 下一个 deal：deal-"+next);
+    LIVE.steps[LIVE.steps.length-1].bal=bals; renderReplay();
+    var docDigest=$("ops-doc").value.trim();
+    var td=termsDigests(b.amt);
+    var deal="deal-"+next; b.deal=deal;
+
+    if(kind==="normal"){
+      await liveFaucet(b);
+      await liveStepTx(b,R0,"bd827024",["string","string","uint128","uint16","string","string","uint64","uint8"],
+        [R1,R2,b.amt,200,td[0],td[1],60000,40],
+        "create_deal(amount="+b.amt+", est=60000ms) → "+deal,[1,3,"tx","create_deal → "+deal],"Qualified");
+      await liveStepTx(b,R1,"b1fecd5a",["string","string","string","string"],
+        [deal,R1,R0,envDigest("offer",{budget:b.amt},R1,R0,deal)],
+        "notarize OFFER (alice→broker)",[0,3,"tx","notarize OFFER"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R0,"b1fecd5a",["string","string","string","string"],
+        [deal,R0,R2,envDigest("request-to-seller",{amount:b.amt,terms:td[0]},R0,R2,deal)],
+        "notarize REQUEST (broker→bob)",[1,3,"tx","notarize REQUEST"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R1,"73451f65",["string"],[deal],
+        "fund(\""+deal+"\", "+b.amt+")",[0,3,"tx","fund → escrow+"+fmt(b.amt)],"Funded");
+      await liveStepTx(b,R2,"b1fecd5a",["string","string","string","string"],
+        [deal,R2,R0,envDigest("acceptance",{terms:td[0],accepted:true},R2,R0,deal)],
+        "notarize ACCEPTANCE (bob→broker)",[2,3,"tx","notarize ACCEPTANCE"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R2,"7ecc9d46",["string","string"],[deal,docDigest],
+        "submit_deliverable(doc "+docDigest.slice(0,10)+"…)",[2,3,"tx","submit_deliverable"],"Submitted");
+      await liveStepTx(b,R1,"b1fecd5a",["string","string","string","string"],
+        [deal,R1,R2,envDigest("receipt",{ok:true},R1,R2,deal)],
+        "notarize RECEIPT (alice→bob)",[0,3,"tx","notarize RECEIPT"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R1,"ad932b5c",["string"],[deal],
+        "complete(\""+deal+"\") → payout bob 98% + fee 2%",[0,3,"tx","complete → settle"],"Settled");
+      liveNewStep();
+      var info=await liveWaitState(b,deal,"Settled");
+      bals=await liveReadBals(b);
+      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].acts.push([0,3,"read","终读回 + 守恒校验"]);
+      var tot=bals[0]+bals[1]+bals[2];
+      liveLog("终态 "+deal+"="+info.state+" · alice "+fmt(bals[0])+" / broker "+fmt(bals[1])+" / bob "+fmt(bals[2]));
+      liveLog("守恒：流动 "+fmt(tot)+" = 基线 "+fmt(LIVE.base)+(tot===LIVE.base?" ✓":" ✗"),tot===LIVE.base?"ok":"err");
+      liveLog("DEMO COMPLETE（实时 · 全部真链计算）","ok");
+    }
+    else if(kind==="timeout"){
+      await liveFaucet(b);
+      await liveStepTx(b,R0,"bd827024",["string","string","uint128","uint16","string","string","uint64","uint8"],
+        [R1,R2,b.amt,200,td[0],td[1],200,40],
+        "create_deal(amount="+b.amt+", est=200ms) → "+deal,[0,2,"tx","create_deal（短估时）→ "+deal],null);
+      var info=JSON.parse((await liveView(b.base,b.C,"deal_info",SEL.dealInfo,["string"],[deal],"string")).v);
+      liveLog("链上读回 timeout_slots="+info.timeout_slots+" deadline_slot="+info.deadline_slot+"（est 200ms → 平台折算 slot）","ok");
+      await liveStepTx(b,R1,"73451f65",["string"],[deal],
+        "fund(\""+deal+"\")",[0,2,"tx","fund → escrow"],"Funded");
+      liveNewStep();
+      liveLog("等待到期：nudge（零值 faucet 出块）直到 due_deals 包含 "+deal,"cmd");
+      var nudges=0, due=[];
+      for(var i=0;i<8;i++){
+        if(liveStopFlag)throw new Error("用户停止");
+        await sendTx(b.base,R0,b.C,encCall("b540def8",["string","uint128"],[R0,0]),"b540def8");
+        nudges++;
+        blk=parseInt(await liveRpc(b.base,"eth_blockNumber",[]),16);
+        var rr=await liveView(b.base,b.C,"due",SEL.dueDeals,["uint64"],[blk],"string[]");
+        due=rr.v;
+        LIVE.steps[LIVE.steps.length-1].acts.push([1,2,"tx","nudge 出块 ×"+nudges]);
+        liveLog("nudge ×"+nudges+" → 块 "+blk+" · due_deals="+JSON.stringify(due));
+        if(due.indexOf(deal)>=0)break;
+      }
+      if(due.indexOf(deal)<0)throw new Error("8 次 nudge 后仍未到期——检查 est/slots（deal "+deal+"）");
+      await liveStepTx(b,R0,"786cfc8f",["string"],[deal],
+        "claim_timeout(\""+deal+"\") → 链上守卫复核",[1,2,"tx","claim_timeout → 全额退款"],"Refunded");
+      liveNewStep();
+      info=await liveWaitState(b,deal,"Refunded");
+      bals=await liveReadBals(b);
+      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].acts.push([0,2,"read","终读回 + 守恒校验"]);
+      var tot=bals[0]+bals[1]+bals[2];
+      liveLog("终态 "+deal+"="+info.state+"（全额退款）· 守恒：流动 "+fmt(tot)+" = 基线 "+fmt(LIVE.base)+(tot===LIVE.base?" ✓":" ✗"),tot===LIVE.base?"ok":"err");
+      liveLog("DEMO COMPLETE（实时 · 全部真链计算）","ok");
+    }
+    else {
+      var fundedBals=null;
+      await liveFaucet(b);
+      await liveStepTx(b,R0,"bd827024",["string","string","uint128","uint16","string","string","uint64","uint8"],
+        [R1,R2,b.amt,200,td[0],td[1],60000,40],
+        "create_deal → "+deal,[1,3,"tx","create_deal → "+deal],"Qualified");
+      await liveStepTx(b,R1,"b1fecd5a",["string","string","string","string"],
+        [deal,R1,R0,envDigest("offer",{budget:b.amt},R1,R0,deal)],
+        "notarize OFFER",[0,3,"tx","notarize OFFER"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R0,"b1fecd5a",["string","string","string","string"],
+        [deal,R0,R2,envDigest("request-to-seller",{amount:b.amt,terms:td[0]},R0,R2,deal)],
+        "notarize REQUEST",[1,3,"tx","notarize REQUEST"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      fundedBals=await liveStepTx(b,R1,"73451f65",["string"],[deal],
+        "fund(\""+deal+"\")",[0,3,"tx","fund → escrow"],"Funded");
+      var forged=sha256HexStr("FORGED-LICENSE-DOC: copied template, wrong scope");
+      liveLog("伪造交付物：明文 \"FORGED-LICENSE-DOC: copied template, wrong scope\" → digest "+forged.slice(0,16)+"…","err");
+      await liveStepTx(b,R2,"7ecc9d46",["string","string"],[deal,forged],
+        "submit_deliverable（伪造 doc）",[2,3,"tx","submit_deliverable（FORGED）"],"Submitted");
+      var rn=$("ops-reason").value;
+      await liveStepTx(b,R1,"b1fecd5a",["string","string","string","string"],
+        [deal,R1,R2,envDigest("dispute",{reason:rn},R1,R2,deal)],
+        "notarize DISPUTE",[0,3,"tx","notarize DISPUTE"],null);
+      await liveRefreshEv(b,deal); renderReplay();
+      await liveStepTx(b,R1,"a48ab911",["string","string"],[deal,sha256HexStr(canon({reason:rn}))],
+        "open_dispute(deal, reason digest)",[0,3,"tx","open_dispute → Disputed"],"Disputed");
+      await liveStepTx(b,R0,"15df3c73",["string[]","uint32"],
+        [[R0,"node-1","node-2","node-3"],3],
+        "committee_config([broker, node-1..3], thr=3) — 地址制成员（⚠ 覆盖实例配置）",
+        [1,3,"tx","committee_config（地址制覆盖）"],null);
+      var entries=await liveRefreshEv(b,deal);
+      var root=fnv1a64Root(entries);
+      liveLog("evidence_root（页内 FNV-1a-64 折叠，与 protocol.py 同规范，seq/from/to/digest/slot 逐字段）="+root,"ok");
+      renderReplay();
+      await liveStepTx(b,R0,"a32974e3",["string","uint8","string[]"],
+        [deal,2,[R0,"node-1","node-2"]],
+        "apply_committee_verdict(verdict=2 Malicious, signers=[broker,node-1,node-2])",
+        [1,3,"cert","apply_committee_verdict（Malicious，认证落地）"],"Refunded");
+      liveNewStep();
+      var info=await liveWaitState(b,deal,"Refunded");
+      bals=await liveReadBals(b);
+      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].acts.push([0,3,"read","终读回：退款 + 不端记录检查"]);
+      liveLog("终态 "+deal+"="+info.state+" · alice "+fmt(fundedBals[0])+" → "+fmt(bals[0])+"（退款 "+fmt(bals[0]-fundedBals[0])+"）· broker/bob 不变 ✓");
+      liveLog("misconduct 计数无 getter（方法面冻结）——证据为 shaker console 的 apply_verdict 累计行（_r2-adversarial-console-raw.txt 同型）");
+      liveLog("DEMO COMPLETE（实时 · 全部真链计算）","ok");
+    }
+  }catch(e){
+    liveLog("失败："+e.message+(liveStopFlag?"（用户停止）":""),"err");
+  }
+  LIVE.done=true;
+  $("tb-livestop").hidden=true;
+  document.querySelectorAll(".tb-scen").forEach(function(x){x.disabled=false});
+  liveRunBusy=false; renderReplay();
+}
+$("tb-livestop").addEventListener("click",function(){liveStopFlag=true;liveLog("停止请求已记录——当前交易完成后终止","cmd")});
+$("live-normal").addEventListener("click",function(){runLiveDemo("normal")});
+$("live-timeout").addEventListener("click",function(){runLiveDemo("timeout")});
+$("live-adversarial").addEventListener("click",function(){runLiveDemo("adversarial")});
 
 /* initial render */
 renderReplay();

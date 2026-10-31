@@ -449,12 +449,14 @@ function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs
 function drawSeq(){
   var sc=activeSc(), box=$("tb-seq");
   box.innerHTML="";
+  if(LIVE_MODE){ step=Math.max(sc.steps.length-1,0); }  // 联调R3修复：showTab 直调时全局 step 是回放遗留值，会越界
   var W = Math.max(320, box.clientWidth - 18);
   var n = sc.actors.length, pad = 12, xs = [];
   for(var i=0;i<n;i++) xs.push(pad + (i+0.5)*(W-2*pad)/n);
   var rows=[];
   for(var s=0;s<=step;s++){
-    var acts=sc.steps[s].acts||[];
+    var stp=sc.steps[s]; if(!stp)continue;   // 越界守卫（LIVE 步进中 steps 渐增）
+    var acts=stp.acts||[];
     for(var a=0;a<acts.length;a++) rows.push({act:acts[a], last:(s===step&&a===acts.length-1)});
   }
   var H = 52 + rows.length*38 + 14;
@@ -659,7 +661,10 @@ function livePoll(){
       .then(function(r){$("lv-due").textContent=JSON.stringify(r.v)});
   });
   var pInfo = liveView(base,contract,"deal_info",SEL.dealInfo,["string"],[deal],"string")
-    .then(function(r){$("lv-lat").textContent=r.ms+"ms";return r.v})
+    .then(function(r){
+      $("lv-lat").textContent=r.ms+"ms";
+      try{ return JSON.parse(r.v) }catch(_){ return null }  // 联调R1修复：此前返回原始字符串，卡片渲染成 ?
+    })
     .catch(function(e){if(String(e.message).indexOf("deal")>=0||String(e.message).indexOf("no such")>=0){return null}throw e});
   var bals = AGENTS.map(function(a){return liveView(base,contract,"balance_of",SEL.balance,["string"],[a[0]],"uint128").then(function(r){$(a[1]).textContent=fmt(r.v);return r.v})});
   var pEv = liveView(base,contract,"evidence",SEL.evidence,["string"],[deal],"string").then(function(r){

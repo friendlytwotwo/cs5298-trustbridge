@@ -1,0 +1,686 @@
+# ============================================================================
+# R4-D2+D3 验证实录（编码员，2026-10-30 +0800）
+# 方案：workflow-out/plan.md（审查通过）；本文件 = 方案 §0 清单 #7
+# 纪律：零 git 写操作——本文件出现的 git 命令只有 log / status / diff（只读）
+# 说明：下列输出均为本轮实跑/实读原文。本轮为纯文档任务：未运行任何 devnet / demo /
+#       deploy / keeper 命令，所有预期输出一律引用既有档案（「文件:行」）。
+# ============================================================================
+
+================================================================================
+T1 开工基线存证（本轮第一条命令，只读；2026-10-30）
+================================================================================
+$ cd trustbridge && git log --oneline -1 && git status --short
+8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)
+=== status ===
+ M workflow-out/_probe_cold_a0.md
+ M workflow-out/_probe_gate_a0.md
+ M workflow-out/_probe_impl_a0.md
+ M workflow-out/_probe_plan_r1_a0.md
+ M workflow-out/plan.md
+?? workflow-out/_implementation-prev-r1-backup.md
+?? workflow-out/_implementation-prev-r2-backup.md
+?? workflow-out/_implementation-prev-w1a-backup.md
+?? workflow-out/_plan-prev-r4d1-backup.md
+?? workflow-out/_plan-prev-r4d1-final-backup.md
+?? workflow-out/_pre-task-snapshot-r1.patch
+?? workflow-out/_pre-task-snapshot-r2.patch
+?? workflow-out/_pre-task-snapshot-r3.patch
+?? workflow-out/report/
+
+# 判读：HEAD 与方案冻结条款 1 的期望值逐字一致。工作树条目 = 方案预列的既有项
+# （4 份评审轮探针档 M、plan.md M、历史备份/快照与 report/ 未跟踪件）。
+# 方案 §0 的 7 个交付件在 T1 时点均不存在（slides/、demo-script.md 均非已有条目）。
+
+================================================================================
+T2 工具链复验（只读）
+================================================================================
+$ python -c "import pptx; print('python-pptx', pptx.__version__)"
+python-pptx 1.0.2
+$ python --version
+Python 3.14.5
+$ python -c "import fontTools; print('fontTools', fontTools.version)"
+fontTools 4.66.1
+$ python -c "import pymupdf; print(pymupdf.VersionBind)"
+1.28.2
+$ grep --version | head -1
+ugrep 7.8.4 WIN64 +sse2（Git for Windows 自带；-F = 固定串，-n = 行号）
+
+# 与方案 §8 规划期基线一致（python-pptx 1.0.2 / Python 3.14.5），无工具链降级。
+
+================================================================================
+T4 D2 构建 + 同进程自检（逐字；GT-a / GT-b / GT-b′ 程序化部分）
+================================================================================
+$ python workflow-out/slides/build_slides.py
+
+OUTPUT=F:\canvus auto\downloads\202609CS5298\trustbridge\workflow-out\slides\trustbridge-final-slides.pptx
+BUILT_PAGES=12
+PAGES=12
+SLIDE_SIZE_IN=13.333 x 7.500 (16:9=True)
+NOTES_OK=True (empty=[])
+KEY_HITS=23/23 (MIN=15)
+MISSING=[]
+TRIPLE_PAGES=[8] (allowed=[8])
+P5_CHAIN=True ('10000 → 9000 → 10000')
+FONT_COVERAGE=UNIQUE_CHARS=628 MISSING_IN_MSYH=0 OK
+PAGE 01 len=649
+PAGE 02 len=1028
+PAGE 03 len=1707
+PAGE 04 len=1413
+PAGE 05 len=1766
+PAGE 06 len=1627
+PAGE 07 len=972
+PAGE 08 len=2128
+PAGE 09 len=1603
+PAGE 10 len=893
+PAGE 11 len=984
+PAGE 12 len=837
+SIZE_BYTES=80761
+BUILD_OK
+EXIT=0
+
+T4.1 独立复核（python-pptx 重开产物，只数页 / notes / 尺寸）
+$ python -c "from pptx import Presentation; p=Presentation('workflow-out/slides/trustbridge-final-slides.pptx'); print('PAGES', len(p.slides)); print('NOTES_ALL', all(s.has_notes_slide and s.notes_slide.notes_text_frame.text.strip() for s in p.slides)); print('SIZE_IN', round(p.slide_width/914400,3), round(p.slide_height/914400,3))"
+PAGES 12
+NOTES_ALL True
+SIZE_IN 13.333 7.5
+
+T4.2 目视复核（LibreOffice 26.8.1.1 → PDF → PNG；12 页逐页阅图）
+$ powershell -NoProfile -Command "(Get-Item 'C:\Program Files\LibreOffice\program\soffice.exe').VersionInfo | Select-Object FileVersion | Format-List"
+FileVersion    : 26.8.1.1
+$ "/c/Program Files/LibreOffice/program/soffice.exe" --headless --convert-to pdf --outdir /tmp/slidecheck workflow-out/slides/trustbridge-final-slides.pptx
+convert F:\canvus auto\downloads\202609CS5298\trustbridge\workflow-out\slides\trustbridge-final-slides.pptx as a Impress document -> C:\Users\lenovo\AppData\Local\Temp\slidecheck\trustbridge-final-slides.pdf using filter : impress_pdf_Export
+$ python -c "import pymupdf, os; d=pymupdf.open(<slidecheck>/trustbridge-final-slides.pdf); print('PDF_PAGES', d.page_count); [d[n].get_pixmap(dpi=95).save(.../p%02d.png % (n+1)) for n in range(d.page_count)]"
+PDF_PAGES 12
+# 12 页 PNG（1267×713 @95dpi）逐页阅图。结论：中文渲染正常、无缺字方块、表格与 console
+# 块不出框、标题条与页脚对齐。本轮据此修正：
+#   ① 正文误用 markdown 反引号（U+0060 会原样显示）→ 去除（P2 等页）；
+#   ② 版面留白过大 → P5 增 T7 实录 console 块、P6/P8 表格字号上调；
+#   ③ U+21D2「⇒」在 Microsoft YaHei 无字形（自检 FONT_COVERAGE 抓到 MISSING='⇒'）→ 改「，即」。
+# 最后一次重建仅改 P8 notes 文本（notes 不上屏、不改变版式），故未再重跑目视。
+
+================================================================================
+T5/T6 交付件指纹（实跑 md5；.pptx 含时间戳，重建会变）
+================================================================================
+$ md5sum workflow-out/slides/build_slides.py workflow-out/slides/trustbridge-final-slides.pptx workflow-out/slides/README.md workflow-out/demo-script.md
+
+c236677be0ab967998f0d032d47222f2 *workflow-out/slides/build_slides.py
+47bf061795406ea81033192e3c9788b8 *workflow-out/slides/trustbridge-final-slides.pptx
+3809e1202c6c02cc16a3ad43c80626e6 *workflow-out/slides/README.md
+3f6848490f55d126db290671d5074fad *workflow-out/demo-script.md
+
+$ ls -la workflow-out/slides/
+total 216
+drwxr-xr-x 1 lenovo 197121     0 Oct 30 22:31 .
+drwxr-xr-x 1 lenovo 197121     0 Oct 30 22:32 ..
+-rw-r--r-- 1 lenovo 197121 13803 Oct 30 22:31 README.md
+-rwxr-xr-x 1 lenovo 197121 49554 Oct 30 22:31 build_slides.py
+-rw-r--r-- 1 lenovo 197121 80761 Oct 30 22:31 trustbridge-final-slides.pptx
+
+================================================================================
+T7 交叉核对：命令与预期输出逐字回实录（方案 T7-①③④ / GT-d）
+================================================================================
+$ python <T7 核对脚本> > t7.out   # 临时核对器（不入交付清单）；对每个字面值跑
+                                 # grep -nF -- <literal> <raw-file>，再比对行号
+# 覆盖：13 条命令 + S2 的 5 条关键输出 + 6 个分镜代码块内全部预期输出行（逐行）+
+#       禁引项反向核对 + KEY_HITS 三方对表（demo-script / slides / report README）
+
+==============================================================================
+T7-1 命令逐字命中（grep -nF；本机 grep = ugrep 7.8.4，-F 固定串语义）
+==============================================================================
+[PASS] S1 命令
+    literal : docker ps --format "{{.Names}} {{.Status}}"
+    file    : workflow-out/implementation.md (expected line: 443)
+    hit     : 443:- `docker ps --format "{{.Names}} {{.Status}}"` → 7 容器 Up（multi-tools / node1-4 / registry / anvil，13–14h）
+    hit     : 617:| T6.0 | `docker ps --format "{{.Names}} {{.Status}}"` | 7 容器 Up（16h） |
+    note    : 形态出处（§7.2 T3.0，同节 :617 同型）
+
+[PASS] S2-① rm
+    literal : docker exec multi-tools rm -rf /tmp/tb-lyquid
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 57)
+    hit     : 57:#   docker exec multi-tools rm -rf /tmp/tb-lyquid                                   -> exit 0
+    note    : 实录为注释形态「#   …→ exit 0」
+
+[PASS] S2-② cp
+    literal : MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-lyquid
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 58)
+    hit     : 58:#   MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-lyquid               -> exit 0
+
+[PASS] S2-③ cargo check
+    literal : docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 125)
+    hit     : 125:# command: MSYS_NO_PATHCONV=1 docker exec multi-tools sh -c "touch /tmp/tb-lyquid/src/*.rs" && MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown
+    note    : 同一行前段另有 touch 命令（:125 全文）；另见 :578 [cargo-check exit=0]
+
+[PASS] S2-④ shaker deploy（片段1）
+    literal : shaker deploy
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 59)
+    hit     : 59:#   MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools shaker deploy \n#       -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws \n#       --private-key 0xac0974...ff80 Cargo.toml      (full key = ANVIL0_KEY, agents/common/rpc.py:97; redacted per R2 precedent)
+    hit     : 71:# [QUOTED] original shaker deploy output, verbatim post-build tail (2026-10-30T02:51:26Z):
+    note    : 首命中行；:71 为 QUOTED 输出段
+
+[PASS] S2-④（片段2 registry/endpoint）
+    literal : -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 59)
+    hit     : 59:#   MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools shaker deploy \n#       -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws \n#       --private-key 0xac0974...ff80 Cargo.toml      (full key = ANVIL0_KEY, agents/common/rpc.py:97; redacted per R2 precedent)
+
+[PASS] S2-④（片段3 脱敏私钥，实录形态）
+    literal : --private-key 0xac0974...ff80 Cargo.toml
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 59)
+    hit     : 59:#   MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools shaker deploy \n#       -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws \n#       --private-key 0xac0974...ff80 Cargo.toml      (full key = ANVIL0_KEY, agents/common/rpc.py:97; redacted per R2 precedent)
+    note    : 占位符形态：demo-script 用 --private-key <ANVIL0_KEY> Cargo.toml；全钥 agents/common/rpc.py:97（:90 注明 devnet 公开确定性密钥）
+
+[PASS] S2 备路径 to-hex
+    literal : docker exec multi-tools shaker to-hex
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 581)
+    hit     : 581:# command: MSYS_NO_PATHCONV=1 docker exec multi-tools shaker to-hex Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa
+
+[PASS] S3 命令（形态）
+    literal : python scripts/demo.py --node http://127.0.0.1:10087 --contract <addr> --flow normal
+    file    : workflow-out/_r2-normal-assess-raw.txt (expected line: 3)
+    hit     : 3:# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract <addr> --flow normal
+    note    : 去 # command: 前缀；<addr> 为实录内字面占位符
+
+[PASS] S4 出处命令（讲解行，不执行）
+    literal : python scripts/keeper.py --node http://127.0.0.1:10087 --contract <addr> --deals deal-3 --interval 5
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: 3)
+    hit     : 3:# command: python scripts/keeper.py --node http://127.0.0.1:10087 --contract <addr> --deals deal-3 --interval 5
+    note    : 去 # command: 前缀
+
+[PASS] S5-① 主命令（T7 实例）
+    literal : python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x942ED2fa862887Dc698682cc6a86355324F0f01e --instance Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa --flow committee
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: 3)
+    hit     : 3:# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x942ED2fa862887Dc698682cc6a86355324F0f01e --instance Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa --flow committee
+    note    : 去 # command: 前缀
+
+[PASS] S5-① 可选 T3 档命令（不执行）
+    literal : python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 --instance Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --flow committee
+    file    : workflow-out/_r3-t3-committee-raw.txt (expected line: 2)
+    hit     : 2:# command: python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 --instance Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --flow committee
+    note    : 去 # command: 前缀
+
+[PASS] S5-② console 命令
+    literal : MSYS_NO_PATHCONV=1 timeout 60 docker exec multi-tools shaker console Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --endpoint ws://node1:10087/ws
+    file    : workflow-out/_r3-t3-console-raw.txt (expected line: 2)
+    hit     : 2:# command: MSYS_NO_PATHCONV=1 timeout 60 docker exec multi-tools shaker console Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --endpoint ws://node1:10087/ws
+    note    : 去 # command: 前缀
+
+==============================================================================
+T7-2 S2 预期输出（deploy 实录）
+==============================================================================
+[PASS] S2 created 行（形态）
+    literal : created Lyquid-
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 85)
+    hit     : 85:2026-10-30T02:51:26.477478Z  INFO ThreadId(01) shaker: created Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa => 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+    note    : 当轮实例名以输出为准
+
+[PASS] S2 deploy 退出行
+    literal : [deploy exit=0]
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 86)
+    hit     : 86:[deploy exit=0]
+
+[PASS] S2 Status 行
+    literal : Status: created
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 80)
+    hit     : 80:Status: created
+
+[PASS] S2 Contract 行
+    literal : Contract: 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 82)
+    hit     : 82:Contract: 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589
+
+[PASS] S2 to-hex 42 字符值
+    literal : 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc
+    file    : workflow-out/_r3-t3-deploy-raw.txt (expected line: 582)
+    hit     : 582:0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc
+    hit     : 584:# ASSERTION (clause 6): TARGET=0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc ; non-zero=yes ; != contract(0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589)=yes
+    hit     : 589:# target   = 0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc (shaker to-hex; non-zero and != contract -> OK)
+    note    : :584 为断言行（同值）
+
+==============================================================================
+T7-3 分镜脚本代码块内的预期输出行（逐行 grep -nF）
+==============================================================================
+block_count=6
+
+--- block 0 → workflow-out/_r3-t4-precheck-raw.txt（S1 devnet 输出（表头 + multi-tools 行））
+[PASS] block0 行
+    literal : CONTAINER ID   IMAGE                                     COMMAND                   CREATED      STATUS        PORTS                                             NAMES
+    file    : workflow-out/_r3-t4-precheck-raw.txt (expected line: -)
+    hit     : 5:CONTAINER ID   IMAGE                                     COMMAND                   CREATED      STATUS        PORTS                                             NAMES
+
+[PASS] block0 行
+    literal : 848dda2bd63d   ghcr.io/lyquor-labs/lyquor-tools:v0.8.1   "sleep infinity"          5 days ago   Up 15 hours                                                     multi-tools
+    file    : workflow-out/_r3-t4-precheck-raw.txt (expected line: -)
+    hit     : 6:848dda2bd63d   ghcr.io/lyquor-labs/lyquor-tools:v0.8.1   "sleep infinity"          5 days ago   Up 15 hours                                                     multi-tools
+
+
+--- block 1 → workflow-out/_r1-demo-normal-raw.txt（S3 正常流（R1 首次正常流，零起点实例，同形预期））
+[PASS] block1 行
+    literal : deal=deal-1 info={'id': 'deal-1', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+    file    : workflow-out/_r1-demo-normal-raw.txt (expected line: -)
+    hit     : 5:deal=deal-1 info={'id': 'deal-1', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 300, 'deadline_slot': None}
+
+[PASS] block1 行
+    literal : final state=Settled balances: alice=9000 bob=980 broker=20
+    file    : workflow-out/_r1-demo-normal-raw.txt (expected line: -)
+    hit     : 6:final state=Settled balances: alice=9000 bob=980 broker=20
+
+[PASS] block1 行
+    literal :   DEMO COMPLETE
+    file    : workflow-out/_r1-demo-normal-raw.txt (expected line: -)
+    hit     : 9:  DEMO COMPLETE
+
+
+--- block 2 → workflow-out/_r2-keeper-loop-raw.txt（S4 keeper 回放）
+[PASS] block2 行
+    literal : [keeper] explicit deals: ['deal-3']
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 6:[keeper] explicit deals: ['deal-3']
+
+[PASS] block2 行
+    literal : [keeper] watching ['deal-3'] every 5s (guard decides; submissions are free)
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 8:[keeper] watching ['deal-3'] every 5s (guard decides; submissions are free)
+
+[PASS] block2 行
+    literal : [keeper 23:39:22] deal-3: {"state": "Refunded", "action": "claimed", "tx": "0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02"}
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 10:[keeper 23:39:22] deal-3: {"state": "Refunded", "action": "claimed", "tx": "0x4095005c0e72c139fb99f630d8e20b7ef005596a88dfac8b1fec8717cd5ada02"}
+
+[PASS] block2 行
+    literal : ATTRIBUTION VERDICT: PASS — every block in (212, 214] carries exactly one tx, all from the keeper sender and all one of the two keeper selectors (nudge=faucet 0xb540def8 / claim_timeout 0x786cfc8f).
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 30:ATTRIBUTION VERDICT: PASS — every block in (212, 214] carries exactly one tx, all from the keeper sender and all one of the two keeper selectors (nudge=faucet 0xb540def8 / claim_timeout 0x786cfc8f).
+
+[PASS] block2 行
+    literal : => the block that crossed deal-3's deadline (213) was mined by the keeper's own nudge,
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 31:=> the block that crossed deal-3's deadline (213) was mined by the keeper's own nudge,
+
+[PASS] block2 行
+    literal : so 'keeper loop drove the timeout' holds with no operator tx inside the window.
+    file    : workflow-out/_r2-keeper-loop-raw.txt (expected line: -)
+    hit     : 32:   so 'keeper loop drove the timeout' holds with no operator tx inside the window.
+
+
+--- block 3 → workflow-out/_r3-t7-dt31-verify-raw.txt（S5-① T7 主路径）
+[PASS] block3 行
+    literal : [committee] faucet read-back OK: alice 0 -> 10000 (+10000)
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 22:[committee] faucet read-back OK: alice 0 -> 10000 (+10000)
+
+[PASS] block3 行
+    literal : [committee] arm read-back OK: armed_deal == deal-1 (pre-arm='')
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 28:[committee] arm read-back OK: armed_deal == deal-1 (pre-arm='')
+
+[PASS] block3 行
+    literal : [committee] final state=Refunded balances after={'alice': 10000, 'bob': 0, 'broker': 0}
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 30:[committee] final state=Refunded balances after={'alice': 10000, 'bob': 0, 'broker': 0}
+
+[PASS] block3 行
+    literal : [committee] refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker unchanged
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 31:[committee] refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker unchanged
+
+[PASS] block3 行
+    literal : DEMO COMPLETE
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 69:  DEMO COMPLETE
+    hit     : 72:# EXIT: DEMO COMPLETE banner printed (last statement of main()); no traceback;
+
+[PASS] block3 行
+    literal : # EXIT: DEMO COMPLETE banner printed (last statement of main()); no traceback;
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 72:# EXIT: DEMO COMPLETE banner printed (last statement of main()); no traceback;
+
+[PASS] block3 行
+    literal : # python exit code observed as 0 (EXIT=0 printed by the tee wrapper).
+    file    : workflow-out/_r3-t7-dt31-verify-raw.txt (expected line: -)
+    hit     : 73:# python exit code observed as 0 (EXIT=0 printed by the tee wrapper).
+
+
+--- block 4 → workflow-out/_r3-t3-committee-raw.txt（S5-① 可选 T3 档（D-T3-1 修复前））
+[PASS] block4 行
+    literal : RuntimeError: [committee] refund accounting mismatch: before={'alice': 0, 'bob': 0, 'broker': 0} after_fund={'alice': 9000, 'bob': 0, 'broker': 0} after={'alice': 10000, 'bob': 0, 'broker': 0} (NotFulfilled must refund the buyer and leave seller/broker untouched)
+    file    : workflow-out/_r3-t3-committee-raw.txt (expected line: -)
+    hit     : 41:RuntimeError: [committee] refund accounting mismatch: before={'alice': 0, 'bob': 0, 'broker': 0} after_fund={'alice': 9000, 'bob': 0, 'broker': 0} after={'alice': 10000, 'bob': 0, 'broker': 0} (NotFulfilled must refund the buyer and leave seller/broker untouched)
+
+[PASS] block4 行
+    literal : # demo exit=1
+    file    : workflow-out/_r3-t3-committee-raw.txt (expected line: -)
+    hit     : 43:# demo exit=1
+
+
+--- block 5 → workflow-out/_r3-t3-console-raw.txt（S5-② console 判级）
+[PASS] block5 行
+    literal : e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+    file    : workflow-out/_r3-t3-console-raw.txt (expected line: -)
+    hit     : 24:e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+    hit     : 29:e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)
+
+[PASS] block5 行
+    literal : committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4) deal=deal-1 verdict=1
+    file    : workflow-out/_r3-t3-console-raw.txt (expected line: -)
+    hit     : 31:committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (Vec<SignerID>=Vec<u32>, len=4) deal=deal-1 verdict=1
+
+[PASS] block5 行
+    literal : apply_verdict: deal=deal-1 verdict=1 misconduct=[]
+    file    : workflow-out/_r3-t3-console-raw.txt (expected line: -)
+    hit     : 36:apply_verdict: deal=deal-1 verdict=1 misconduct=[]
+
+[PASS] block5 行
+    literal : deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":637}
+    file    : workflow-out/_r3-t3-console-raw.txt (expected line: -)
+    hit     : 38:deal_info: {"id":"deal-1","buyer":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8","seller":"0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","amount":1000,"state":"Refunded","timeout_slots":300,"deadline_slot":637}
+
+
+==============================================================================
+T7-4 禁引项反向核对（R2 normal 已用实例输出不得作 S3 预期来源）
+==============================================================================
+_r2-normal-assess-raw.txt:12 = deal=deal-9 info={'id': 'deal-9', 'buyer': '0x70997970C51812dc3A010C7d01b50e0d17dc79C8', 'seller': '0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC', 'amount': 1000, 'state': 'Qualified', 'timeout_slots': 
+_r2-normal-assess-raw.txt:13 = final state=Settled balances: alice=58000 bob=1960 broker=40
+
+[PASS] 禁引三元组字面 'alice=58000 bob=1960 broker=40' 在 demo-script.md 中的出现次数 = 0
+
+==============================================================================
+T7-5 KEY_HITS 对表（demo-script / slides / report README 三方一致）
+==============================================================================
+[PASS] 1,936,008                                      demo-script=True  slides=True  README=True 
+[PASS] 3,843,041                                      demo-script=True  slides=True  README=True 
+[PASS] 3,707,457                                      demo-script=True  slides=True  README=True 
+[PASS] 407                                            demo-script=True  slides=True  README=True 
+[PASS] 2083                                           demo-script=True  slides=True  README=True 
+[PASS] 1323                                           demo-script=True  slides=True  README=True 
+[PASS] 2933                                           demo-script=True  slides=True  README=True 
+[PASS] 2173                                           demo-script=True  slides=True  README=True 
+[PASS] 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589     demo-script=True  slides=True  README=True 
+[PASS] 0x942ED2fa862887Dc698682cc6a86355324F0f01e     demo-script=True  slides=True  README=True 
+[PASS] 0xFD6F7A6a5c21A3f503EBaE7a473639974379c351     demo-script=True  slides=True  README=True 
+[PASS] 1000002                                        demo-script=False slides=True  README=True 
+[PASS] 999002                                         demo-script=False slides=True  README=True 
+[PASS] 77000                                          demo-script=False slides=True  README=True 
+[PASS] 3920                                           demo-script=False slides=True  README=True 
+[PASS] 81000                                          demo-script=False slides=True  README=True 
+[PASS] 980                                            demo-script=True  slides=True  README=True 
+[PASS] non-member signer                              demo-script=True  slides=True  README=True 
+[PASS] misconduct                                     demo-script=True  slides=True  README=True 
+[PASS] inputs=4                                       demo-script=True  slides=True  README=True 
+[PASS] [0, 1, 2, 3]                                   demo-script=True  slides=True  README=True 
+[PASS] 8d093b5                                        demo-script=True  slides=True  README=True 
+
+KEY_HITS_MISMATCH=[]
+
+==============================================================================
+T7-6 汇总
+==============================================================================
+CHECKS_TOTAL=65
+FAILS=0
+
+================================================================================
+T7-b′ 三数口径人工复核（GT-b′；程序护栏见 T4 的 TRIPLE_PAGES / P5_CHAIN）
+================================================================================
+# 扫描口径：pptx 的全部 shape 文本 + 表格单元格 + notes 逐行取出，按「独立数值」正则
+#   (?<![\d,])9000|980|20(?![\d,])
+# 取命中行（避免 19000 / 2026 / 2083 / 3,707,457 之类误判）。
+$ python <token 扫描脚本>
+
+P03 | 20   | ① 状态机：R0 keeper 触发 claim_timeout，deal-1 由 Funded 变 Refunded，余额 999002 → 1000002（w1b2-refunded-evidence.md:20-:25、:51-:54）；deadline_slot=102、claim 发生在 block 104（:46-:47），边
+P03 | 20   | ② 两阶段：e2_configure 只做 staging（console:5 原文 dest epoch advance/finalize required），真正激活要先 __lyquor_oracle_advance_epoch 再 finalize_epoch（_r3-t3-committee-raw.txt:18、:20），激活
+P04 | 20   | • inputs=4 有四个不同 Node 输入行佐证（console:20-:23）；signers=4 见 :31
+P04 | 20   | 读法讲解：inputs=4 指这一轮聚合收到 4 条来自不同 Node 的提案输入（console:20-:23 四行，ts_ms 1793328719418/…458/…460/…460），agreed 行 :24 给出 from 4 input(s) (avg_num=4)；signers=4 指认证证书里 Vec<SignerID>
+P05 | 9000 | • alice 余额链：10000 → 9000 → 10000（faucet +10000 → fund −1000 → NotFulfilled 全额退款 +1000）（w1b2-r3-e2-committee.md:98）
+P05 | 9000 | • 9000 在此是 funding 中间态（不是结算值）：三数口径见 P8
+P05 | 9000 | [committee] refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker unchanged
+P05 | 9000 | 口径强调（冻结条款 2 三数口径铁律）：本页的 9000 是 R3 认证流里的 funding 中间态——alice 从 faucet 拿 10000，fund 时锁定 1000 剩 9000，NotFulfilled 裁决全额退款 1000 回到 10000；它不是 R1 正常流分账里的 9000（那是 alice 付给 escrow 
+P05 | 9000 | 口径强调（冻结条款 2 三数口径铁律）：本页的 9000 是 R3 认证流里的 funding 中间态——alice 从 faucet 拿 10000，fund 时锁定 1000 剩 9000，NotFulfilled 裁决全额退款 1000 回到 10000；它不是 R1 正常流分账里的 9000（那是 alice 付给 escrow 
+P05 | 9000 | 口径强调（冻结条款 2 三数口径铁律）：本页的 9000 是 R3 认证流里的 funding 中间态——alice 从 faucet 拿 10000，fund 时锁定 1000 剩 9000，NotFulfilled 裁决全额退款 1000 回到 10000；它不是 R1 正常流分账里的 9000（那是 alice 付给 escrow 
+P05 | 9000 | T7 复验：D-T3-1（demo 内建余额断言 stale baseline）于 d1e6f5f 修复后在新实例 Lyquid-dpp6…unqa @ 0x942ED2fa…f01e 上端到端重跑，exit 0、DEMO COMPLETE（_r3-t7-dt31-verify-raw.txt:69；:72-:73 记录 EXIT=0），
+P07 | 20   | • 两侧工作量不同：EVM 一轮 20 笔交易 vs Lyquid R3 14 笔（含认证回合），交易数与总量不构成同工作量对比（:193、:197）
+P07 | 20   | 工作量差异：EVM 侧一轮实验含 3 条完整业务流 + 1 次负对照（20 笔 = deploy + 19），Lyquid R3 只有 1 条业务流 + 认证回合（14 笔 = 创建 + 13，:193），因此本片不引用任何「总量更省」说法。
+P08 | 20   | w1b2-refunded-evidence.md:14、:20-25、:43、:46-47、:51-54
+P08 | 9000 | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 980  | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 20   | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 9000 | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 980  | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 20   | Settled，分账 alice=9000 / bob=980 / broker=20（守恒 9000+980+20=10000）；assess_brief 7→4 string（Stack too deep），selector 0x3297eeb6
+P08 | 980  | Malicious→Refunded（misconduct 1→2）/ Fulfilled→Settled（bob +980 / broker +20，alice 49000→48000→48000）/ NotFulfilled→Refunded（计数不增）；实例守恒 77000 / 3920 / 80（sum 81000）
+P08 | 20   | Malicious→Refunded（misconduct 1→2）/ Fulfilled→Settled（bob +980 / broker +20，alice 49000→48000→48000）/ NotFulfilled→Refunded（计数不增）；实例守恒 77000 / 3920 / 80（sum 81000）
+P08 | 9000 | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 980  | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 20   | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 9000 | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 980  | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 20   | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 9000 | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 980  | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 20   | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 20   | (1) 9000 / 980 / 20 三数同现 = R1 正常流分账（w1b2-r1-demo-normal.md:29 原文 final state=Settled balances: alice=9000 bob=980 broker=20；:79 守恒式 9000 + 980 + 20 = 10000）。fee_bps=200，即
+P08 | 980  | (2) R2 Fulfilled 结算 = bob +980 / broker +20，alice 49000 → 48000（fund）→ 48000（verdict，refund_to_buyer=0 不再变动）——本行是 split check 与 G6B 表的字面值（w1b2-r2-adversarial.md:77-:78、:8
+P08 | 20   | (2) R2 Fulfilled 结算 = bob +980 / broker +20，alice 49000 → 48000（fund）→ 48000（verdict，refund_to_buyer=0 不再变动）——本行是 split check 与 G6B 表的字面值（w1b2-r2-adversarial.md:77-:78、:8
+P08 | 9000 | (3) 9000 作为独立数值出现在 R3 = funding 中间态：alice 10000 →（fund −1000）9000 →（退款 +1000）10000（w1b2-r3-e2-committee.md:98），与 R1 的 9000 语义不同。
+P08 | 9000 | (3) 9000 作为独立数值出现在 R3 = funding 中间态：alice 10000 →（fund −1000）9000 →（退款 +1000）10000（w1b2-r3-e2-committee.md:98），与 R1 的 9000 语义不同。
+P08 | 9000 | (3) 9000 作为独立数值出现在 R3 = funding 中间态：alice 10000 →（fund −1000）9000 →（退款 +1000）10000（w1b2-r3-e2-committee.md:98），与 R1 的 9000 语义不同。
+P08 | 20   | R0 行：tx 0x85e4e39b…0838 完整哈希见 w1b2-refunded-evidence.md:14/:24；status 0x1、block 104、gasUsed 35996（:20-:25）；余额 999002（block 103）→ 1000002（block 104）（:51-:54）；deadline_slot
+
+--- 汇总（页, token）= 次数 ---
+P03 20   x2
+P04 20   x2
+P05 9000 x7
+P07 20   x2
+P08 20   x10
+P08 9000 x8
+P08 980  x7
+
+# 复核结论：
+# (a) 9000 + 980 + 20「独立数值」同现的页集合 = {P8}（程序护栏 TRIPLE_PAGES=[8]），
+#     且 P8 的 (1) 段明确标注其为 R1 正常流分账，出处 w1b2-r1-demo-normal.md:29、:79。
+# (b) P5 的 9000 共 7 处，全部处于「10000 → 9000 → 10000 funding 中间态」或 T7 实录行
+#     （refund check OK: alice 10000 -> 9000 … -> 10000）语境；无一处写作结算值。
+# (c) 非 P5/P8 页只命中 token「20」，来源为引用行号（:20-:25、console:20-:23）或
+#     「20 笔交易」工作量表述；这些页无 9000、无 980。
+# (d) 全片无「R2 且 9000/980/20 三元组」断言表述：P8 notes 的 R2 反例句已改为
+#     「R2 对抗流档内没有这组三数（alice 侧是 49000/48000/47000 量级）」。
+
+================================================================================
+T8 收尾存证（只读；写入本文件之前的时点）
+================================================================================
+$ git log --oneline -1
+8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)
+$ git status --short
+ M workflow-out/_probe_cold_a0.md
+ M workflow-out/_probe_gate_a0.md
+ M workflow-out/_probe_impl_a0.md
+ M workflow-out/_probe_plan_r1_a0.md
+ M workflow-out/plan.md
+?? workflow-out/_implementation-prev-r1-backup.md
+?? workflow-out/_implementation-prev-r2-backup.md
+?? workflow-out/_implementation-prev-w1a-backup.md
+?? workflow-out/_plan-prev-r4d1-backup.md
+?? workflow-out/_plan-prev-r4d1-final-backup.md
+?? workflow-out/_pre-task-snapshot-r1.patch
+?? workflow-out/_pre-task-snapshot-r2.patch
+?? workflow-out/_pre-task-snapshot-r3.patch
+?? workflow-out/demo-script.md
+?? workflow-out/report/
+?? workflow-out/slides/
+$ git diff --name-only lyquid scripts docs experiments agents
+（空输出 —— 代码目录零改动）
+
+# 判据（GT-e）：HEAD 逐字不变（8d093b5）；相对 T1 基线，新增条目只有
+#   ?? workflow-out/slides/          （方案 §0 #3/#4/#5：源 + 产物 + README）
+#   ?? workflow-out/demo-script.md   （方案 §0 #6）
+# 本文件（?? workflow-out/_r4d2d3-verify-raw.txt）与工作流要求重写的
+# workflow-out/implementation.md 在写入后追加于 T8.2（见文件末尾）。
+# 未出现任何新的 M 条目；全程未执行 git add / commit / push / branch / tag / stash / restore。
+
+
+================================================================================
+T8.2 本文件与实现说明落盘后的收尾复核（只读；最终时点）
+================================================================================
+$ date "+%Y-%m-%d %H:%M:%S %z"
+2026-10-30 22:33:40 +0800
+
+$ git log --oneline -1
+8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)
+$ git status --short
+ M workflow-out/_probe_cold_a0.md
+ M workflow-out/_probe_gate_a0.md
+ M workflow-out/_probe_impl_a0.md
+ M workflow-out/_probe_plan_r1_a0.md
+ M workflow-out/implementation.md
+ M workflow-out/plan.md
+?? workflow-out/_implementation-prev-r1-backup.md
+?? workflow-out/_implementation-prev-r2-backup.md
+?? workflow-out/_implementation-prev-w1a-backup.md
+?? workflow-out/_plan-prev-r4d1-backup.md
+?? workflow-out/_plan-prev-r4d1-final-backup.md
+?? workflow-out/_pre-task-snapshot-r1.patch
+?? workflow-out/_pre-task-snapshot-r2.patch
+?? workflow-out/_pre-task-snapshot-r3.patch
+?? workflow-out/_r4d2d3-verify-raw.txt
+?? workflow-out/demo-script.md
+?? workflow-out/report/
+?? workflow-out/slides/
+$ git diff --name-only lyquid scripts docs experiments agents
+（以上空输出 = 代码目录零改动）
+
+$ md5sum workflow-out/slides/build_slides.py workflow-out/slides/trustbridge-final-slides.pptx workflow-out/slides/README.md workflow-out/demo-script.md workflow-out/implementation.md
+c236677be0ab967998f0d032d47222f2 *workflow-out/slides/build_slides.py
+47bf061795406ea81033192e3c9788b8 *workflow-out/slides/trustbridge-final-slides.pptx
+3809e1202c6c02cc16a3ad43c80626e6 *workflow-out/slides/README.md
+3f6848490f55d126db290671d5074fad *workflow-out/demo-script.md
+275b338e2d504eaa033111839142cec5 *workflow-out/implementation.md
+
+# 与 T1 基线比对：工作树条目新增 4 条 ——
+#   ?? workflow-out/slides/            （§0 #3/#4/#5）
+#   ?? workflow-out/demo-script.md     （§0 #6）
+#   ?? workflow-out/_r4d2d3-verify-raw.txt（§0 #7，本文件）
+#   M  workflow-out/implementation.md  （工作流约定的实现说明重写，偏离 D1）
+# 其余 14 条既有条目（5 M + 9 ??）逐字未动；HEAD 逐字仍 8d093b5；全程零 git 写操作。
+
+# 指纹说明：上表 md5 为交付件（slides/ 三件 + demo-script.md）与实现说明在该时点的实跑值。
+# 本文件（verify-raw）为追加型实录，其 md5 随追加变化，故不写死；implementation.md 随后又对 §1 作了修订
+# （md5 随之变化）。对外交付指纹以 slides/ 三件 + demo-script.md 为准。
+
+================================================================================
+T7-7 补充：分镜表列出的两条非代码块预期输出（S1 容器名 / S3 FLOW banner）
+================================================================================
+$ grep -nF -- 'FLOW 1 — normal: assess -> escrow -> deliver -> settle' workflow-out/_r1-demo-normal-raw.txt
+3:  FLOW 1 — normal: assess -> escrow -> deliver -> settle
+$ for n in multi-tools multi-node1-1 multi-node2-1 multi-node3-1 multi-node4-1 multi-registry-1 multi-anvil-1; do grep -cF -- "$n" workflow-out/_r3-t4-precheck-raw.txt; done
+multi-tools        hits=2
+multi-node1-1      hits=1
+multi-node2-1      hits=1
+multi-node3-1      hits=1
+multi-node4-1      hits=1
+multi-registry-1   hits=1
+multi-anvil-1      hits=1
+
+# 判读：FLOW banner 命中 _r1-demo-normal-raw.txt:3（S3 预期首行）；7 个容器名在
+# _r3-t4-precheck-raw.txt 中各命中 ≥1 次（表头 :5 + 容器行 :6-:12）。
+
+================================================================================
+T8.3 交付指纹复算（T5/T6 之后对 slides/README.md 做了一处事实修正：LibreOffice 版本号）
+================================================================================
+$ md5sum workflow-out/slides/build_slides.py workflow-out/slides/trustbridge-final-slides.pptx workflow-out/slides/README.md workflow-out/demo-script.md
+c236677be0ab967998f0d032d47222f2 *workflow-out/slides/build_slides.py
+47bf061795406ea81033192e3c9788b8 *workflow-out/slides/trustbridge-final-slides.pptx
+91c6b7ed81e0b0c973200971e8a9ade9 *workflow-out/slides/README.md
+3f6848490f55d126db290671d5074fad *workflow-out/demo-script.md
+
+# 判读：build_slides.py / .pptx / demo-script.md 与 T5/T6 同值（未再改动）；README.md 因
+# 「LibreOffice 25.x → 26.8.1.1」事实修正而 md5 变化 —— 上表为**最终交付指纹**。
+
+================================================================================
+T9 仲裁修订：implementation.md 指针加「R3 版」限定 + 重建 + 复核（追加段；不改已有记录）
+================================================================================
+T9-0 重建与自检（指针限定语改动的唯一构建动作）
+$ python workflow-out/slides/build_slides.py
+OUTPUT=F:\canvus auto\downloads\202609CS5298\trustbridge\workflow-out\slides\trustbridge-final-slides.pptx
+BUILT_PAGES=12
+PAGES=12
+SLIDE_SIZE_IN=13.333 x 7.500 (16:9=True)
+NOTES_OK=True (empty=[])
+KEY_HITS=23/23 (MIN=15)
+MISSING=[]
+TRIPLE_PAGES=[8] (allowed=[8])
+P5_CHAIN=True ('10000 → 9000 → 10000')
+FONT_COVERAGE=UNIQUE_CHARS=630 MISSING_IN_MSYH=0 OK
+PAGE 01 len=649
+PAGE 02 len=1028
+PAGE 03 len=1763
+PAGE 04 len=1413
+PAGE 05 len=1766
+PAGE 06 len=1627
+PAGE 07 len=972
+PAGE 08 len=2128
+PAGE 09 len=2033
+PAGE 10 len=893
+PAGE 11 len=994
+PAGE 12 len=837
+SIZE_BYTES=81155
+BUILD_OK
+EXIT=0
+# 判读：页数 / notes / KEY_HITS / 三数口径护栏 / P5 退款链 / 字覆盖全部维持通过。
+# PAGE 03/09/11 的 len 与 SIZE_BYTES 因新增「R3 版…取回」限定语文本而增大，属预期。
+
+T9-① 交付树上的 S1 出处复核（现状 = R4-D2+D3 重写后的 implementation.md）
+$ grep -nF -- 'docker ps --format "{{.Names}} {{.Status}}"' workflow-out/implementation.md
+$ echo "rc=$?"
+rc=1
+# 判读：预期 rc=1（无输出）。上文 T7-1「S1 命令」执行时 implementation.md 尚为 R3 版
+# （当时命中 :443）；T8.2 才按工作流约定重写该文件（实现说明 §5-D1）。因此裸指针已失效，
+# 本轮把该出处改为「R3 版，git show 8d093b5:workflow-out/implementation.md 取回」限定形。
+
+T9-② 限定形复核（取回 R3 版后 grep）
+$ git show 8d093b5:workflow-out/implementation.md | grep -nF 'docker ps --format "{{.Names}} {{.Status}}"'
+443:- `docker ps --format "{{.Names}} {{.Status}}"` → 7 容器 Up（multi-tools / node1-4 / registry / anvil，13–14h）
+617:| T6.0 | `docker ps --format "{{.Names}} {{.Status}}"` | 7 容器 Up（16h） |
+$ echo "rc=$?"
+rc=0
+# 判读：命中 :443 与 :617（两者同取回源），与 demo-script 的出处标注（implementation.md:443
+# （R3 版…取回）与差异登记里的「同节 :617 同一取回源」）一致 → PASS。
+
+T9-③ 裸指针自查（三份自有交付物全文；判定 = 每处 implementation.md 提及须同行含「R3 版」或「取回」）
+$ python <bare-pointer checker>（规则同下注，输出逐行）
+[OK    ] workflow-out/demo-script.md:21  | **S1** | 终端 A：devnet 自检 | `docker ps --format "{{.Names}} {{.Status}}"`（形态出处 `implementation.md:443`（R3 版，`git show 8d093b5:workflow-out/i
+[OK    ] workflow-out/demo-script.md:55  `implementation.md:443`（R3 版，`git show 8d093b5:workflow-out/implementation.md` 取回））；输出与 `_r3-t4-precheck-raw.txt:5-:12` 同形（7 行 `Up`，
+[OK    ] workflow-out/demo-script.md:237  （D-T6-1 教训，见 `workflow-out/implementation.md` §7.3（R3 版，`git show 8d093b5:workflow-out/implementation.md` 取回）与操作手册 §2.1）。
+[OK    ] workflow-out/demo-script.md:267  | 1 | S1 命令形态 | 方案 §4.1 说「形态出处 `implementation.md` §7.2 T3.0」（R3 版，`git show 8d093b5:workflow-out/implementation.md` 取回）；实测该命令原文在 `implement
+[OK    ] workflow-out/slides/README.md:157  | 4 | implementation.md 指针 | 方案 §0 把 `implementation.md` 列为只读素材（R3 版） | 本轮按工作流约定重写了该文件（实现说明 §5-D1），裸指针会指向新文件 | P9（含 notes）/P3 notes 的指针统一加「R
+[OK    ] workflow-out/slides/README.md:176  | P9 | `misconduct`；`lib.rs:222` TODO(W4)；`_r2-adversarial-raw.txt:6` | §5「局限清单」 | `r3-t4-contrast-report.md:107、:212-221`；`implementation.m
+[OK    ] workflow-out/slides/build_slides.py:413  "组件与轮次对应（R3 版 implementation.md §2 同源，取回：git show 8d093b5:workflow-out/implementation.md）："
+[OK    ] workflow-out/slides/build_slides.py:687  "B3 线下用户测试未收集（三文档已备：docs/b3-user-test/；R3 版 implementation.md:603）",
+[OK    ] workflow-out/slides/build_slides.py:688  "对抗流 node 复跑未执行（R3 版 implementation.md:511；r3-t4-contrast-report.md:212-221）",
+[OK    ] workflow-out/slides/build_slides.py:690  "（r3-t4-contrast-report.md:212-221；R3 版 implementation.md:28）",
+[OK    ] workflow-out/slides/build_slides.py:701  dict(text="指针口径：implementation.md 已于 R4-D2+D3 重写，本页「R3 版」指针一律指 R3 版，"
+[OK    ] workflow-out/slides/build_slides.py:702  "以 git show 8d093b5:workflow-out/implementation.md 取回。",
+[OK    ] workflow-out/slides/build_slides.py:714  "（R3 版 implementation.md:603 文档交付行，git show 8d093b5:workflow-out/implementation.md 取回）。\n"
+[OK    ] workflow-out/slides/build_slides.py:715  "4) 对抗流 node 复跑：R3 授权面无链写实跑，留作后续（R3 版 implementation.md:511）；"
+[OK    ] workflow-out/slides/build_slides.py:718  "（R3 版 implementation.md:28 devnet 行；r3-t4-contrast-report.md:253 共同前提）。\n"
+[OK    ] workflow-out/slides/build_slides.py:723  "指针口径：implementation.md 已于 R4-D2+D3 重写（D1），本页所有 implementation.md 指针均指 R3 版，"
+[OK    ] workflow-out/slides/build_slides.py:724  "以 git show 8d093b5:workflow-out/implementation.md 取回；期末报告 PDF 封面引用的 :28-:31 与"
+[OK    ] workflow-out/slides/build_slides.py:783  "遗留：对抗流 node 复跑（R3 版 implementation.md:511）；Lyquid 侧跨单签名重放实验（无数据，"
+[OK    ] workflow-out/slides/build_slides.py:795  "遗留项两个：对抗流 node 复跑（R3 授权面无链写实跑，R3 版 implementation.md:511）；"
+
+MENTIONS_TOTAL=19  BARE_POINTERS=0
+# 注：检查器把每处 implementation.md 提及列一行；如上 MENTIONS_TOTAL=19、BARE_POINTERS=0。
+# report/README.md 与报告 PDF 按 plan.md:27 只读冻结不回改（其 :133 与封面 :28-:31 引用
+# 由实现说明 §0 的扩围说明覆盖）。
+
+T9-④ 重建后的交付指纹（最终值）
+$ md5sum workflow-out/slides/build_slides.py workflow-out/slides/trustbridge-final-slides.pptx workflow-out/slides/README.md workflow-out/demo-script.md
+25ccb29fdad6d5189c3edfcf7102fc59 *workflow-out/slides/build_slides.py
+a2495e35786d6c17a91341a61235af9b *workflow-out/slides/trustbridge-final-slides.pptx
+3f742722007c03ccff7f38126ddb3b69 *workflow-out/slides/README.md
+cd78c6471b4bfe55e5d92b5a97b34bb7 *workflow-out/demo-script.md
+$ ls -la workflow-out/slides/build_slides.py workflow-out/slides/trustbridge-final-slides.pptx workflow-out/slides/README.md workflow-out/demo-script.md
+-rw-r--r-- 1 lenovo 197121 25555 Oct 30 22:51 workflow-out/demo-script.md
+-rw-r--r-- 1 lenovo 197121 14741 Oct 30 22:52 workflow-out/slides/README.md
+-rwxr-xr-x 1 lenovo 197121 50445 Oct 30 22:51 workflow-out/slides/build_slides.py
+-rw-r--r-- 1 lenovo 197121 81155 Oct 30 22:51 workflow-out/slides/trustbridge-final-slides.pptx
+
+# 判读：四件均为修订后最终态（build_slides.py / .pptx 由 T9-0 重建产生；README 因 §2/§7
+# 与差异登记更新、demo-script 因指针限定语更新）。.pptx 含时间戳，重建即变。

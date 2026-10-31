@@ -1,700 +1,428 @@
-# R3 实现说明（编码员，2026-10-30）
+# R4-D4 实现说明（编码员，2026-10-30）
 
-> 方案：`workflow-out/plan.md`（独立终裁官定稿；§0 冻结条款 1–6 = 编码基线，正文带
-> 「仲裁 R1#x/R2#x」的条款全部保留）。执行基线 = 交付前工作树（含 R1/R2 **未提交**
-> 改动，**零回退**）。
-> 本文件按轮重建；R2 版已原样备份为 `_implementation-prev-r2-backup.md`
-> （md5 `ce21660c59b7d28c140474f8d5c78bcf`，自保 artifact，不入方案清单）。
-> **分节纪律**：§1 = R1/R2 已审改动（引用 `_commit-plan.md`，不重述，本轮零回退）；
-> **§2 = R3 新增改动（审查焦点）**；§3 门禁总表（R3 口径 + 本轮实际执行状态）；
-> §4 命令与输出摘要（全部实跑）；§5 偏离与事实修正；§6 未尽清单。
+> 方案：`workflow-out/plan.md`（R4-D4，2026-10-30，审查通过版；下文「§x」均指该文件）。
+> 本轮任务 = **纯文档收尾**：产出 `workflow-out/_submission-plan.md` 一份
+> （ZIP 内容清单 + 全量交叉复核 a/b/c/d + 人工待办清单），**不产生任何链上证据、不改代码目录**。
+> 纪律：**零 git 写**（全程只读 `git log/status/diff/ls-files/show/rev-list/check-ignore`）；
+> **只登记不修改**（复核发现的不一致全部落 `_submission-plan.md` §2.e，未改动 R0–R3/R4-D1/D2/D3 产物）。
+> 复核与清单的每条结论均为**本轮实跑**，命令与输出逐字入档于 `_submission-plan.md` §2/§4。
 >
-> **本轮任务边界（如实声明）**：本任务 = **代码改动 + 本文件**（即 T2 的写码部分）。
-> T1 平台探针梯子、T3 E2 演示实录、T4 对照实验跑数、T5 B3 文档、T6 回归收尾 **不在
-> 本任务内**；§3 对它们一律标「未执行」，**不预填任何运行结果**。已实跑的是构建/静态
-> 类验证：容器 `cargo check`、`forge build`、`py_compile`、sim 逐字 diff、冻结 md5、
-> 恢复快照可逆性。
+> **本文件按工作流约定重写（先例：R4-D2+D3 的 D1，见 `git show 8d093b5:workflow-out/implementation.md`
+> §5-D1）**。上一版为 **R4-D2+D3 实现说明**（208 行，md5 `b421a1997fdfd160219a4789cf934278`），
+> 该版本**未入库**（`git status` 为 ` M`、不在 HEAD），**无法由 git 取回**，故本轮改写前先 `cp` 到
+> `%TEMP%` 并**逐字保留于本文件附录 A**（md5 复核见 §4-T1）。该改写不在方案 §0 清单内，作为偏离项
+> 登记于 §5-D1。
 
 ---
 
-## 0. 基线、环境与恢复凭据
+## 0. 基线与环境（本轮实跑）
 
-| 项 | 值 / 证据（本轮实跑，见 §4） |
-|---|---|
-| HEAD | `dc78d2f`（W1-B2 收尾提交） |
-| 工作树 | R1/R2 未提交改动 + R3 改动（3 个 M 源文件 + 1 个新模块 + experiments/ + 文档） |
-| 冻结基线 | `_r2-t0-frozen-baseline.txt`；本轮复核 `md5sum` 四文件 **全 OK**（types/core/committee/assessor） |
-| 冻结门 | `git diff --stat lyquid/src/{types,core,committee}.rs` **空**；`assessor.rs` 对 HEAD 仍 `5 0`（R1 已审，持续在场，严禁回退） |
-| devnet | `docker ps`：7 容器 Up（multi-tools / node1-4 / registry / anvil） |
-| 宿主 | Python 3.14.5（`python --version`）；Git Bash |
-| 容器工具链 | cast/forge **1.7.1**（`cast --version` / `forge --version`）；jq、python3 在位 |
-| selector（实取） | `cast sig`：`e2_arm(string)`=0x8b7acf91、`e2_run_verdict_round()`=0x368e198c、`e2_net_config()`=0x2b5d6a4a、`e2_configure(bytes32[],uint16)`=0xcd9cc3c8（仅存档，不入 `_ABI`） |
-| NodeID ×4（实取） | `get_node_ids()`：node1..4 的 NodeID 显示串 + bytes32，**与 S2 §1 逐字节一致**（如 node1 `0xa9373057…98fe`） |
-| TARGET 形态 | `shaker to-hex Lyquid-tldda6zq…` → `0x9aC6307B3019C01d2878911E285efFDD2ACdcAf9`（≠ R2 合约 `0xFD6F…c351`）——只读命令实测，仅作形态证据 |
-| 恢复凭据 | `workflow-out/_pre-task-snapshot-r3.patch`（51667 bytes / 19 hunks，仲裁修订后重生成；真实语义见 §5-1；逆向可 apply 校验通过） |
-
-## 1. R1/R2 已审改动（本轮零回退）
-
-| 文件 | R1/R2 内容（提交组） | R3 处置 |
+| 项 | 值 | 取得方式 |
 |---|---|---|
-| `lyquid/src/lib.rs` | `assess_brief` 7→4 string（C1）；`open_dispute`/`apply_committee_verdict` eth 导出 + 扁平 wire + apply_verdict println（C5） | **同文件追加** R3 改动（§2.1）；R1/R2 段落逐字保留（只更新指向新 helper 的注记） |
-| `lyquid/src/assessor.rs` | `DealBrief` derive（C1，对 HEAD `+5`） | **零触碰**（md5 = T0 基线；在场要求不变） |
-| `agents/common/rpc.py` | 角色表/nudge/discover/assess（C2）；`_ABI` 新行 + 编解码器两处修正（C6） | **同文件追加** R3 面（§2.3）；R2 修正逐字保留 |
-| `scripts/demo.py` | node 身份/发送方矩阵、读回重试、对抗流上链（C2/C6） | **同文件追加** `flow_committee` 与 `--instance`（§2.4）；`--flow all` 序列与 sim 路径零改动 |
-| `scripts/keeper.py` | `--deals` 可选 + `--nudge`（C2） | **零改动** |
-| `README.md` | SPIKE W1-4 移除（C3） | **零改动**（方案默认不动 README；状态行更新属可选偏离，未做） |
-| `workflow-out/plan.md` | 本方案 | 零改动 |
+| HEAD（开工） | `8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)` | `git log --oneline -1` |
+| 工作树（开工） | **19 条**（6 `M` + 13 `??`；逐条见 `_submission-plan.md` §5） | `git status --short` / `git status --porcelain \| wc -l` |
+| Python | 3.14.5 | `python --version` |
+| pypdf / python-pptx | **6.19.0 / 1.0.2** | `python -c "import pypdf,pptx; print(pypdf.__version__, pptx.__version__)"` |
+| 本机 grep | ugrep 7.8.4（`-F` 固定串语义；Windows 上输出 CRLF） | `grep --version` |
+| PowerShell | 5.1.26100.9711（`Compress-Archive`/`Expand-Archive`/`Get-FileHash` 可用） | `powershell -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'` |
+| tar | GNU tar 1.35（`F:\Git\usr\bin\tar.exe`） | `tar --version`（PowerShell 内同源） |
+| 不可用工具 | **无 `7z` / 无 `zip` / 无 `pwsh`**（`command -v` 均 rc=1） | `command -v 7z \| zip \| pwsh` |
+| 仓库体积提示 | `lyquid/` = **1.3G**（含 `lyquid/target`，已 gitignore） | `du -sh lyquid`；ZIP 命令据此改用 `git archive`（§3.1.2） |
 
-## 2. R3 新增改动（逐文件，审查焦点）
-
-### 2.1 `lyquid/src/lib.rs`（6 处）
-
-1. **模块头 R3 段**（lib.rs:49-58）：路线② 定位（`committee_certified` = 认证回调接线）、
-   helper 单点、`e2_armed_deal` 的共识传递、**「cert 门控的资金路径，不是 probe 类
-   SPIKE 例外」**、指向模块头 E2 门禁表。
-2. **`state!` 两字段**（lib.rs:119/124）：
-   - `network oracle cert_verdict;`（E2 认证主题；先例 `cert_probe` lib.rs:110，
-     price-feed:167 声明形态；子模块不能自带 `state!`）；
-   - `network e2_armed_deal: String = String::new();`（arming：共识持久、全节点可见；
-     未 arm = 空串，propose fail-closed）。
-3. **模块声明**（lib.rs:67）：`pub mod committee_certified;`。
-4. **ACCESS_MATRIX 审计面注记**（lib.rs:193-194，一行指向）：certified 回调不入矩阵
-   （cert 即认证、origin=ZERO 过不了地址门）；门禁台账见模块头 E2 表。**矩阵本体零增删**
-   （12 条条目不变，仍保持「每行一个 require 地址门」单点语义）。
-5. **通道注记块 R3 段**（lib.rs:264-270）：e2_configure = cast send（编码器零扩展，
-   终裁条款 1）；e2_arm/e2_net_config = NodeClient eth 收发；e2_run_verdict_round =
-   cast call（严禁 cast send）。
-6. **行为保持重构（仲裁 R1#3 / 风险 R7）**：
-   - `apply_committee_verdict`（lib.rs:520）保留扁平 wire `(string,uint8,string[])` +
-     `require(Access::Committee)` + caller∈signers 检查，其后**整段**改为
-     `apply_cert_and_payout(state, deal_id, cert)`；
-   - 新增 `pub(crate) fn apply_cert_and_payout`（lib.rs:746）：**成员/阈值读取 →
-     evidence 读取 → into_domain → misconduct 镜像桥接 → core::apply_verdict → 写回 →
-     apply_payout → println 视图**，逐字搬移（含注释）。`pub(crate)` 是跨模块可见性的
-     最小化（方案写「私有 helper」，模块外不可见、方法面不变，见 §5-3）。
-   - 行为保持判据 = G2 sim 零回退（本轮已证 IDENTICAL）+ G3 对抗流复跑（T3，未执行）。
-
-### 2.2 `lyquid/src/committee_certified.rs`（新建，433 行）
-
-顶层壳模块（不入 `probe/`：该目录注记明言 W1-B1 SPIKE、W2 移除，`probe/mod.rs:17-18`）。
-**E2 门禁台账在模块头**（:28 起，7 方法 × 面 × 实际门 × 是否触资金）。
-
-| 方法 | 行 | 属性 / 面 | 实现要点 |
-|---|---|---|---|
-| `e2_configure` | :113 | `network(export=eth, eth_guard=creator)` | 镜像 `probe_configure`，落 `cert_verdict` staging；额外 fail-closed：空委员会/`threshold==0` 拒绝（§5-4） |
-| `e2_arm` | :161 | `network(export=eth, eth_guard=creator)` | 写 network `e2_armed_deal`；空串拒绝；println 回显（仅 transcript 佐证） |
-| `e2_net_config` | :192 | `network(export=eth)`，**`ctx: &_` 只读形** | JSON dump：`armed_deal` + current/staging(threshold,committee,epoch) + `get_epoch` + dest(epoch,change_count)；`fetch_oracle_info("cert_verdict",…)` 口径。**签名与返回类型：`pub fn e2_net_config(ctx: &_) -> LyquidResult<String>`，`_ABI` 返回面 = `string`——属新增 R3 面、非偏离**（终裁条款 2；先例 deal_info）。只读形理由见 §5-2 |
-| `propose` | :239 | `instance(group = oracle::two_phase::cert_verdict)`（**字面名**） | 读 network `e2_armed_deal` + `evidence_log` + `deals`；`committee::check_evidence_shape` 派生 verdict（0/1）；fail-closed：未 arm/无 deal/非 Disputed → Err |
-| `aggregate` | :289 | `instance(group = oracle::two_phase::cert_verdict)`（**字面名**） | `inputs < avg_num` → None；**提案不一致 → None（拒证）**；无可解码提案 → None；一致 → `CertifiedCallParams{ origin: ZERO, method: "committee_verdict_certified", input: encode_by_fields!(deal_id, verdict_code), target }` |
-| `committee_verdict_certified` | :355 | `network(group = oracle::certified::cert_verdict::two_phase)` | `ctx.cert.signers`（RAW u32）→ `ctx.signer_node_id` 逐节点映射为 NodeID 串（未映射者剔除，不猜身份）→ `CommitteeCertWire` → **`crate::apply_cert_and_payout`**。**这是 cert 门控的资金路径**（共享 helper → `apply_payout`（lib.rs:712）→ `credit`（lib.rs:688）真实结算）；**不是** probe 类「SPIKE 例外/非生产面」（probe 零资金且 W2 移除） |
-| `e2_run_verdict_round` | :401 | `instance(export = eth)` | 镜像 `probe_run_round`；`E2_AVG_NUM = 4`（编码期常量，:91）；`propose_and_certify` + `submit_certified_call!`；返回 false = 未激活/拒证 |
-
-设计要点（与方案逐条对应）：
-- **arming 决策**（§3.2-B）：init 只携带 price-feed 已证的 `avg_num`/`target`，待裁对象走
-  共识状态 → 规避「init 第三字段不可解码」风险 R2；
-- **每节点独立检视**（§3.2-C）：verdict 由链上证据派生（shape 成立=0，不成立=1），非脚本喂值；
-- **cert 门禁**（§3.2-E）：认证回调 origin=ZERO，地址门必然 fail-closed；实质门禁
-  = `core::validate_cert` 四查（成员/去重/阈值/evidence_root），`committee_members` 中配置的
-  正是真实 NodeID 串 → 伪造 signers 过不了成员检查；
-- **只读边界**：本模块只读 escrow 状态，唯一 escrow 写路径是回调经 helper 的裁决结算。
-
-### 2.3 `agents/common/rpc.py`（+约 270 行）
-
-1. **模块 docstring** R3 段（:37-46）：三条新面（get_node_ids / docker_exec(_cast) /
-   `_ABI` 三行）与「e2_configure 无此行」的口径。
-2. **`_ABI` 三行**（:148-150，selector 容器内 `cast sig` 实取冻结）：
-   `e2_arm(string)`→`8b7acf91` bool；`e2_run_verdict_round()`→`368e198c` bool；
-   `e2_net_config()`→`2b5d6a4a` **string**。**e2_configure 不入表**（排除注记 :158-162）。
-3. **编码器覆盖注记**（:188-190）：「仍无 bytes32/bytes32[]（e2_configure 走 cast 通道，
-   编码器零扩展 = 终裁冻结条款 1）」。**编码器零改动**（`_enc_value`/`_is_dynamic`/
-   `_decode_ret` 逐字未动）。
-4. **容器通道助手**（:282-413）：`docker_exec(*argv, timeout, check)`（`MSYS_NO_PATHCONV=1`
-   子进程、文本捕获、失败抛原文；**超时语义**：`check=False` 时把 `TimeoutExpired` 转成
-   `CompletedProcess(rc=124, stdout=<已捕获输出>)`——`shaker console` 是流式命令，与宿主
-   `timeout 60 docker exec …` 先例同语义；`check=True` 则抛 RuntimeError）、
-   `docker_exec_cast(*args)`、`_cast_bool`、
-   `shaker_to_hex(instance)`、`shaker_console(instance, endpoint=ws://node1:10087/ws)`
-   （check=False：`timeout` 收尾 rc=124 属正常）。
-5. **四端点 NodeID**（:364-404）：`node_id_to_bytes32`（demo.sh:199-212 换算段镜像，
-   35 字节校验）与 `get_node_ids()`（宿主 urllib POST GetNodeInfo ×4；任一端口不可达即抛，
-   fail-closed）。
-6. **NodeClient R3 包装**（:660-750）：`e2_arm`（`_send`）、`e2_net_config`（`_view` 解码
-   JSON）、`e2_configure_cast`（cast send，字节数组 + anvil#0 钥）、
-   `e2_run_verdict_round`（**cast call**）、`oracle_advance_epoch`/`oracle_finalize_epoch`/
-   `oracle_dest_epoch_info`/`oracle_dest_epoch`（平台内置，占 cast call 通道）。
-   常量：`NODE_PORTS=(10087,11087,12087,13087)`、`CONTAINER=multi-tools`、
-   `DEFAULT_RPC_URL=http://node1:10087/api`、`ANVIL0_KEY`（devnet 公开确定性密钥，
-   仅出现在容器 cast send 命令行；docstring 的「Python 侧从不持有私钥」仍描述 eth JSON-RPC 写通道）。
-
-### 2.4 `scripts/demo.py`（+约 270 行）
-
-1. **`flow_committee`（:552-717，node-only）**：按 plan §3.6 的 1–7 步——
-   env 断言（docker/cast 可用 + **TARGET = `shaker to-hex <实例名>`，断言非零且
-   ≠ `--contract`**，:583 区）→ `get_node_ids()` ×4 → **自身**发
-   `committee_config(NodeID×4, 4)`（:595，在断言之后）+ `e2_configure_cast(bytes32×4, 4)`
-   （cast send）→ `advance`(cast call) → `_wait_dest_epoch`（dest 面轮询，P5）→
-   `finalize`(cast call) → `e2_net_config` 打印 → 争议单（faucet + `require_funds` +
-   create/fund + 无交付 + dispute）→ `e2_arm` **一次**（:645）+ 读回纪律（见下）→
-   `e2_run_verdict_round()` **node1 单次（cast call）** → 终态读回纪律（见下）+
-   余额勾稽（alice 净 0、bob/broker 不变）+ console 取证段（**取证源 node1**，
-   grep `e2_configure/e2_net_config/e2_arm/e2_propose/e2_aggregate/e2_run_verdict_round/
-   committee_verdict_certified/apply_verdict` 行）+ 终态摘要。
-   sim 调用即 `SystemExit`（明确报错）；未给 `--instance` 亦 `SystemExit`（fail-closed）。
-2. **`wait_for(node, predicate, timeout_s, interval_s, *, what)`（:147，仲裁修订 3）**：
-   读回轮询 helper，**间隔递增 1s→2s→4s（cap 4s）**（R5 口径：内层 certified call 晚块
-   上链 + 4 节点 validate 轮有耗时，固定 0.4s×5 的 `READ_BACK_ATTEMPTS` 不够）。
-   `predicate()` 返回 `(done, value)`，可抛异常立即 abort；超时 RuntimeError 带 last value
-   并注明「still pending, not a mismatch」——**pending 与硬失配两类失败语义可区分**。
-   两处调用：
-   - **arm 读回**（:645-662）：记 `pre_arm` → `e2_arm` 一次 → 轮询 `e2_net_config`
-     至 `armed_deal == deal_id`（预算 15s）；空/仍等于 `pre_arm` = pending 继续等；
-     第三种值 = 硬失配**立即 abort**；**绝不重复 `e2_arm`**（plan §3.6-5「一次」）。
-   - **终态**（:675-687）：轮询 `deal_info` 至 `Refunded`（预算 30s，覆盖 certified call
-     晚块 + 4 节点 validate 轮）；停在 `Disputed` = pending 继续等；其他终态（如
-     `Settled`）或超时才 abort；**绝不重触发 `run_round`**（单次纪律不变）。
-3. **`--instance` 参数**（:730）与常量 `DEFAULT_INSTANCE = ""`（:87）：
-   **T3 deploy 实录回填点**（plan §0-#4/§3.6-7；形态先例 `_r1-deploy-raw.txt:423-424`）。
-   回填前 committee 流 fail-closed。
-4. **`--flow` choices 增 "committee"**（:733）；`flows` 字典增 `committee`（:768）；
-   **`--flow all` 序列仍为 `["normal","timeout","adversarial"]`**（:769-773，committee 带
-   oracle 配置/activation 副作用，不进 all——G2 逐字门前提）。
-5. **main() fail-closed 门控（:764-767，仲裁修订 1）**：默认（地址制）
-   `committee_config` 由 `if args.flow != "committee":` 包住——`--flow committee` 跳过，
-   改由 `flow_committee` 在 env/TARGET 断言**之后**自置 NodeID 制成员/阈值（plan
-   §3.6「先断言后写」序；已核 flow_committee 不依赖该地址制集）。`FakeNode.committee_config`
-   静默，故 sim 字面零变化（`--flow all` 仍走本行；`--flow committee --sim` 仍在
-   :566-568 退出——node-only 检查在 `--instance` 检查之前）。修复前旧序会在 `--instance` 校验前先发一笔 committee_config tx
-   （见 §5-12 的勘误与重录实录）。
-6. 常量：`E2_TOPIC="cert_verdict"`、`E2_THRESHOLD=4`（:81；阈值是调用参数，改值不需重部署；
-   `avg_num` 才是编码期常量）。
-
-### 2.5 `experiments/evm-contrast/`（新建 3 文件，**不在 lyquid/ 冻结树内**）
-
-- **`Escrow.sol`（407 行）**：纯 EVM 最小对照——建单/托管、notarize（msg.sender 自署）、
-  交付/完成、`claimTimeout`（block.timestamp）、`cancel`、`openDispute`、
-  `committeeConfig(address[],uint256)`（deployer 门）、
-  **`applyVerdict(uint256,uint8,bytes[])` = 自建 k-of-n ECRECOVER**（每 sig 对
-  `verdictDigest = keccak256(abi.encode(dealId, verdictCode, evidenceRoot))` 原始签名；
-  ecrecover ∈ 成员 + 去重 + ≥ threshold；EIP-2 low-s 防护）、
-  `evidenceRoot` = 顺序敏感 keccak 链折叠（含位置；语义对齐 core.rs:225-231，算法族不同）；
-  裁决效果 = Fulfilled→Settled 分账 / 其余→全额退款 / `code>=2` → misconduct+1。
-  数据采集面：`dealInfo/rolesOf/amountOf/stateOf/deadline/evidenceCount/committeeSize`。
-  诚实边界写在合约头注释（委员会由 deployer 地址表承载、签名聚合自建、时间域差异）。
-- **`foundry.toml`**：`src="."`（Escrow.sol 在工程根，plan §0-#5 路径）、out/lib、
-  optimizer 开；**solc 不钉死**（容器实测解析到 Solc 0.8.37；pragma ^0.8.24）。
-- **`run-contrast.sh`（171 行）**：容器内 build→deploy→committeeConfig(4,3)→
-  normal→timeout（evm_increaseTime + evm_mine）→adversarial（3-of-4 签名 + NotFulfilled）
-  →负向对照（同一签名集重放到另一 deal 必须失败）→`gas-raw.txt`/`report.txt`；
-  头注给出宿主 `MSYS_NO_PATHCONV=1 docker cp` 引导命令（纪律同 lyquid 通道）。
-  角色 = anvil #0 broker/deployer、#1 buyer、#2 seller、#3 委员会成员。
-
-### 2.6 `workflow-out/_pre-task-snapshot-r3.patch`（新，51667 bytes / 19 hunks）
-
-**真实语义见 §5-1**：pre-task → R3 代码态的三文件 diff（lib.rs / rpc.py / demo.py），
-pre-task 侧逐文件 **md5 校验**（lib.rs `a8fdcf06…` 与 `_r2-deploy-raw.txt` 的 R2 部署 md5 一致；
-rpc.py `a9443231…`、demo.py `25bfeae5…` 与任务开始时宿主 `md5sum` 一致）。
-`git apply -R --check` 通过 = 可把本 patch 逆向还原到 R3 前代码态。
-
-## 3. 门禁总表（R3 口径 + 本轮执行状态）
-
-| 门 | 判据（方案） | 本轮状态 | 依据 |
-|---|---|---|---|
-| **G0** | 快照存在；四文件 md5 全 OK；sim 基线入档；40/40 入档；七容器 Up | **部分**：快照（语义见 §5-1）✓、md5 四 OK ✓、sim 基线 diff IDENTICAL ✓、七容器 ✓；**壳 40/40 未跑**（壳在仓库外、`lib.rs` 不挂载壳，非本任务） | §4-1/2/7 |
-| **G1** | T1 三份日志 + 分级结论表（L2/L1/L0） | **未执行**（T1 阶段） | — |
-| **G2** | 容器 `cargo check` 零 error（md5 勾稽在档）；40/40；sim diff **IDENTICAL**；冻结门（三文件 diff 空 + 四文件 md5 OK + assessor +5 在场） | **代码侧子集已过**：`cargo check --target wasm32-unknown-unknown` **rc=0**（`Finished`，33 warnings，新模块仅 7 条 `unused doc comment`＝与 probe 同类的宏注释告警）；sim `--flow all` 与 T0 基线 **IDENTICAL**；三文件 diff 空；四文件 md5 全 OK；assessor `5 0` 在场；**release cdylib 构建成功**（`trustbridge.wasm`）。**壳 40/40 未跑** | §4-3/4b/7/8 |
-| **G3** | committee transcript（console 取证源 node1、`--instance` 实例名、signers 映射真实节点、L2 判据 inputs=4+signers=4、TARGET 断言、arm 读回断言、终态 Refunded、余额勾稽、对抗流复跑） | **未执行**（T3 阶段；`DEFAULT_INSTANCE` 待 T3 回填） | — |
-| **G4** | Escrow 部署收据 + 三流 + 四维数据 + 报告 | **未执行**（T4 阶段）；本轮仅 `forge build` 成功 + 脚本 `bash -n` | §4-6/9 |
-| **G5** | B3 三文档 + 命令与实录一致 | **已交付（R3-T5，2026-10-30）**：三文档在 `docs/b3-user-test/`（操作手册 / 通过判据 / 反馈收集表），命令与预期输出回填自 `_r3-t3-*` 归档实录，修复后新增行标「无已档实录」；**（原状态：未执行 / T5 阶段）** | §9、plan §3-T5.1–T5.3 |
-| **G6** | 回归三件套 + `_commit-plan` R3 组 + implementation.md 分节；**未执行任何 git commit** | **已跑（R3-T6，2026-10-30）**：壳 40/40（宿主通道 33+5+2）+ sim `--flow all` 与 T0 基线 IDENTICAL + 冻结门 4×OK；`_commit-plan.md` §6 R3 分组与覆盖表已增补；实现说明已合并（5.13 + §9）；**未执行任何 git commit/add/push**（全程）；**（原状态：部分 / 回归三件套待 T6）** | §9、`_r3-t6-regression-raw.txt` |
-
-## 4. 命令与输出摘要（本轮实跑，全部为构建/静态类验证）
-
-```
-# 1) 冻结文件 md5（对 _r2-t0-frozen-baseline.txt）
-$ md5sum lyquid/src/{types,core,committee,assessor}.rs
-f33e334a… *types.rs   4ae54a47… *core.rs   c5f660a1… *committee.rs   4df7cda6… *assessor.rs   → 全 OK
-$ git diff --stat lyquid/src/{types,core,committee}.rs   → 空
-$ git diff --numstat lyquid/src/assessor.rs              → 5  0（R1 在场）
-
-# 2) 环境
-$ docker ps        → 7 容器 Up（multi-tools/node1-4/registry/anvil）
-$ python --version → Python 3.14.5
-$ docker exec multi-tools cast --version  → cast Version: 1.7.1
-$ docker exec multi-tools forge --version → forge Version: 1.7.1
-
-# 3) selector 实取（容器内）
-$ for s in "e2_arm(string)" "e2_run_verdict_round()" "e2_net_config()" "e2_configure(bytes32[],uint16)"; do cast sig "$s"; done
-  → 0x8b7acf91 / 0x368e198c / 0x2b5d6a4a / 0xcd9cc3c8
-
-# 4) 新建模块 + lib.rs 的编译门（容器内，强制重编）
-$ MSYS_NO_PATHCONV=1 docker exec multi-tools rm -rf /tmp/tb-r3-check
-$ MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-r3-check
-$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-r3-check multi-tools sh -c "touch src/*.rs src/probe/*.rs && cargo check --target wasm32-unknown-unknown"
-  → Compiling trustbridge v0.1.0 … Finished dev profile in 27.95s（全新副本全量重编；增量复跑 1.4–1.8s）  （rc=0，零 error）
-  （唯一的 “error:” 文本 = ldk git checkout 内 lyquid-template 的 `{{project-name}}`
-   提示，R2 部署日志同款、非本 crate 编译错误，构建继续并成功）
-
-# 4b) release cdylib 构建（比 check 更严：含代码生成/链接/ABI 导出生成）
-$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-r3-build multi-tools sh -c "touch src/*.rs src/probe/*.rs && cargo build --release --target wasm32-unknown-unknown"
-  → Finished `release` profile [optimized] in 31.49s（rc=0，零 error）
-  → artifacts: trustbridge.wasm 1,085,891 B；libtrustbridge.rlib
-
-# 5) Python 静态门
-$ python -m py_compile agents/common/rpc.py scripts/demo.py           → OK
-$ python scripts/demo.py --selftest                                   → 7 PASS，SELFTEST OK
-$ python scripts/demo.py --sim --flow all > /tmp/r3-sim-after.txt
-$ diff -u workflow-out/_r2-t0-sim-baseline-raw.txt /tmp/r3-sim-after.txt → 无输出（IDENTICAL）
-$ python scripts/demo.py --sim --flow committee
-  → "[committee] node-only flow: FakeNode has no oracle certification round …"（rc=1）
-$ B0=$(python -c "from agents.common.rpc import NodeClient; print(NodeClient('http://127.0.0.1:10087', contract='0xFD6F…c351').block_number())")
-$ python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x0000000000000000000000000000000000000000 --flow committee
-  → "FLOW 4 — committee: 4-node oracle certification (route ②, E2)" +
-    "[committee] --instance <Lyquid-…> is required: shaker console / to-hex take the instance NAME …"
-  → rc=1
-$ B1=$(同上 block_number)      → block_before=318，block_after=318（**不变 = 零交易**）
-  （仲裁修订 1 修复后重录：跳过 main() 默认 committee_config，故 SystemExit 前无任何 tx；
-   修复前旧序会先发一笔 committee_config tx —— 见 §5-12）
-
-# 6) EVM 对照工程构建（容器内）
-$ MSYS_NO_PATHCONV=1 docker cp experiments/evm-contrast/. multi-tools:/tmp/tb-evm
-$ MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-evm multi-tools forge build
-  → Compiling 1 files with Solc 0.8.37 … Compiler run successful!
-  （仅 2 条 block-timestamp lint 告警——对照报告须把它写成「时间源信任差异」）
-
-# 7) 四端点 NodeID 与 bytes32（宿主直连，实跑）
-$ python -c "from agents.common import rpc; print(rpc.get_node_ids())"
-  node1 Node-ve3tav5… → 0xa9373057…98fe ; node2 → 0x4eca21e3…5d7b ;
-  node3 → 0xd15cb394…b9eb ; node4 → 0x7434b144…b0fe     （与 w1b1-s2-oracle.md §1 逐字节一致）
-
-# 8) TARGET 形态（只读命令）
-$ docker exec multi-tools shaker to-hex Lyquid-tldda6zq… → 0x9aC6307B…DCdcAf9（42 字符）
-
-# 9) 脚本语法
-$ bash -n experiments/evm-contrast/run-contrast.sh → BASH_SYNTAX_OK
-
-# 9b) 容器助手超时语义 + console 通道（实跑）
-$ python: docker_exec("sh","-c","echo hello; sleep 5", timeout=1.5, check=False)
-  → rc=124, stdout='hello\n', elapsed=1.53；同一命令 check=True → RuntimeError（含 stdout 原文）
-$ python: shaker_console("Lyquid-tldda6zq…", timeout=8.0)
-  → rc=124, elapsed=8.0, stdout 305 行（console 历史回放可达 → 取证段可用）
-$ python: shaker_to_hex("Lyquid-tldda6zq…") → 0x9aC6307B…DCdcAf9
-
-# 10) ABI 编解码面（纯本地）
-$ python: _ABI e2 三行 = 8b7acf91/368e198c/2b5d6a4a；_sig_types("e2_run_verdict_round()") = ()；
-  string 返回解码 round-trip = {"armed_deal":"deal-1",…}
-
-# 11) 恢复快照可逆性
-$ git apply -R --check -p1 workflow-out/_pre-task-snapshot-r3.patch → OK（19 hunks；仲裁修订后重生成）
-
-# 12) git 状态
-$ git log --oneline -1 → dc78d2f；全程未执行 git add/commit/push
-
-# 13) 仲裁修订后复跑（2026-10-30，本轮修订的验收）
-$ python -m py_compile agents/common/rpc.py scripts/demo.py            → OK
-$ python scripts/demo.py --selftest                                    → 7 PASS，SELFTEST OK
-$ python scripts/demo.py --sim --flow all … + diff 对 T0 基线          → IDENTICAL
-$ python scripts/demo.py --sim --flow committee                        → node-only SystemExit（rc=1）
-$ 无 --instance node 探针（§4-5 重录）                                  → rc=1，eth_blockNumber 318→318（零交易）
-$ wait_for 语义自检（importlib 载入 demo.py，纯本地 predicate，无网络/无链写）：
-  cadence  → gaps=[1.0, 2.0]s（再下一次 4.0，cap 4s），total=3.0s
-  pending  → timeout_s=1.5 精确在 1.5s 触发，消息含「still pending, not a mismatch」+ last={'state': 'Disputed'}
-  mismatch → predicate 抛错即 abort，elapsed=0.0s（不等满预算）
-$ git apply -R --check -p1 _pre-task-snapshot-r3.patch                 → OK（19 hunks）
-```
-
-## 5. 偏离与事实修正
-
-1. **`_pre-task-snapshot-r3.patch` 的语义（重要，如实登记）**：方案 §0-#15 要求「T0 工作树
-   快照 = `git diff` 全量」，而编码开始时工作树已含 **R1/R2 未提交改动**，且本任务在首次
-   编辑前**未能**落盘当时的 `git diff`（无从取得完整 pre-task 全量 diff：`_pre-task-snapshot-r2.patch`
-   只是 R2 开始时的状态，不是 R2 结束态）。替代件 = **pre-task → R3 代码态**的三文件 diff，
-   pre-task 侧逐文件按**已记录 md5** 逐字校验（lib.rs `a8fdcf064f2a5d472531f545b9eea42f` =
-   `_r2-deploy-raw.txt` 的 R2 部署 md5；rpc.py `a9443231…`、demo.py `25bfeae5…` = 任务开始时
-  宿主 `md5sum`）。用途相同（可逆还原 R3 前的代码态），覆盖面小于方案原意（不含
-  文档/README/keeper 等本轮未改文件）。
-2. **`e2_net_config` 的 ctx 用只读形（`ctx: &_`）**：由 `&mut _` 改为 `&_`（ImmutableNetworkContext）。
-   **不是冻结条款的偏离**——属性 `network(export = eth)`、ABI 签名 `e2_net_config()`、
-   返回类型 `LyquidResult<String>` 与 `_ABI` 返回面 `string` 全部照方案；改动的只是 Rust
-   形参可变性。理由：eth_call 读通道只路由**只读**方法（R2 实测 §5-4：可变 network 方法在
-   eth_call 上恒 `FuncNotFound`，`&_` getter 正常路由），而终裁条款 2 / §3.2-G 要求
-   arm 读回断言走 `NodeClient call("e2_net_config()")` —— 只读形是让该口径真实可用的必要
-   条件。已通过容器 `cargo check`（§4-4）。
-3. **helper 可见性**：`apply_cert_and_payout` 落 `pub(crate)`（方案写「私有 helper」）。
-   crate 内跨模块调用所需；对 crate 外不可见，方法清单/ABI/矩阵零变化。
-4. **新增 fail-closed 校验（两处，均为方案未禁止的实现细节）**：`e2_configure` 拒绝
-   `threshold==0`（probe_configure 只查空委员会）；`propose` 在 armed/存在性之外还要求
-   deal 处于 `Disputed`（台账已列该门）。二者只会把「必然失败」提前成显式错误，
-   不改变合法路径语义。
-5. **`e2_run_verdict_round` 的 `_ABI` 行与执行通道**：`_ABI` 行（`368e198c`/bool）按方案
-   要求落表，但 NodeClient 包装**只走 cast call**（docker_exec_cast），不经 `_send`/`_view`
-   —— 行本身承担 selector/签名面冻结与交叉核对（S2 通道纪律：cast send 内层静默丢失）。
-6. **`docker_exec_cast` 与 console/to-hex 的助手命名**：方案把 advance/finalize/e2_configure/
-   console 都归到 `docker_exec_cast()` 名下；实现拆为 `docker_exec_cast()`（cast 子命令）+
-   同族 `docker_exec()`（`shaker to-hex`/`shaker console` 这类非 cast 命令）。同一
-   `docker exec` 通道、同一 `MSYS_NO_PATHCONV=1` 纪律，行为等价。
-7. **`e2_configure` 的 cast send 形态**：`cast send <contract> "e2_configure(bytes32[],uint16)" "[…]" <th> --private-key <anvil#0> --rpc-url http://node1:10087/api`，与 S2
-   §2 probe_configure 同形；rpc.py 编码器**零扩展**、`_ABI` 无该行（终裁条款 1 的默认路径，
-   未走「扩编码器 + cast calldata 逐字节对照」的例外路径）。
-8. **sim `--flow all` 与全部 sim 路径零改动**：逐字 diff **IDENTICAL**（§4-5；新增代码只在
-   node-only `flow_committee` 与 rpc.py 新增函数内，且 `--flow all` 序列未变）。
-   仲裁修订后复跑仍 **IDENTICAL**（§4-13）。
-9. **`_implementation-prev-r2-backup.md`**：重建本文件前对 R2 版 implementation.md 的备份
-   （自保 artifact，与 `_implementation-prev-r1-backup.md` 同处置，不入方案清单）。
-10. **NEW：`Escrow.sol` 的 `dealInfo` 返回值拆分**：8 返回值 + storage 指针在默认编译管线
-    触发 solc `Stack too deep`（与 Lyquid 侧 solc 参数上限同族）；改为 4 返回值 + 独立
-    `rolesOf/amountOf` getter（**未启用 viaIR**）。属实现细节，数据采集面完整。
-11. **未执行任何 git commit / add / push**（全程；`_commit-plan.md` 未增补 R3 分组——见 §6-6）。
-12. **仲裁修订（2026-10-30 采纳，3 条；被驳回的意见未改）**：
-    (a) **main() fail-closed 门控**：默认（地址制）`committee_config` 现由
-    `if args.flow != "committee":` 包住（demo.py:764-767）。**事实修正**：修复前
-    `--node … --flow committee`（无 `--instance`）会在 `--instance` 校验前**先发一笔
-    committee_config tx**，因此本文件此前 §4-5 的「零网络调用」断言在修复前
-    **为假**；该句已按修复后行为**重录替换**（`eth_blockNumber` 318→318、rc=1，§4-5），
-    旧断言文字不再沿用。「先断言后写」序 = plan §3.6；`--flow all` 与 sim 字面零变化
-    （G2 复跑 IDENTICAL）。
-    (b) **读回纪律加固（T3 前）**：新增 `wait_for(node, predicate, timeout_s, interval_s,
-    *, what)`（demo.py:147，间隔递增 1s→2s→4s）；arm 读回（:645-662，预算 15s，
-    空/旧值=pending、第三值=硬失配立即 abort，**绝不重复 e2_arm**）与终态 Refunded
-    （:675-687，预算 30s，Disputed=pending、其他态/超时 abort，**绝不重触发 run_round**）
-    均改走该 helper；超时消息注明「still pending, not a mismatch」，与硬失配两语义可区分。
-    (c) `flow_committee` 在 env/TARGET 断言之后**自行**发 NodeID 制 `committee_config`
-    （:595），不再依赖 main() 的地址制集。
-
-### 5.13 R3 各阶段偏离总表（R3-T5+T6 合并；索引性质，原文不搬移、不删改）
-
-> 构成 = T2 期 §5 的 12 条 + T3 期 §7.3 的 2 条（D-T3-1/D-T3-2）+ T4 期 §8.4 的 7 条
-> （D-T4-1..7）= 21 条既有，加本轮新增 2 条（D-T5-1 / D-T6-1）= **23 条**。
-> 本表只做索引：编号 + 一句话 + 原文位置指针；原文段落全部保持原位。
-
-| # | 编号 | 一句话 | 原文位置 |
-|---|---|---|---|
-| 1 | §5-1 | `_pre-task-snapshot-r3.patch` 实为 pre-task→R3 三文件 diff（非全量快照），pre-task 侧按记录 md5 校验 | §5-1（:307-314） |
-| 2 | §5-2 | `e2_net_config` 用只读形 `ctx: &_`（让 eth_call 读通道可用），属性/ABI/返回类型照方案 | §5-2（:315-321） |
-| 3 | §5-3 | `apply_cert_and_payout` 落 `pub(crate)`（跨模块调用所需，crate 外不可见） | §5-3（:322-323） |
-| 4 | §5-4 | 两处新增 fail-closed 校验：`e2_configure` 拒绝 `threshold==0`、`propose` 要求 deal 处 `Disputed` | §5-4（:324-327） |
-| 5 | §5-5 | `e2_run_verdict_round` 的 `_ABI` 行只承担 selector/签名面冻结，执行只走 cast call | §5-5（:328-330） |
-| 6 | §5-6 | 容器助手拆为 `docker_exec_cast()` + 同族 `docker_exec()`（同一通道同一纪律） | §5-6（:331-334） |
-| 7 | §5-7 | `e2_configure` 的 cast send 形态；编码器零扩展、`_ABI` 无该行 | §5-7（:335-337） |
-| 8 | §5-8 | sim `--flow all` 与全部 sim 路径零改动（逐字 diff IDENTICAL） | §5-8（:338-340） |
-| 9 | §5-9 | `_implementation-prev-r2-backup.md` 为重建本文件前的自保备份（不入方案清单） | §5-9（:341-342） |
-| 10 | §5-10 | `Escrow.sol` 的 `dealInfo` 拆分返回值（避 solc Stack too deep），数据采集面完整 | §5-10（:343-345） |
-| 11 | §5-11 | 全程未执行任何 git commit / add / push | §5-11（:346） |
-| 12 | §5-12 | 仲裁修订 3 条：main() fail-closed 门控、`wait_for` 读回纪律、flow_committee 自置 NodeID 成员 | §5-12（:347-361） |
-| 13 | D-T3-1 | demo 余额断言的 stale baseline（faucet 后立即快照）——**已于 R3-T6 修复（行为修复，见 §9）** | §7.3-1（:479-484）；`w1b2-r3-e2-committee.md:106-121` |
-| 14 | D-T3-2 | deploy 日志首写被 `tee /dev/stderr` 截断；已重建并标注 `[RE-RUN]`/`[QUOTED]` | §7.3-2（:485-490） |
-| 15 | D-T4-1 | 同一对照实验跑了 3 次（canonical=run-3），作废轮产物另存留证 | §8.4（:570） |
-| 16 | D-T4-2 | 计划外新增 5 个留证件（基线 md5 快照 + 4 个作废产物） | §8.4（:571） |
-| 17 | D-T4-3 | T4.4 逐笔对拍改在容器内执行（宿主无 jq） | §8.4（:572） |
-| 18 | D-T4-4 | T4.5 三个 selector 未识别，如实登记不猜名 | §8.4（:573） |
-| 19 | D-T4-5 | plan 引用两处既有日志行号有偏差，报告按实际行号（:25 / :6） | §8.4（:574） |
-| 20 | D-T4-6 | 「委员会成员含买卖双方」是实跑事实，不是偏离；按事实表述 | §8.4（:575） |
-| 21 | D-T4-7 | T4.5 未做 Lyquid 侧跨单签名重放实验（不在 T4 范围） | §8.4（:576） |
-| 22 | **D-T5-1（新）** | 全案 §5 的「演示脚本.md」不在本任务三件之列：按任务陈述交付 操作手册/通过判据/反馈收集表；动线要点并入操作手册第④节 | 本轮新增；plan §1-9 / §4-#4 |
-| 23 | **D-T6-1（新）** | 壳 40/40 走**宿主通道**实跑通过（33+5+2），容器 fallback 未启用；规划期「宿主工具链损坏」前提在当前机器状态不成立 | 本轮新增；plan §1-5 / §5-R2；`_r3-t6-regression-raw.txt` T6.2 |
-
-## 6. 未尽清单（如实列出，均非本轮可完成项）
-
-| # | 项 | 状态 / 原因 | 去向 |
-|---|---|---|---|
-| 1 | T1 平台探针梯子（th2/th4 signers 聚合 + node2-4 通道面） | **未执行**（运行级，非本任务） | T1 |
-| 2 | T3 E2 演示（deploy 新实例、`--flow committee`、L2/L1/L0 判定、fallback 预登记执行、对抗流复跑） | **已执行（2026-10-30）→ 判级 L2**（`inputs=4` + `signers=4`）；`DEFAULT_INSTANCE` 已回填；对抗流 node 复跑仍顺延。详见 §7。**R3-T6 补记：对抗流 node 复跑仍未执行**（本轮授权面无链写实跑，计划见 §5-R7） | T3 → §7；对抗流复跑 → 后续/用户安排 |
-| 3 | T4 对照实验跑数（deploy/三流/gas）+ `w1b2-r3-evm-contrast.md` | **已执行（2026-10-30，R3-T4）→ 报告 + 四维数据在档**（`r3-t4-contrast-report.md`、§8）；原状态：未执行（仅 `forge build` 与 `bash -n` 通过） | T4 → §8 |
-| 4 | T5 B3 三文档 | **已交付（2026-10-30，R3-T5）→ 三文档在 `docs/b3-user-test/`**；原状态：未执行 | T5 → §9 |
-| 5 | T6 回归（壳 40/40 + sim diff + 冻结门复跑）与 `_commit-plan.md` R3 分组 | **已执行（2026-10-30，R3-T6）→ 壳 40/40（宿主通道 33+5+2）+ sim IDENTICAL + 冻结门 4×OK**；原状态：未执行（40/40 只读复跑属 T0/T6） | T6 → §9、`_r3-t6-regression-raw.txt` |
-| 6 | `_commit-plan.md` R3 主题分组增补 | **已完成（R3-T6）→ §6 R3-C1..C6 + 全覆盖表**；原状态：未做（属收尾交付项，见 §3-G6） | T6 → §9、`_commit-plan.md` §6 |
-| 7 | README 状态行更新 | **未做**（方案默认不动；可选偏离需单独登记） | 可选 |
-| 8 | Fulfilled 加分对照单（T3 可选项） | **未做** | T3 可选 |
-| 9 | 真实 LLM 端到端 | 仍无 `TB_LLM_*` 凭据（R2 结论） | W2'/W3 |
-| 10 | R9（forge/solc 复现性）、R11（lyquid 侧 gas 读取通道） | 未触发/未探（T4 才需要） | T4 |
-| 11 | L0 降级登记 | **未发生**：T3 首跑 console 判级 = L2（`inputs=4` + `signers=4`），无 L0/L1 分支。详见 §7 | T3 → §7 |
+未触发任何降级路径：方案 §6 的风险 3（pypdf/pptx 环境异常）未发生（§2.d 两条命令均实跑通过）。
 
 ---
 
-## 7. §R3-T3 执行实现说明（编码员，2026-10-30）——单次实跑 + 证据回填
+## 1. 逐文件改动（方案 §0 清单对照）
 
-> **性质与边界**：本任务 = R3-T3「E2 四节点委员会演示实跑 + §T3 回填」，方案 = `workflow-out/plan.md`。
-> 执行基线 = T2 交付态（HEAD `dc78d2f`）。**唯一代码面改动 = `scripts/demo.py:87` 一行常量回填**；
-> lyquid 源码零改动（`E2_AVG_NUM` 保持 4，无 L1 fallback）。
-> **结论 = L2 达成**：`e2_aggregate: agreed … from 4 input(s) (avg_num=4)` + `cert.signers RAW = [0, 1, 2, 3] (len=4)`
-> + 四条 signer→Node 映射。
+| # | 路径 | 动作 | 改动摘要 | 规模 |
+|---|---|---|---|---|
+| 1 | `workflow-out/_submission-plan.md` | **新建**（方案 §0-#3，唯一交付产物） | 五章：§1 ZIP 内容清单（1.1 三件 + 1.2 已入库代码面 103 文件逐文件 + 1.3 w1b2-* 13 份逐份 + 1.4 其余证据归组 + 1.5 在盘未入库 19 条）；§2 交叉复核（2.a 27×3 矩阵、2.b b1/b2/b3、2.c 15 条抽查、2.d 页数、2.e 不一致 8 条）；§3 人工待办五项（ZIP 命令 2 版 / 11-19 检查单 8 项 / B3 / demo 实拍 / 终裁记录五份）；§4 命令附录 C1–C10；§5 红线自查 | **779 行**（T7 `wc -l` 实跑，md5 `b24acb49e22ff9281ce9a3688daad0e3`；其后若仅有登记性追改，以复跑为准） |
+| 2 | `workflow-out/implementation.md` | **改写**（工作流约定；偏离项 D1） | 本文件；R4-D2+D3 原版 208 行**逐字保留于附录 A** | 本文件 |
+
+**只读引用（一字未改）**：`workflow-out/plan.md`（R4-D4 方案，规划期覆盖，非本轮写入）、
+`workflow-out/_plan-prev-r4d2d3-backup.md`（规划期备份）、`report/{README.md,build_report.py,
+trustbridge-final-report.pdf}`、`slides/{README.md,build_slides.py,trustbridge-final-slides.pptx}`、
+`demo-script.md`、`r3-t4-contrast-report.md`、`_r4d2d3-verify-raw.txt`、`w1b2-*` 13 份、
+`_r1-*`/`_r2-*`/`_r3-*` 原始日志、`docs/b3-user-test/` 三份、`_plan-prev-r2/r3/r3t4/r3t5t6/
+r4d1-final-backup.md`、`_commit-plan.md`。**零写入**：`lyquid/`、`scripts/`、`agents/`、
+`docs/`、`experiments/`、`README.md`（T7 `git status` 与 T0 逐条比对可证）。
+
+---
+
+## 2. `_submission-plan.md` 实现要点（方案 §5 章节规格逐节对照）
+
+| 方案 §5 要求的节 | 落点 | 实现摘要 |
+|---|---|---|
+| §0 头部 | 文件头引用块 | 方案出处（R4-D4 + 备份件）、生成日期 2026-10-30、基线 HEAD 存证（开工/收尾两次逐字 `8d093b5`）、纪律声明四条（零 git 写 / 只登记 / 全实跑 / 不生成 ZIP） |
+| §1.1 主交付三件 | §1.1 | PDF（12 页，md5 `18c90f03…`）、PPTX（12 页 16:9，md5 `a2495e35…`）、demo-script（8 镜 305s，md5 `cd78c647…`），各标规模 + 来源路径 + 入库状态（三件均未入库）；另列 7 件配套源文件/说明件 |
+| §1.2 已入库代码面 | §1.2 | 15 提交序列逐字 + 103 文件（95 A + 8 M）按 C1–C7/R3-C1–C6/归档/T7 **逐文件**分组 + `_commit-plan.md` 头部时点语义登记（E1） |
+| §1.3 证据索引 | §1.3 | w1b2-* **13 份逐份一行**：说明（文件头 / `report/README.md` §5）、对应原始日志（文档内引用实取）、规模、入库提交号（dc78d2f×6 / c31d701×3 / efc256c×3 / 8d093b5×1）；`_w1b2_t3_replay.py` 与两份 `_plan-prev-w1b2*` 备份单列（非证据件） |
+| §1.4 其余证据归组 | §1.4 | `_r1-*`(13) / `_r2-*`(15) / `_r3-*`(26) / `_r4d2d3-verify-raw.txt` / `w1a-*`(8) / `w1b1-*`(8) / `t0-*`(2) / `_w1b1-*`(3) 按组一行（计数 + 归属组号 + 入库状态，`ls`/`git ls-files` 实跑） |
+| §1.5 在盘未入库 | §1.5 | 19 条按 6 类归组（R4 产物 / 本轮新建 / 改写件 / 探针 / 备份 / patch），指向 §3.2 |
+| §2.a 命中矩阵 | §2.a | 报告 27/27（逐字复跑 `report/README.md:71`）、幻灯片 25/27（python-pptx 全文本，P6 六键全命中且命中页 = P6）、demo 19/27（`grep -cF`）；**27×3 三态矩阵** + 冲突扫描（地址/selector/大数字结构化抽取，结论 **0 冲突**）+ 未命中形态说明 + 可选修正建议 |
+| §2.b 索引齐套 | §2.b | b1 索引→盘 10/10 OK；b2 盘→索引 `comm -3` **DIFF_LINES=0**（13/13）；b3 引用原始日志 34/34 OK |
+| §2.c 抽查 15 条 | §2.c | 命令级 9（S2-①…④、S2 备路径、S3、S4、S5-①、S5-②）+ 输出级 6（S1 七行、deploy exit、S3 分账、S4 归因、S5-① 退款勾稽、S5-② 四签）；**15/15 命中**，另附可选 S1 命令源（HEAD `:443/:617`）实跑 |
+| §2.d 页数复验 | §2.d | `PAGES=12`、`SLIDES=12`、`NOTES_EMPTY=[]`（逐字） |
+| §2.e 不一致总表 | §2.e | E1–E8 逐条：位置 / 事实 / 与谁不一致 / 以 KEY_HITS 或 git 为准的建议 / 处置状态 =「仅登记，未修改」 |
+| §3.1 ZIP 命令 | §3.1 | 两条可复制 PowerShell 命令（3.1.1 显式清单 / 3.1.2 `git archive 8d093b5` + 叠加），附工具可用性实测与「勿整目录压 `lyquid/`（1.3G）」提示 |
+| §3.2 提交前检查单 | §3.2 | 8 项（R4 入库决策 / 冲突修正 / PDF-PPTX 终验 / demo 实拍 / B3 回收 / 终裁签认 / ZIP+md5 / git 动作），标「11/19 12:00 截止」与状态 |
+| §3.3 B3 安排 | §3.3 | 三份 481/144/123 行（`wc -l` 实跑）+ 当前状态（空白表单、无反馈，HEAD `implementation.md` §9.1 #6 口径）+ ≥3 天回收窗口建议 |
+| §3.4 demo 实拍 | §3.4 | S3 当轮新实例（`demo-script.md` §8-5/§3）、占位符、单次纪律、`MSYS_NO_PATHCONV=1`、截止/rc=124、预案 A/B、305s 与 180s 剪辑点 |
+| §3.5 终裁记录 | §3.5 | 五份位置（R2 `:279`、R3 `:9`、T4 `:4/:14`、T5T6 `:48/:73`、D1 `:139-:144/:146-:148`）`grep -n '终裁'` 实跑 + HEAD 版 `:347-:361`/`:663-:696` 只读取回核对结论 |
+| §4 命令附录 | §4 | C1–C10 逐字（KEY_HITS / 幻灯片提取 / demo 计数 / 两处结构化扫描 / b1-b3 / 15 条抽查 / 页数 / T1 采集 / 终裁定位） |
+| §5 红线自查 | §5 | 零 git 写前后存证、新增/覆盖文件 4 项、未修改声明、未跑项 5 项、复现性 |
+
+### 2.1 执行顺序（方案 §4 T0–T7 对照）
+
+| 阶段 | 方案要求 | 本轮实跑 |
+|---|---|---|
+| T0 | HEAD + `status` + 环境探测 | `8d093b5`；19 条；pypdf 6.19.0 / pptx 1.0.2 / Python 3.14.5 ✅ |
+| T1 | 已入库面采集 | 15 提交；103 文件（95 A + 8 M）；`ls-files workflow-out/` = 119；w1b2 16 命中（13 证据件 + 2 方案备份 + 1 脚本）✅ |
+| T2 | 三文档 27 键 | 27/27、25/27、19/27；P6 六键命中页 = P6 ✅ |
+| T3 | b1/b2/b3 | 10/10、13/13 DIFF=0、34/34 ✅ |
+| T4 | 15 条抽查 | 命令级 9/9 + 输出级 6/6 = 15/15 ✅ |
+| T5 | 可打开性 | `PAGES=12`、`SLIDES=12`、`NOTES_EMPTY=[]` ✅ |
+| T6 | 撰写交付文件 | `workflow-out/_submission-plan.md` ✅ |
+| T7 | 收尾存证 | HEAD 仍 `8d093b5`；见 §4-T7 / `_submission-plan.md` §5 ✅ |
+
+---
+
+## 3. 门禁总表（方案 §2 完成判据，逐项如实登记）
+
+| 门 | 判据 | 状态 | 依据 |
+|---|---|---|---|
+| GT-a | 27 键 × 3 文档矩阵完整（每格 命中/未命中/冲突），冲突项给「以 KEY_HITS 为准」建议且未改他阶段产物 | **满足** | `_submission-plan.md` §2.a 27 行矩阵；报告 27/27、幻灯片 25/27、demo 19/27、**冲突 0**；未命中 10 处均判「非冲突、无需改数」 |
+| GT-b | b1 索引所指文件 100% 在盘；b2 在盘 w1b2-* 100% 被索引（`comm` 双向零差异） | **满足** | §2.b：b1 10/10 OK、b2 `IDX=13 DISK=13 DIFF_LINES=0`、b3 34/34 OK |
+| GT-c | 抽查 15 条（命令级 ≥5，本方案定命令级 9 + 输出级 6），每条给实跑 `grep -nF` 命令与输出 | **满足** | §2.c：15/15 命中（命令级 9/9、输出级 6/6），逐条附命令与命中行号 |
+| GT-d | pypdf `PAGES=12`、python-pptx `SLIDES=12` 逐字输出在档 | **满足** | §2.d 两条命令逐字输出（另 `NOTES_EMPTY=[]`） |
+| GT-e | §3 五项人工待办齐全，ZIP 命令可直接复制执行 | **满足** | §3.1–§3.5 五项齐全；ZIP 命令两版可复制的 PowerShell 片段 + 工具可用性实测（3.1 未执行，见 §7） |
+| GT-f | 收尾 HEAD 仍 `8d093b5`；相对 T0 新增文件仅 `_submission-plan.md`（+规划期 2 项）；`git status` 差异逐条登记；零 `git add/commit/push` | **满足（1 项登记）** | HEAD 不变（§4-T7）；新增 `_submission-plan.md`；`plan.md`/`_plan-prev-r4d2d3-backup.md` 为规划期产物；另有 `implementation.md` 改写（D1，属既有 ` M` 条目、不新增 status 行），差异全部登记 |
+
+---
+
+## 4. 命令与输出摘要（全部本轮实跑；完整原文见 `_submission-plan.md` §2/§4）
+
+| 步 | 命令（逐字） | 关键输出 |
+|---|---|---|
+| T0 | `git log --oneline -1`；`git status --short`；`python -c "import pypdf,pptx; …"` | `8d093b5 …`；19 条；`6.19.0 1.0.2`；`Python 3.14.5` |
+| T1 | `git log --oneline dc78d2f..HEAD`；`git rev-list --count`；`git diff --name-status dc78d2f..HEAD`；`git ls-files workflow-out/`；逐 w1b2 `git log -1 -- <f>`；逐提交 `git show --name-status` | 15 提交；103 文件（95 A + 8 M）；119 tracked；w1b2 13 份提交号 dc78d2f/c31d701/efc256c/8d093b5 |
+| T2-a1 | 报告 KEY_HITS 一行 `python -c`（`report/README.md:71` 逐字） | `KEY_HITS=27/27` / `MISSING=[]` / `RC=0` |
+| T2-a2 | 幻灯片 12 页递归提取（正文 + 表格 + notes）27 键判定 | `SLIDES=12` / `NOTES_EMPTY=[]` / `KEY_HITS=25/27` / `MISSING=[完整 tx hash, 第 5 节]` / `P6_HAS_TABLE=True` / `P8_HAS_TABLE=True` |
+| T2-a3 | `grep -cF -- "<key>" demo-script.md` × 27 | 19 命中 / 8 未命中（键序计数逐字见 §2.a） |
+| T2-冲突 | 幻灯片 + demo 结构化抽取（地址/selector/大数字） | 幻灯片地址 3（全落 KEY_HITS）、selector 3、大数字均属对比报告/R2 语境；demo `980` 6 处全为 R1 分账 → **0 冲突** |
+| T3-b1 | `sed -n '109,136p' report/README.md \| grep -oE … \| sed … \| sort -u` + `test -f` 循环 | 10 文件，10/10 OK |
+| T3-b2 | 从 `_submission-plan.md` §1.3 抽 w1b2 文件名集合 → `tr -d '\r'` → `sort -u`，与 `ls workflow-out/w1b2-*` 的 basename 排序集做 `comm -3`（逐字命令见 `_submission-plan.md` §2.b） | `IDX=13 DISK=13` / `DIFF_LINES=0` |
+| T3-b3 | `cat w1b2-* \| grep -ohE '_[A-Za-z0-9_-]*\.(txt\|md)' \| tr -d '\r' \| sort -u` + `test -f` | 34 文件，34/34 OK |
+| T4 | 15 条 `grep -nF -- '<literal>' <raw>` + 同 literal 对 `demo-script.md` | 15/15 命中（raw 行号 57/58/125/59/581/3/3/3/2/6/86/6/30/31/31） |
+| T4-可选 | `git show 8d093b5:workflow-out/implementation.md \| grep -nF 'docker ps --format "{{.Names}} {{.Status}}"'` | 命中 `:443`、`:617`，rc=0（T4 执行时盘上 D2+D3 版仅 `:153`/`:190` 提及，非命令源；改写后的盘上 D4 版见 `_submission-plan.md` §2.c 时点说明） |
+| T5 | `python -c "import pypdf; …PAGES…"`；`python -c "from pptx import Presentation; …SLIDES/NOTES_EMPTY…"` | `PAGES=12`；`SLIDES=12`；`NOTES_EMPTY=[]` |
+| T6 | 撰写 `workflow-out/_submission-plan.md` | 五章落盘；b2 在文档落盘后对最终 `§1.3` 复跑得 `DIFF_LINES=0` |
+| T1（附录 A 自保） | `cp workflow-out/implementation.md /tmp/impl-d2d3-backup.md` + `md5sum` | 两侧 `b421a1997fdfd160219a4789cf934278`，208 行（逐字一致） |
+| T7 | `git log --oneline -1`；`git status --short`；`git status --porcelain \| wc -l`；`won't-run` 项见 §7 | 见下 |
+
+**T7 收尾实跑（逐字）**
+
+```
+$ git log --oneline -1
+8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)
+
+$ git status --porcelain | wc -l
+20
+
+$ git status --short   （6 M + 14 ??；与 T0 19 条相比唯一新增 = ?? workflow-out/_submission-plan.md）
+ M workflow-out/_probe_cold_a0.md
+ M workflow-out/_probe_gate_a0.md
+ M workflow-out/_probe_impl_a0.md
+ M workflow-out/_probe_plan_r1_a0.md
+ M workflow-out/implementation.md
+ M workflow-out/plan.md
+?? workflow-out/_implementation-prev-r1-backup.md
+?? workflow-out/_implementation-prev-r2-backup.md
+?? workflow-out/_implementation-prev-w1a-backup.md
+?? workflow-out/_plan-prev-r4d1-backup.md
+?? workflow-out/_plan-prev-r4d1-final-backup.md
+?? workflow-out/_plan-prev-r4d2d3-backup.md
+?? workflow-out/_pre-task-snapshot-r1.patch
+?? workflow-out/_pre-task-snapshot-r2.patch
+?? workflow-out/_pre-task-snapshot-r3.patch
+?? workflow-out/_r4d2d3-verify-raw.txt
+?? workflow-out/_submission-plan.md
+?? workflow-out/demo-script.md
+?? workflow-out/report/
+?? workflow-out/slides/
+
+$ git diff --name-only -- lyquid scripts agents experiments docs README.md
+（空输出）
+
+$ wc -l workflow-out/_submission-plan.md
+779 workflow-out/_submission-plan.md
+
+$ md5sum workflow-out/_submission-plan.md
+b24acb49e22ff9281ce9a3688daad0e3 *workflow-out/_submission-plan.md
+
+$ git log --oneline -1
+8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)
+```
+
+**未运行（如实登记）**：`docker` / `scripts/demo.py` / `scripts/keeper.py` / `shaker deploy` /
+`cargo` 全部未跑（纯文档任务，不产生新证据）；ZIP 未生成（方案冻结条款 6）；demo 未实拍；
+B3 未开展；PDF/PPTX 目视复核未重跑（沿用 D1/D2+D3 轮记录）。
+
+---
+
+## 5. 偏离与差异登记
+
+| # | 项 | 说明 | 处置 |
+|---|---|---|---|
+| **D1** | 重写 `workflow-out/implementation.md` | 工作流约定「实现说明写入 `workflow-out/implementation.md`」，但方案 §0 只列 3 件、§3-2 要求「清单之外零写入」；上一版（R4-D2+D3，208 行）**未入库、git 无法取回** | 按工作流约定重写（本文件）；改写前 `cp` + `md5sum`（`b421a199…`），**原版逐字保留于附录 A**；`git status` 该文件本就在 T0 基线（` M`），不新增条目；影响面仅内容 |
+| D2 | T0 `git status` 19 条 vs 方案 §1-3 预列 18 条 | 差 1 = 规划期新建 `_plan-prev-r4d2d3-backup.md` | 以 T0 实跑为基线；`_submission-plan.md` §2.e-E7 登记 |
+| D3 | ugrep 在 Windows 输出 CRLF | 直接 `grep -o` 入 `comm`/`test -f` 会把 13/34 份全部误报 MISS（`DIFF_LINES=26`） | b2/b3 命令统一 `tr -d '\r'` 并写明原因（§2.b）；误报已实测复现后修正 |
+| D4 | HEAD 版 `implementation.md` §9.1 行数 477/143 | 现盘实取 481/144（8d093b5 改过两文档） | 属时点差异，`_submission-plan.md` §2.e-E2 仅登记，未改 |
+| D5 | `report/README.md:133`（及 PDF 封面）裸指针 `implementation.md:28/:407/:511/:603` | 该文件只读冻结；指针只对 HEAD/R3 版（751 行）有效 | §2.e-E5 登记 + 给出 `git show 8d093b5:…` 取回命令；未改冻结文件 |
+| D6 | `_commit-plan.md:1` 头部「未执行任何 git commit」 | 与 15 提交事实并存（时点语义） | §2.e-E1 登记；入库判定以 git 实跑为准 |
+| D7 | `_pre-task-snapshot.patch`（无后缀）不在 `??` 面 | 已于 `dc78d2f` 入库（`git log -1 -- <f>` 实跑） | 已在 §1.5/§2.e 备注，非漏项 |
+| D8 | demo 脚本 8 键未命中 / 幻灯片 2 键未命中 | 三文档侧重不同；形态差异（缩略哈希） | 判「未命中≠错误」，§2.a 登记 + 可选口播补充建议（**本任务未执行**） |
+| D9 | ZIP 命令未执行 | 方案冻结条款 6 | §3.1 给两条可复制命令；工具可用性已实测 |
+
+---
+
+## 6. 红线自查
+
+1. **零 git 写**：全程仅 `git log/status/diff/ls-files/show/rev-list/check-ignore`；开工与收尾 `git log --oneline -1` 均 `8d093b5`（§4-T7）。
+2. **写入面**：`workflow-out/_submission-plan.md`（新建）+ `workflow-out/implementation.md`（工作流约定，附录 A 保留原版）；`plan.md` / `_plan-prev-r4d2d3-backup.md` 为规划期产物。
+3. **未修改他阶段产物**：T7 `git status` 与 T0 基线逐条比对，状态行集合**只新增本文件**
+   `?? workflow-out/_submission-plan.md`（19 → 20 条），其余 19 条逐字相同（其中 `implementation.md`
+   内容被本轮改写，状态行不变，见 D1）；代码面 `git diff --name-only -- lyquid scripts agents
+   experiments docs README.md` **空输出**。
+4. **未跑项**见 §4 末（docker/demo/keeper/deploy/cargo/ZIP/实拍/B3/目视复核）。
+
+---
+
+## 7. 未尽清单（如实）
+
+1. **ZIP 未生成**（D9）：两条命令已按本机工具链（PowerShell 5.1 + GNU tar 1.35，无 7z/zip）写死路径与步骤，但**未执行**，ZIP 内条目结构最终以人工运行为准。
+2. **demo 未实拍**：305s 为设计值；S3 预期输出只静态命中 R1 档（`_r1-demo-normal-raw.txt:5/:6/:9`），录制当轮须以新实例实录为准。
+3. **B3 未开展**：反馈收集表为空白表单，无已收集反馈（`_submission-plan.md` §3.3）。
+4. **目视复核未重跑**：本轮只做程序化页数/notes 复验（§2.d），未重开 PDF/PPTX 逐页阅图。
+5. **`report/README.md:133` 与 PDF 封面的裸指针**未修（只读冻结）：以 `git show 8d093b5:workflow-out/implementation.md` 取回为准（§2.e-E5）。
+6. **`implementation.md` 改写**：见 D1，如不接受可用附录 A 逐字还原（md5 应与 `b421a1997fdfd160219a4789cf934278` 一致）。
+
+---
+
+## 附录 A：R4-D2+D3 实现说明原版（逐字保留）
+
+> 本节为**上一版 `workflow-out/implementation.md`**（R4-D2+D3 实现说明，2026-10-30，208 行，
+> md5 `b421a1997fdfd160219a4789cf934278`）的**逐字副本**。该版本未入库（`git status` 为 ` M`，不在 HEAD），
+> 无法由 git 取回，为避免改写造成信息丢失原样保留；节内「方案」「§x」「verify-raw」等指代均指
+> R4-D2+D3 方案及其证据，备份件为 `workflow-out/_plan-prev-r4d2d3-backup.md`。**本节不得回改**。
+
+# R4-D2+D3 实现说明（编码员，2026-10-30）
+
+> 方案：`workflow-out/plan.md`（R4-D2+D3，审查通过版；以下「§x」均指该文件）。
+> 本轮任务 = **纯文档交付**：D2 幻灯片（≥10 页 `.pptx`，本方案定 12 页，每页 notes）+
+> D3 预录 demo 分镜脚本（8 镜，305s）。**零 git 写操作**（全程只有 `git log` / `status` /
+> `diff` 只读）；**不改代码目录**（`lyquid/`、`scripts/`、`docs/`、`experiments/`、
+> `agents/` 零改动，`git diff --name-only` 空输出为证）。
+> 构建/自检/逐条核对均为**本轮实跑**，原始输出全部入档
+> `workflow-out/_r4d2d3-verify-raw.txt`（约 690 行）。
 >
-> **体例说明（偏离登记，文档面）**：本文件头部约定「按轮重建」（R1/R2 期各留 `_implementation-prev-*` 备份）。
-> 本轮**改为追加 §7**：原因是 plan §2 明确把 implementation.md 的增量/偏离表更新留给收尾阶段，
-> 而 §1/§2 的 R3 代码面描述（仍在树内、仍是审查焦点）不应因本轮实跑而失效或重写；追加不丢任何
-> 既有内容，也不需要新增备份文件（方案 §0 文件清单外）。§6 表 #2/#11 已在此同步关闭。
+> **本轮按工作流约定重写了本文件（implementation.md）**：上一版为 R3 实现说明
+> （md5 `f7033445e29ef8436fae8d4dc7cb170f`，751 行）。重写前实测
+> `md5sum workflow-out/implementation.md` 与 `git show 8d093b5:workflow-out/implementation.md | md5sum`
+> **两侧同值**，即 R3 版与 HEAD 跟踪版本逐字一致 → 可由
+> `git show 8d093b5:workflow-out/implementation.md` 原样取回。
+>
+> **受影响引用（扩围说明，仲裁修订第 4 条）**：凡指向 R3 版 `implementation.md` 的「文件:行」
+> 均不受本次重写影响，但必须**按 R3 版取回后核对**——① 期末报告 PDF 封面引用的
+> `implementation.md:28-:31`（devnet / 工具版本行）与 `report/README.md:133` 的 §5 索引行
+> （`:28、:407、:511、:603`）；② 幻灯片 P9 正文与 notes 的 `:603 / :511 / :28`、P3 notes 的
+> 「§2 同源」；③ demo-script 的 S1 出处 `implementation.md:443`（同节 `:617`）与 §6 纪律里的
+> `workflow-out/implementation.md §7.3`（D-T6-1 教训）。上述引用在本轮交付物中**一律加「R3 版」限定语**
+> 并给出取回命令；`report/README.md` 与报告 PDF 按 `plan.md:27` **只读冻结、不回改**（其 :133 与
+> 封面 :28-:31 引用由本段说明覆盖）。限定语落实后的裸指针自查与 S1 出处复核见 verify-raw §T9
+> （`MENTIONS_TOTAL=19 / BARE_POINTERS=0`；交付树 grep rc=1、限定形 grep 命中 :443/:617）。
+>
+> 该重写不在方案 §0 的 7 件清单内，作为**偏离项**登记于 §5-D1。
 
-### 7.1 逐文件改动（本阶段，plan §0 清单对照）
+---
 
-| # | 路径 | 动作 | 改动摘要 |
+## 0. 基线与环境（本轮实跑）
+
+| 项 | 值 | 证据（verify-raw 段） |
+|---|---|---|
+| HEAD（开工） | `8d093b5 R3 evidence: D-T3-1 fix E2E re-verification on fresh instance (T7)` | T1 |
+| 工作树（开工） | 5 条 M（4 份评审探针档 + `plan.md`）+ 9 条历史未跟踪条目（含 `report/`），共 14 条；§0 的 7 件均不存在 | T1 |
+| HEAD（收尾） | `8d093b5`（逐字不变） | T8 / T8.2 |
+| Python | 3.14.5 | T2 |
+| python-pptx | 1.0.2 | T2 |
+| fontTools | 4.66.1（字覆盖检查） | T2 |
+| PyMuPDF | 1.28.2（仅目视复核用） | T2 |
+| 本机 grep | ugrep 7.8.4（Git for Windows；`-F` 固定串语义） | T2 |
+| 目视复核工具 | LibreOffice 26.8.1.1（`soffice --headless --convert-to pdf`；版本取自 `soffice.exe` VersionInfo） | T4.2 |
+
+工具链与方案 §8 规划期基线一致，**未触发**方案 §7-R1 的降级路径（marp/beamer）。
+
+---
+
+## 1. 逐文件改动（方案 §0 清单对照）
+
+| # | 路径 | 动作 | 摘要 | 规模 |
+|---|---|---|---|---|
+| 1 | `workflow-out/slides/build_slides.py` | **新建** | 幻灯片唯一源文件：12 页全文 + speaker notes 内嵌为 Python 数据结构；python-pptx 构建；尾段同进程**重开产物**自检（页数 / 16:9 / notes / KEY_HITS / 三数口径护栏 / P5 退款链 / console 行宽 / 字体覆盖）。md5 `25ccb29fdad6d5189c3edfcf7102fc59` | 1,013 行 / 50,445 B |
+| 2 | `workflow-out/slides/trustbridge-final-slides.pptx` | **新建（构建产物）** | 13.333×7.5 in（16:9）、12 页、每页 notes 非空；中文字体 Microsoft YaHei、console 块 Consolas；**不嵌入字体**。md5 `a2495e35786d6c17a91341a61235af9b`（含时间戳，重建即变） | 81,155 B |
+| 3 | `workflow-out/slides/README.md` | **新建** | 构建/验证/复现命令与实跑输出、KEY_HITS 一致性核对表（12 页 → 出处）、字体不嵌入登记、降级路径登记（未触发）、差异登记 4 条（含 implementation.md 指针限定）+ D4 措辞登记。md5 `3f742722007c03ccff7f38126ddb3b69`（最终值，见 verify-raw §T9-④） | 242 行 / 14,741 B |
+| 4 | `workflow-out/demo-script.md` | **新建** | D3 分镜脚本：8 镜（S0–S7）五列表 + 逐镜口播 + 占位符替换规则 + 录制技巧 + 预案 A/B + 纪律 + 时长判据 + 差异登记 7 条；S1 出处与 §6 纪律的 implementation.md 指针均加「R3 版…取回」限定。md5 `cd78c6471b4bfe55e5d92b5a97b34bb7`（最终值，见 verify-raw §T9-④） | 285 行 / 25,555 B |
+| 5 | `workflow-out/_r4d2d3-verify-raw.txt` | **新建** | 验证实录：T1 开工基线 / T2 工具链 / T4 构建+自检+目视 / T5-T6 指纹 / T7 逐条 grep（65 项全 PASS）/ T7-b′ 三数口径 token 扫描 / T8+T8.2 收尾。**追加型实录，md5 与行数随追加变化，不写死** | 约 690 行 / 约 49 KB |
+| 6 | `workflow-out/implementation.md` | **重写**（工作流约定；见 §5-D1） | 本文件 | — |
+
+> **指纹口径**：`slides/build_slides.py`、`slides/trustbridge-final-slides.pptx`、
+> `slides/README.md`、`demo-script.md` 的 md5 为**交付指纹**——以 verify-raw **§T9-④**（仲裁修订后的
+> 重建/重写实跑值）为最终值；T5/T6、T8.2、T8.3 记的是各时点的历史值（指针限定语改动后已变）。
+> 其中 `.pptx` 含时间戳、**重建即变**；`_r4d2d3-verify-raw.txt` 与 `implementation.md` 属
+> 追加/修订型文档，不写死 md5。
+
+只读引用（未改一字）：`workflow-out/report/README.md`（KEY_HITS 唯一事实源）、
+`workflow-out/report/build_report.py`（构建模式参考）、R3 版 `implementation.md`、
+`w1b2-*.md` 六件、`_r1-demo-normal-raw.txt`、`_r2-{normal-assess,keeper-loop,adversarial}-raw.txt`、
+`_r3-t3-{console,committee,deploy}-raw.txt`、`_r3-t7-dt31-verify-raw.txt`、
+`_r3-t4-{precheck,flows,gas,code-size,evidence-recheck,lyquid-scan}-raw.txt`、
+`r3-t4-contrast-report.md`、`docs/b3-user-test/通过判据.md`、`scripts/demo.py:346-:357`、
+`agents/common/rpc.py:91、:97`。
+
+---
+
+## 2. `build_slides.py` 实现要点（方案 §3 / §3.1）
+
+### 2.1 结构
+- 单文件、无外部数据依赖：12 个 `slide_NN(prs)` 函数各自内嵌标题 / 正文 / 表格行 /
+  console 行 / notes；`SLIDE_BUILDERS` 顺序表 + `main()` 构建落盘 + `self_check()`。
+- 版式：`blank` 版式（`slide_layouts[6]`）+ 自绘文本框；标题条（25pt 粗体 NAVY + 细横线）、
+  页脚「TrustBridge · CS5298 · 2026-10-30 · 第 X / 12 页」。
+- 表格：`shapes.add_table`，列宽按比例（P6 `[1.45, 4.3, 5.2]`，P8 `[1.55, 7.0, 3.7]`），
+  表头 NAVY 底白字、正文行 `#F2F4F7` / 白交替。
+- console 摘录：圆角浅底框 + `Consolas` 文本框，`word_wrap = False`（**长行不折断**）。
+- notes：`slide.notes_slide.notes_text_frame.text = …`，写入后再统一设字体。
+
+### 2.2 字体写法（冻结条款 6）
+每个 run 同时写 `a:latin` / `a:ea` / `a:cs` 三处 `typeface`（`_set_run_font`）——只设
+`font.name` 只管西文，中文会回退主题字体；三处同设才保证中文走 Microsoft YaHei。
+**不嵌入**任何字体（无 `embedTrueTypeFonts`、无 fontdata part）。
+
+### 2.3 尾段自检（重开产物；全过才 `BUILD_OK` + exit 0）
+| 项 | 判据 | 本轮实跑 |
+|---|---|---|
+| (a) 页数 / 尺寸 | `len(slides)==12` 且 ≥10；13.333×7.5 | `PAGES=12`、`SLIDE_SIZE_IN=13.333 x 7.500 (16:9=True)` |
+| (b) notes | 每页 notes 非空 | `NOTES_OK=True (empty=[])` |
+| (c) KEY_HITS | 方案 §6 GT-b 候选 23 项在「全文本（含 notes）」命中 ≥15 | `KEY_HITS=23/23 (MIN=15)`、`MISSING=[]` |
+| (d) 三数口径 | `9000`+`980`+`20`「独立数值」同现页 ⊆ {P8}；P5 含 `10000 → 9000 → 10000` | `TRIPLE_PAGES=[8] (allowed=[8])`、`P5_CHAIN=True` |
+| (e) console 行宽 | 最长行 × 0.55em × 字号 ≤ 块内可用宽（不折行不出框） | P4：114 字符/784pt/858pt；P5：112 字符/739pt/858pt（页脚可见） |
+| (f) 字体覆盖 | 全片去重字符 ⊆ msyh cmap（fontTools；缺字形方块预警） | `FONT_COVERAGE=UNIQUE_CHARS=628 MISSING_IN_MSYH=0 OK` |
+
+「独立数值」正则用 `(?<![\d,])…(?![\d,])` 边界，避免 `19000` / `2026-10-30` / `2083` /
+`3,707,457` 误判（这也是 GT-b′ 护栏能在 P5 与 P8 之外不误报的原因）。
+
+### 2.4 与方案的差异（细节见 `slides/README.md` §4）
+- §3.1 假设「摘录行 ≤100 字符」；P4 的 `cert.signers RAW …` 实录行实为 **114 字符**。
+  处置：**不改写实录行**，改用 12.5pt Consolas + 程序化行宽预检（§2.3-e）保证不折行。
+- 目视复核为本轮**额外**手段（方案 GT 未要求），结论见 verify-raw T4.2。
+
+---
+
+## 3. `demo-script.md` 实现要点（方案 §4）
+
+- **8 镜 / 305 秒**：S0 20 + S1 20 + S2 40 + S3 60 + S4 45 + S5 60 + S6 40 + S7 20 = 305s
+  （5 分 05 秒，落在 240–360；表后附合计行与判据说明）。
+- **五列表**：镜号 / 画面 / 命令（逐字 + 「文件:行」）/ 预期输出（对齐实录 + 行号）/ 时长；
+  表后每镜一小节写口播 2–3 句；S3 口播点 R1 三数（9000/980/20），S5 口播点 funding 中间态
+  （`10000 → 9000 → 10000`，全额退款）。
+- **S4 = 实录回放**（方案仲裁修订 1）：无执行命令，画面即 `_r2-keeper-loop-raw.txt`；keeper.py
+  命令降为「讲解行，不执行」并给 `:3` 形态与 `:2`/`:7` 实例地址；预期输出 :6/:8/:10/:30/:31-32。
+- **S5 = T7 主命令**（方案仲裁修订 2）：主命令取 `_r3-t7-dt31-verify-raw.txt:3`（去
+  `# command: ` 前缀）；预期 :22/:28/:30/:31/:69/:72-73。T3 档降为可选回放（不执行），
+  若展示**必须补** `:41` RuntimeError 与 `:43` exit=1 并加字幕「D-T3-1 修复前档案」。
+  console 命令取 `_r3-t3-console-raw.txt:2`，预期 :24/:31/:36/:38。
+- **S3 单一口径**（方案冷读修订 7）：`<addr>` = S2 当轮新部署实例地址；
+  **禁填** `0xFD6F…c351`；**禁引** `_r2-normal-assess-raw.txt:12-:13`（已用实例 deal-9）；
+  条件分支写明「复用已 Up 实例时余额不得引 R1 三数」。
+- **占位符**：`<addr>` / `<实例名>` / `<新名>` / `<新地址>` / `<ANVIL0_KEY>` 逐条给替换规则；
+  全钥来源 `agents/common/rpc.py:97`（`:90` 注明 devnet 公开确定性密钥、非生产凭据），
+  但脚本正文只写 `<ANVIL0_KEY>`，实录行按 R2 先例脱敏（`_r3-t3-deploy-raw.txt:59`）。
+- **技巧 / 预案 / 纪律**：字号 ≥18pt、每镜独立起止、S5 双终端、console 流式回放与
+  `rc=124` 正常收尾、预案 A（devnet 不可用 → 全实录回放）、预案 B（逐镜重录点，S4 无重录点）、
+  单次纪律（禁重复 `e2_arm` / `e2_run_verdict_round`）、`MSYS_NO_PATHCONV=1`、实例不混称。
+- **差异登记 7 条**（含 S1 命令实际行号 `implementation.md:443`、容器名带 compose 后缀、
+  S2 命令三行注释形态拼回单行、密钥脱敏、S3 预期来源只能静态命中 R1 档、**3 分钟版剪辑点**
+  与课程原文（方向总结:24「3 分钟预录 demo」）的口径差、时长为设计值未经实拍）。
+
+---
+
+## 4. 命令与输出摘要（全部本轮实跑；完整原文见 `_r4d2d3-verify-raw.txt`）
+
+| 步骤 | 命令（逐字） | 关键输出 | 段 |
 |---|---|---|---|
-| #3 | `scripts/demo.py` | 改（1 行） | :87 `DEFAULT_INSTANCE = ""` → `"Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa"`（T3.1 deploy 实录实例名；唯一代码面改动，预登记项） |
-| #4 | `workflow-out/w1b2-r3-e2-committee.md` | 改 | §T3 占位（原 :39-41「（待 T3 触发回填。）」）替换为实录段：判级结论 / console 判级摘录（原文+行号）/ 读回勾稽 5 项 / 偏离登记 D-T3-1·D-T3-2 / 原始日志清单 / GT3 a–f 自检；§T1 段落未动 |
-| #5 | `workflow-out/_r3-t3-deploy-raw.txt` | 新建 | T3.0 预检 + T3.1 部署（rm/cp、md5 9/9 MATCH、cargo check Finished、shaker deploy、TARGET 推导与断言）+ T3.2 回填声明 + T3.6 收尾自检；含 D-T3-2 的「首写被截断→重建」说明与 `[RE-RUN]`/`[QUOTED]` 标注 |
-| #6 | `workflow-out/_r3-t3-committee-raw.txt` | 新建 | `--flow committee` **单次**主跑全 transcript（exit=1，由 D-T3-1 的 demo 内建断言导致；未重跑） |
-| #7 | `workflow-out/_r3-t3-console-raw.txt` | 新建 | `shaker console` 全量原始输出（判级唯一依据；rc=124 正常收尾） |
-| #8 | `workflow-out/_r3-t3-final-state-raw.txt` | 新建 | T3.5 终态读回（deal_info/三方余额）+ 补充：blocks 0–341 全量 faucet 单次链上扫描 |
-| #9–#11 | （条件项，未触发） | 未改/未建 | 无 L1 fallback：`committee_certified.rs:91` `E2_AVG_NUM` 保持 4（md5 仍 `83e358ee…`），无 `_r3-t3-fb-*` |
-| — | 冻结四件 / `lib.rs` / `rpc.py` / `keeper.py` / README / `deploy.sh` 等 | 未改 | `md5sum -c _r2-t0-frozen-baseline.txt` 4×OK；`git status --short lyquid/` 与 T2 交付态逐字相同（M assessor.rs、M lib.rs、?? committee_certified.rs） |
-| — | 本文件 `workflow-out/implementation.md` | 改（文档） | 追加 §7 + §6 表 #2/#11 交叉指向（见上方体例说明） |
+| T1 基线 | `git log --oneline -1` + `git status --short` | `8d093b5 …`；14 条既有条目（5 M + 9 ??）；§0 七件不存在 | T1 |
+| T2 工具链 | `python -c "import pptx; print(pptx.__version__)"` 等 | `1.0.2` / `Python 3.14.5` / `fontTools 4.66.1` / `pymupdf 1.28.2` | T2 |
+| T4 构建 | `python workflow-out/slides/build_slides.py` | `BUILD_OK`、`EXIT=0`、`PAGES=12`、`KEY_HITS=23/23`、`TRIPLE_PAGES=[8]`、`P5_CHAIN=True`、`FONT_COVERAGE … MISSING_IN_MSYH=0 OK` | T4 |
+| T4.1 复核 | `python -c "from pptx import Presentation; …"` | `PAGES 12` / `NOTES_ALL True` / `SIZE_IN 13.333 7.5` | T4.1 |
+| T4.2 目视 | `soffice --headless --convert-to pdf …` + PyMuPDF 落图 | `PDF_PAGES 12`；12 页 PNG 逐页阅图（修正 3 处视觉问题） | T4.2 |
+| T7 逐条核对 | `grep -nF -- <literal> <raw-file>` × 65 | `CHECKS_TOTAL=65 FAILS=0`（13 命令 + 5 关键输出 + 6 代码块逐行 + 禁引反向 + KEY_HITS 三方） | T7 |
+| T7-b′ 口径 | token 扫描（`9000/980/20` 独立数值） | 同现页 = {P8}；P5 的 9000 全为 funding 中间态/退款链语境；非 P5/P8 只命中「20」（行号/工作量表述） | T7-b′ |
+| T8 收尾 | `git log --oneline -1` + `git status --short` + `git diff --name-only` | HEAD 仍 `8d093b5`；新增仅 `?? workflow-out/slides/`、`?? workflow-out/demo-script.md`（+ 本文件与 verify-raw）；代码目录 `git diff` 空 | T8 / T8.2 |
+| T9 仲裁修订（指针限定 + 重建） | ① `python workflow-out/slides/build_slides.py`（重建）② `grep -nF -- 'docker ps --format "{{.Names}} {{.Status}}"' workflow-out/implementation.md` ③ `git show 8d093b5:workflow-out/implementation.md \| grep -nF 'docker ps --format "{{.Names}} {{.Status}}"'` ④ 裸指针自查脚本 | ① `BUILD_OK`/`EXIT=0`、`PAGES=12`、`KEY_HITS=23/23`、`TRIPLE_PAGES=[8]`、`P5_CHAIN=True`、`SIZE_BYTES=81155`；② **rc=1（无输出）**——交付树已无该行（T8.2 重写所致，见 D1）；③ 命中 `:443`、`:617`，`rc=0`；④ `MENTIONS_TOTAL=19 / BARE_POINTERS=0` | T9（T9-0/①②③④） |
 
-### 7.2 命令与输出摘要（全部本轮实跑；完整原文见 §7.1 的日志件）
+未运行（如实登记）：任何 `docker` / `python scripts/demo.py` / `scripts/keeper.py` /
+`shaker deploy` / `cargo` 命令 —— 本轮为纯文档任务，**不产生新的链上证据**，
+所有预期输出一律引用既有档案。
 
-**T3.0 预检**
-- `docker ps --format "{{.Names}} {{.Status}}"` → 7 容器 Up（multi-tools / node1-4 / registry / anvil，13–14h）
-- `md5sum -c workflow-out/_r2-t0-frozen-baseline.txt` → types/core/committee/assessor **4×OK**（附已知 WARNING `1 line is improperly formatted`）`[exit=0]`
-- `git diff --stat -- lyquid/src/{types,core,committee,assessor}.rs` → 仅 `assessor.rs | 5 +++++`（R1 已审在场）
-- `git status --short lyquid/` → `M assessor.rs` / `M lib.rs` / `?? committee_certified.rs`
+---
 
-**T3.1 部署新实例**
-- `docker exec multi-tools rm -rf /tmp/tb-lyquid` → exit 0；`MSYS_NO_PATHCONV=1 docker cp lyquid/. multi-tools:/tmp/tb-lyquid` → exit 0（**原始运行**；重建件中记为 `[QUOTED]`，该容器副本仍在且 md5 9/9）
-- 宿主 vs 容器 `md5sum`（src/*.rs + Cargo.toml + Cargo.lock，容器侧需 `sh -c` 承载 glob）→ **9/9 MATCH**，含 `committee_certified.rs 83e358ee…`（新模块首次上容器）
-- `touch src/*.rs` + `docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown` → 原始 `Finished dev profile … in 5.72s`（exit 0）；重建件 `[RE-RUN]` `Finished … in 1.45s`（exit 0）；唯一 `error:` = ldk 模板 `{{project-name}}` 固有噪音（R2 同款）
-- `shaker deploy -r http://registry:8000/lyquids --endpoint ws://node1:10087/ws --private-key <ANVIL0_KEY> Cargo.toml` → `Finished release … 8.00s`、image `sha256:ccf7498b…`、**`created Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa => 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589`**、`[deploy exit=0]`
-- `docker exec multi-tools shaker to-hex Lyquid-ybidj…` → `0xc05034ED5191cbc3404956D9b7dFcC7391e99bfc`；断言**非零且 ≠ 合约地址**（条款 6）→ 通过
+## 5. 偏离与差异登记
 
-**T3.2 常量回填**：`demo.py:87` 一行（见 §7.1）；未触发壳 40/40 与 sim diff（Python 常量，只被 committee 流消费）。
-
-**T3.3 主跑（单次）**
-- `python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x87006e75a5B6bE9D1bbF61AC8Cd84f05D9140589 --instance Lyquid-ybidj3krshf4gqcjk3m3px6mooi6tg74twwaa --flow committee` → **exit 1**
-- 链上主路径全部成功：e2_configure(staged 4) → advance=true → dest_epoch 1 → finalize=true → deal-1 Disputed → `arm read-back OK: armed_deal == deal-1 (pre-arm='')` → `e2_run_verdict_round() -> True` → `final state=Refunded`
-- 唯一失败点 = demo 内建余额断言 `RuntimeError: refund accounting mismatch: before={'alice': 0,…} after_fund={'alice': 9000,…} after={'alice': 10000,…}`（demo.py:694）→ **D-T3-1**（faucet 读回竞态，非链上失配）；按纪律**不重跑**
-
-**T3.4 console 判级**
-- `MSYS_NO_PATHCONV=1 timeout 60 docker exec multi-tools shaker console Lyquid-ybidj… --endpoint ws://node1:10087/ws` → `rc=124`（正常收尾）
-- 判级行齐全：`agreed … from 4 input(s) (avg_num=4)`（console:24）、`cert.signers RAW = [0, 1, 2, 3] (len=4)`（:31）、`signer N -> Node-…` ×4（:32-35）、`apply_verdict … misconduct=[]`（:36）、`deal_info … "state":"Refunded"`（:38）
-- **判级 = L2**（无需 fallback，未改 `E2_AVG_NUM`、未重部署）
-
-**T3.5 终态勾稽（独立于 transcript）**
-- `NodeClient` 只读快照（block 341）：`deal_info(deal-1).state=Refunded`；`balance_of` alice=10000 / bob=0 / broker=0；`evidence_entries=3`；`e2_net_config.armed_deal="deal-1"`
-- 补充链上扫描（blocks 0–341 全量 tx）：`faucet(string,uint128)` **仅 1 笔**（block 333，from broker，agent=alice，amount=10000）→ alice 10000 基线唯一，fund 1000 → 9000，退款 +1000 → 10000（全额退款、bob/broker 不变）
-- `FINAL-STATE CHECK: PASS`（4/4 PASS）
-
-**T3.6 收尾自检**
-- `md5sum -c _r2-t0-frozen-baseline.txt` → 4×OK；`committee_certified.rs` md5 `83e358ee…`；`sed -n 91p` → `const E2_AVG_NUM: u16 = 4;`
-- `git log --oneline -1` → `dc78d2f`（本阶段**未 commit/add/push**）
-- 四个 `_r3-t3-*` 日志全部在 `workflow-out/`
-
-### 7.3 偏离与发现（2 项，均已在 §T3 登记）
-
-1. **D-T3-1（demo 代码缺陷，本阶段不修）**：`demo.py:622` faucet 后**立即** `before = snapshot()`（:623），
-   读路径滞后一块使 `before[alice]=0`；:692 的 `after[alice] == before[alice]` 因而在 faucet 竞态下必然
-   误报为 `refund accounting mismatch`。链上资金语义正确（T3.5 + 链上扫描独立证明）。
-   **未修**（本阶段代码面授权仅 demo.py:87 一行）、**未重跑**（plan §T3.3 纪律）。
-   建议（下阶段）：基线改为 faucet 落账后读回，或断言改 `after[alice] == after_fund[alice] + 1000`
-   （`after_fund` 在 `wait_state(Funded)` 之后读，不受该竞态影响）。
-2. **D-T3-2（deploy 日志首写被截断，已重建）**：我在 TARGET 取数用的
-   `{ … } >> $LOG 2>&1` 块内含 `tee /dev/stderr`；Git Bash/MSYS 下 `tee` 按路径打开 `/dev/stderr`
-   会**截断**重定向目标（已在 /tmp 最小例复现）。重建件 629 行：T3.0/md5/cargo check 为 `[RE-RUN]`
-   （只读、针对同一容器副本），deploy 段为 `[QUOTED]`（原始会话输出逐字引述，**刻意不重跑 deploy**）；
-   丢失的 ~460 行 warning 无决策内容，已在文件尾「TRANSCRIPT SCOPE NOTE」声明。
-
-**观察（非偏离）**：console 中 aggregate 出现两次 `agreed`（:24/:29，同一 4 输入集重复回放），
-但 `certified call submitted` / `committee_verdict_certified` / `apply_verdict` 各仅一次（:30/:31/:36）
-→ 无重复结算。
-
-### 7.4 GT3 门禁状态（对照 plan §6）
-
-| 门 | 状态 |
-|---|---|
-| GT3-a | ✅ 满足（deploy 段为重建件，见 D-T3-2；关键行齐全） |
-| GT3-b | ⚠️ **部分满足**：arm 读回 OK / run_round 单次 / Refunded 均在；「余额勾稽 OK」行缺失（D-T3-1 断言打断），实质由 T3.5 独立证明 |
-| GT3-c | ✅ 满足（L2 判级可从 console 原文直接读出） |
-| GT3-d | ✅ 满足（§T3 回填完成；偏离登记段在档） |
-| GT3-e | ✅ 满足（冻结面复验 4×OK；无 fallback，40/40 不触发） |
-| GT3-f | ✅ 满足（未 git commit/add/push；lyquid 源零改动） |
-
-### 7.5 遗留（下一阶段）
-
-| # | 项 | 去向 |
-|---|---|---|
-| 1 | D-T3-1 demo 余额断言 stale baseline 修复（demo.py:622-623 / 692-696） | 收尾阶段（T6）或独立小修 → **已于 R3-T6 修复（行为修复，见 §9；代码现 :622-634 / :703-707）** |
-| 2 | 对抗流 node 复跑（全案 §6-T3 尾项 / G3 尾项） | T6 收尾 → **R3-T6 未执行**（本轮授权面无链写实跑）→ 后续/用户安排 |
-| 3 | `_commit-plan.md` R3 分组、implementation.md 正式增量/偏离表合并 | T6 收尾 → **已于 R3-T6 完成**（`_commit-plan.md` §6；本文件 §5.13 + §9） |
-| 4 | T4 EVM 对照 / T5 B3 备料 | 后续阶段（本轮未做）→ **均已于 R3-T4 / R3-T5 完成**（§8、`docs/b3-user-test/`） |
-
-## 8. §R3-T4 执行实现说明（2026-10-30）
-
-本轮任务性质：**单次实验 + 数据采集 + 报告**，不改任何已交付代码（`lyquid/`、`experiments/evm-contrast/` 全程只读，证据见 8.5 GT4-e）。§0–§7 为本轮之前的内容，未作任何修改；本节为增量。
-
-### 8.1 产物清单（#2–#10 及计划外留证件）
-
-| # | 文件 | 内容 | md5 |
+| # | 项 | 说明 | 处置 |
 |---|---|---|---|
-| 2 | `workflow-out/r3-t4-contrast-report.md` | 四维对照报告（代码量/信任假设/裁决不可篡改性/开销）+ 证据清单 + 如实结论 | `69541198fd91b4d13549a5769dc0606b` |
-| 3 | `workflow-out/_r3-t4-precheck-raw.txt` | T4.0：`docker ps` 7 容器全 Up、四工具 which、冻结面 md5 基线 | `b8f7bef57f1a5a955938afd57dc33317` |
-| 4 | `workflow-out/_r3-t4-md5-raw.txt` | T4.1/T4.3：拷出 3/3 MATCH + 拷回 2/2 MATCH（含执行过程如实登记） | `d09f2fc9ce798edbdd99bb956687b0f2` |
-| 5 | `workflow-out/_r3-t4-build-raw.txt` | T4.2：`forge build` 全量输出，EXIT_CODE=0 | `803dfe6e5c2f3ee23acf87d03cf5a028` |
-| 6 | `workflow-out/_r3-t4-flows-raw.txt` | T4.3：容器内 report.txt 原样拷回（run-3） | `db00915f7fbf421e6c3a31619a5b8ddc` |
-| 7 | `workflow-out/_r3-t4-gas-raw.txt` | T4.3：容器内 gas-raw.txt 原样拷回（20 行逐笔，run-3） | `3f49b7358d2c11b4972580270ca2c141` |
-| 8 | `workflow-out/_r3-t4-evidence-recheck-raw.txt` | T4.4：逐笔 receipt 对拍 20/20 + 终态读回 + 负对照复跑 + 三地址字节码 | `4a729d9f91b2b9c41525b30cfdbca8f0` |
-| 9 | `workflow-out/_r3-t4-lyquid-scan-raw.txt` | T4.5：链扫脚本原文 + 全量输出 + 两笔创建交易完整收据 + 9 条既有证据对拍 | `b5195252a39f87afaa124a00af51eafc` |
-| 10 | `workflow-out/_r3-t4-code-size-raw.txt` | T4.6：wc 三列口径 + `#[cfg(test)]` 起点 + 口径声明 | `10bc0ec58cf48dee43a133626f3cac11` |
-| 12 | `workflow-out/_plan-prev-r3t4-backup.md` | 规划期已建：旧 plan.md 备份（md5 与 plan §0-#12 声明一致） | `cf15233b3ad4db7b7248dddd8467ee3f` |
+| **D1** | 重写 `workflow-out/implementation.md` | 工作流约定「实现说明写入 workflow-out/implementation.md」，但方案 §0 只列 7 件、冻结条款 3 要求「清单之外零写入」，且 R3 版 implementation.md 是报告与 P9 的只读取证源 | 按工作流约定重写（本文件）；重写前实测 R3 版 md5 与 `git show 8d093b5:workflow-out/implementation.md` 一致（`f7033445…`），**可原样取回**；影响面：`git status` 新增 ` M workflow-out/implementation.md`（方案 GT-e 未列此项） |
+| D2 | console 摘录行宽 | 方案 §3.1 假设 ≤100 字符；实录行 114 字符 | 不改写实录；12.5pt + 行宽预检（`slides/README.md` §4-1） |
+| D3 | 目视复核 | 方案 GT 未要求 | 额外用 LibreOffice 转 PDF + 落图复核；据其修正 3 处视觉问题（反引号 / 留白 / `⇒` 缺字形） |
+| D4 | P8 notes 反例句措辞 | 原句「R2 对抗流档内没有 9000/980/20 这组三元组」在同一句堆了三数与 R2 | 改为「没有这组三数」，消除机械误读（GT-b′ 人工复核要求） |
+| D5 | 3 分钟版 | 课程原文 demo 上限 3 分钟（方向总结:24），方案判据 5±1 分钟 | 主设计按方案 305s；`demo-script.md` §7 附 180 秒剪辑点，供课程硬性上限时使用 |
+| D6 | 时长未经实拍 | 8 镜时长为设计值 | `demo-script.md` §8-7 登记；实拍超 360s 的压法已给 |
+| **D7** | implementation.md 指针限定语（仲裁修订） | D1 重写后，交付物里指向 R3 版的裸指针（`implementation.md:443/:617/§7.3/§2/:28/:511/:603`）会落到新文件上 | 全部改为「R3 版…`git show 8d093b5:workflow-out/implementation.md` 取回」限定形；`report/README.md` 与报告 PDF 按 `plan.md:27` 只读冻结不回改（其 :133 与封面 :28-:31 由本文件 §0 扩围说明覆盖）；自查 `BARE_POINTERS=0`（verify-raw §T9-③），并按修订要求重建 + 复跑自检（§T9-0） |
 
-计划外留证件（见 8.4 D-T4-2）：
+无「与 KEY_HITS 不一致」的数字：幻灯片 23 项 KEY_HITS 全部命中（`MISSING=[]`），
+demo-script 的数字与 KEY_HITS/README 逐条三方核对通过（T7-5 `KEY_HITS_MISMATCH=[]`）。
 
-| 文件 | 用途 | md5 |
-|---|---|---|
-| `workflow-out/_r3-t4-baseline-md5.txt` | 冻结面 md5 基线独立快照，供 T4.9 逐字节对拍 | `6fafc26bcbd4300068902cff0f4d22df` |
-| `workflow-out/_r3-t4-run1-superseded-gas-raw.txt` | 作废 run-1 的 gas-raw 留证 | `f4bc15e9014546b08e227894eee230b8` |
-| `workflow-out/_r3-t4-run1-superseded-flows-raw.txt` | 作废 run-1 的 report 留证 | `37a15e0b0cf7bbacef4bcc0af146c84b` |
-| `workflow-out/_r3-t4-run2-superseded-gas-raw.txt` | 作废 run-2 的 gas-raw 留证 | `44ef19a44d91d0444ffe3e6eafb0cebd` |
-| `workflow-out/_r3-t4-run2-superseded-flows-raw.txt` | 作废 run-2 的 report 留证 | `b1f7ecc14e8762d11b9cfd768c321e21` |
+---
 
-### 8.2 实跑命令摘要（全部本轮实际执行）
+## 6. 门禁总表（方案 §6，逐项如实登记）
 
-| 阶段 | 命令（宿主 Git Bash；路径相对 `trustbridge/`） | 结果 |
-|---|---|---|
-| T4.0 | `docker ps`；`MSYS_NO_PATHCONV=1 docker exec multi-tools sh -lc 'which forge cast jq python3'`；`md5sum lyquid/src/*.rs lyquid/Cargo.toml lyquid/Cargo.lock experiments/evm-contrast/*` | 7 容器 Up 15h；四工具齐备；基线入档 |
-| T4.1 | `docker exec multi-tools rm -rf /tmp/tb-evm`；`docker cp experiments/evm-contrast/. multi-tools:/tmp/tb-evm`；`docker exec -w /tmp/tb-evm multi-tools md5sum Escrow.sol foundry.toml run-contrast.sh` | 3/3 MATCH |
-| T4.2 | `docker exec -w /tmp/tb-evm multi-tools forge build` | `Compiler run successful!`，EXIT_CODE=0 |
-| T4.3 | `docker exec -w /tmp/tb-evm multi-tools bash run-contrast.sh`；随后 `docker cp` 拷回 gas-raw.txt / report.txt 并双向 md5 | 三流全 PASS（Settled 5 / Refunded 6 / Refunded 6）+ 负对照 rc=1；拷回 2/2 MATCH |
-| T4.4 | 归档 gas-raw 逐字节喂入容器 `/tmp/t4recheck/gas-raw.txt`（md5 两侧一致）→ 容器内循环 `cast receipt --json \| jq` 对拍；再 `cast call stateOf/dealInfo/rolesOf/amountOf/committeeSize/threshold/misconduct/codesize` 读回；最后用 deal-3 的三签对 deal-4 重放 | 20/20 gasUsed、20/20 status 一致；deal-1/2/3/4 = 5/6/6/4；重放 rc=1 `non-member signer` |
-| T4.5 | 容器内 `python3 /tmp/t4-lyquid-scan.py`（eth_blockNumber/getBlockByNumber(full)/getTransactionReceipt，块 0..404，endpoint `http://node1:10087/api`）；两笔创建交易 `cast receipt --json` 全文 | 创建交易恰 2 笔：R2 `0xaabbe98a…`@199（0x389241）、R3 `0xc789080c…`@327（0x3aa3e1）；R2 调用 123 笔 / R3 13 笔 |
-| T4.6 | `wc -l experiments/evm-contrast/Escrow.sol lyquid/src/*.rs`；`grep -n "cfg(test)" lyquid/src/*.rs` | 407 / 2933（顶层）/ 2083（六文件）；三处 `#[cfg(test)]` 起点 309/92/209 |
-
-### 8.3 数据勾稽关系
-
-1. **代码一致性**：脚本三件套 宿主↔容器 md5 3/3 MATCH（`_r3-t4-md5-raw.txt` 第一部分）。
-2. **产物一致性**：容器 gas-raw/report ↔ 宿主归档件 2/2 MATCH（同文件第三部分），故 `_r3-t4-gas-raw.txt` / `_r3-t4-flows-raw.txt` 是容器内脚本的原样产物。
-3. **EVM 数据自证**：归档 gas-raw 的 20 行逐笔与链上 receipt 对拍 20/20（gasUsed 与 status 双一致），且复核输入经 md5 证明就是归档件本身（`_r3-t4-evidence-recheck-raw.txt:6-16`）。
-4. **终态以读回为准**：deal-1 Settled(5)、deal-2 Refunded(6)、deal-3 Refunded(6)、deal-4 Disputed(4)、misconduct(seller)=0（`_r3-t4-evidence-recheck-raw.txt:50-53,83`）。
-5. **Lyquid 数据对拍**：链扫结果与既有日志逐条对上——R3 faucet@333（`_r3-t3-final-state-raw.txt:25` ↔ 扫描 `:288`）、R3 终态块 341（`:4` ↔ `:296`）、R2 keeper 双笔 gasUsed 0x923c/0x8c9c（`_r2-keeper-loop-raw.txt:27-28` ↔ 扫描 `:173-174`）、R2 P2 探针 37,748 gas（`_r2-deploy-raw.txt:762-766` ↔ 扫描 `:161`）；两笔创建交易 hash/block/gas 与 plan §1-5 复验值一致。
-6. **代码量三列**与 plan §2 基线三项交叉校验全部 MATCH（`_r3-t4-code-size-raw.txt:65-68`）。
-7. **运行时字节码 8709** 双源一致：脚本 summary（`_r3-t4-flows-raw.txt:22`）与 `cast codesize`（`_r3-t4-evidence-recheck-raw.txt:86,121`）。
-
-### 8.4 偏离登记
-
-| 编号 | 偏离 | 事实与处理 |
-|---|---|---|
-| D-T4-1 | **同一实验跑了 3 次**（run-1 / run-2 / run-3），canonical = run-3 | 原因：执行员两次在「重写 md5 日志」时误把生成日志脚本连同 `rm -rf /tmp/tb-evm` 一起重跑，清掉了容器内已产出的 gas-raw/report，导致 run-1、run-2 的容器侧拷回勾稽无法在归档文件中成型。处理：作废两轮的宿主产物另存留证（8.1 计划外留证件），第三次把「拷出→实跑→拷回」放进同一次执行，勾稽 2/2 在档。全过程在 `_r3-t4-md5-raw.txt` 第四部分如实登记，未删改任何历史输出。副作用：`run-contrast.sh` 内含 `evm_increaseTime 30`（`run-contrast.sh:118`），三次实跑累计把共享 anvil 时间源推进约 90s（plan §5-R4 登记的是单次 +30s）；Lyquid 实例本轮全程只读、未做依赖未来 slot 的操作。 |
-| D-T4-2 | 计划外新增 5 个文件 | `_r3-t4-baseline-md5.txt`（冻结面基线独立快照，供 T4.9 逐字节对拍）+ 4 个 run-1/run-2 作废产物留证件。理由：不删证。 |
-| D-T4-3 | T4.4 的逐笔对拍在**容器内**执行，不在宿主 | 宿主 Git Bash 无 `jq`（`which jq` → not found，见 `_r3-t4-evidence-recheck-raw.txt` 头部注记），首版宿主侧脚本因此产出空列；改为把归档 gas-raw 字节喂入容器（md5 证明同一性）后在容器内 `cast receipt | jq` 对拍。另增「§〇 输入同一性」与「§七 三地址字节码」两小段。 |
-| D-T4-4 | T4.5 有三个 selector **未识别** | `0xeddfc069`（9 笔）、`0x9771a522`（1 笔）、`0x0d8712ee`（1 笔）在仓库 Rust 源码与 `w1b2-s4-rpc.md` 的 selector 表中均无对应；已在 `_r3-t4-lyquid-scan-raw.txt:383-387` 如实登记为「未识别平台方法」，不猜名。已确证的两个：`0xcd9cc3c8`=`e2_configure`、`0x8b7acf91`=`e2_arm`（容器内 `cast sig` 实算 + console 行对位）。 |
-| D-T4-5 | plan 引用的两处既有日志行号与实际有偏差 | plan 记 `_r3-t3-final-state-raw.txt:27`（faucet 证明）实为 **:25**；plan 记 `_r2-adversarial-raw.txt:7-9`（status 1 但 Disputed）实为 **:6**。报告与本节一律按**实际行号**引用，并在相应处注明。 |
-| D-T4-6 | 报告与实现说明中「委员会成员含买卖双方」的定性 | 这不是偏离，而是本轮实跑暴露的事实（`_r3-t4-flows-raw.txt:23` 的 4 个地址中 buyer/seller 在列），报告 §2-②/§4-1 已按此如实表述，未按「独立第三方委员会」写。 |
-| D-T4-7 | T4.5 未做 Lyquid 侧跨单签名重放实验 | 不在 T4 方案范围；报告 §2-③ 已标「无数据（原因）」并只给代码路径证据。 |
-
-### 8.5 GT4 门禁状态（对照 plan §6）
-
-| 门 | 状态 | 依据 |
-|---|---|---|
-| GT4-a | ✅ 满足 | deal-1 Settled(5) / deal-2 Refunded(6) / deal-3 Refunded(6) / deal-4 Disputed(4) + 负对照重放 rc=1 + misconduct(seller)=0，全部 `cast call` 读回（`_r3-t4-evidence-recheck-raw.txt:50-53,83,100-102`）；#6/#7/#8 均在档 |
-| GT4-b | ✅ 满足 | 拷出 3/3 MATCH + 拷回 2/2 MATCH（`_r3-t4-md5-raw.txt`，结论行 `GT4-b: PASS（3/3 + 2/2）`） |
-| GT4-c | ✅ 满足 | 报告四维表逐格带 `文件:行号`；无数据处标原因（§2-④-7 数据缺口表）；代码量①维持 plan §2 三列口径（407 / 2083·1323 / 2933·2173，lib.rs 850 计入列 c），未回退为单口径 |
-| GT4-d | ✅ 满足 | Lyquid 数字全部来自既有日志行或 #9 链扫行；部署环节双重记载——平台操作日志（`_r3-t3-deploy-raw.txt:74-89` OCI/registry）+ 链上 to=null 创建交易收据全文（`_r3-t4-lyquid-scan-raw.txt` §3）；部署 gas 与部署→终态块跨度已进四维表④（R3: 3,843,041 / 327→341=14 块；R2: 3,707,457 / 199→326=127 块） |
-| GT4-e | ✅ 满足 | T4.9 md5 与 T4.0 基线一致（见本节末）；`experiments/`、`lyquid/` 未改；未执行 git commit/add/push |
-| GT4-f | ✅ 满足 | 本节含产物清单（8.1）+ 实跑命令摘要（8.2）+ 数据勾稽（8.3）+ 偏离登记（8.4，D-T4-1..7）+ GT4 状态表（8.5） |
-
-## 9. §R3-T5+T6 执行实现说明（编码员，2026-10-30）
-
-> **任务性质**：B3 三文档（R3-T5）+ 回归收尾（R3-T6：D-T3-1 行为修复、回归三件套、
-> 提交计划与实现说明合并）。**无实跑部署、无任何链写**（不发交易、不建 deal、不重跑
-> committee 流、不重启容器）；唯一代码改动 = `scripts/demo.py` 的 D-T3-1 修复 hunk。
-> 全部命令与原始输出见 `workflow-out/_r3-t6-regression-raw.txt`（T6.0/T6.1/T6.2/T6.5 四段）。
-
-### 9.1 产物清单（#3-#9 + md5）
-
-| # | 文件 | 动作 | 内容摘要 | 规模 | md5 |
-|---|---|---|---|---|---|
-| 3 | `scripts/demo.py` | 改（D-T3-1 修复：13 行替换原 2 行，净 +11） | `pre_tap` 前置读 → `faucet` → `wait_for(faucet_landed, 15s)` 读回 → 打印 `faucet read-back OK` → `before = snapshot()`；余额断言本体零改动 | 784 → 795 行 | `d81c50b1c0f0c15f376b1307e0861a88` |
-| 4 | `docs/b3-user-test/操作手册.md` | 新建 | 六节（环境/部署/主跑/console 观察/终态读回/错误排查）+ 三附录；命令与预期输出回填 `_r3-t3-*` 实录并逐条标 `文件:行号`；修复后新增行标「无已档实录」 | 457 行 | `c5dc5ad610b8fe6b1d94f2d612a734d3` |
-| 5 | `docs/b3-user-test/通过判据.md` | 新建 | L2/L1/L0 三层口径（引 `_plan-prev-r3-backup.md` §3.4）+ L2 验收清单（逐条引 console 行）+ 读回勾稽 5 项 + 通用纪律（status≠effect / 两段 agreed / pending vs 硬失配）+ 降级形态 | 143 行 | `70904c0ccc3728403604c9049537f892` |
-| 6 | `docs/b3-user-test/反馈收集表.md` | 新建 | 四维空白表单：任务理解（含两道信任模型题 Q1/Q2）/ 操作顺畅度（六节 1-5 分）/ 结果可信度 / 开放意见；无示例反馈 | 123 行 | `caeb682d30fc0016fc7c616dce1ff9e1` |
-| 7 | `workflow-out/_r3-t6-regression-raw.txt` | 新建 | T6.0 前置核验 / T6.1 修复前后摘录 + py_compile + selftest + sim diff + 门控 / T6.2 壳 40/40（宿主）/ T6.5 冻结门 + 计数 + 文档引用回验 + 只读复验 + 未做项 | 218 行 | `edf1d9a17b235cff6d5e7e93eef3fef3` |
-| 8 | `workflow-out/_commit-plan.md` | 改（§3 末句补记 + §6/§6.1 追加；原文 §1-§5 不动） | §6：R3-C1..C6 提交序列 + 不入库/归档组 + 移列声明；§6.1：96 状态行全覆盖表（零未归属）+ 分组计数；§3：R3 轮壳零修改只读复跑补记 | 187 → 414 行 | `7d4fc151db7c46de2b4b078d5e55195e` |
-| 9 | `workflow-out/implementation.md` | 改（§5.13 + §3 G5/G6 + §6 #2-#6 + §7.5 注记 + 本节） | §5.13 偏离总表 23 条（索引，原文不动）；§3 G5/G6 状态格核销；§6 / §7.5 状态注记；§9 产物/命令/勾稽/偏离/门禁/对账 | 555 → 700 行 | 见下方说明 |
-| — | `workflow-out/plan.md`（本轮未改，#2 备份件已由规划期建好） | 读 | — | 319 行 | `a808bbfcc4384fd5148530b61db49ff7`（备份件 `a7eb173c…`） |
-
-**md5 说明**：上表 #3-#8 的 md5 为写入完成后的实测值；**#9（本文件）不自引用**——
-写入本节后其 md5 才定稿，故不列入表内，最终值由本轮交付回报登记。
-`plan.md` md5 为读入时实测，本轮零改动。
-
-### 9.2 实跑命令摘要（T6.0–T6.5，全部实跑；完整输出见 #7）
-
-| 阶段 | 命令 | 结果 |
-|---|---|---|
-| T6.0 | `docker ps --format "{{.Names}} {{.Status}}"` | 7 容器 Up（16h） |
-| T6.0 | `md5sum -c workflow-out/_r2-t0-frozen-baseline.txt` | 4×OK + 已知 `WARNING: 1 line is improperly formatted`，exit 0 |
-| T6.0 | `git diff --stat -- lyquid/src/{types,core,committee}.rs`；`git diff --numstat -- lyquid/src/assessor.rs` | 空；`5	0`（R1 在场） |
-| T6.0 | `md5sum lyquid/src/committee_certified.rs`；`sed -n 91p …` | `83e358ee…`；`const E2_AVG_NUM: u16 = 4;` |
-| T6.0 | `git status --porcelain | wc -l`；`md5sum scripts/demo.py` | 94（规划期 93，执行时点为准）；`4fd99a6a…`（修复前） |
-| T6.1 | `python -m py_compile scripts/demo.py` | exit 0 |
-| T6.1 | `python scripts/demo.py --selftest` | 7 PASS + `SELFTEST OK`，exit 0 |
-| T6.1 | `python scripts/demo.py --sim --flow all > /tmp/r3t6/sim.txt` + `diff -u workflow-out/_r2-t0-sim-baseline-raw.txt /tmp/r3t6/sim.txt` | exit 0；**diff 无输出（IDENTICAL）**，两侧 23 行 |
-| T6.1 | `python scripts/demo.py --sim --flow committee` | exit 1，`node-only flow: FakeNode has no oracle certification round …` |
-| T6.2 | `cd ../workflow-out/verify_core && cargo test --lib --tests` | exit 0；`33 passed` / `5 passed` / `2 passed`，0 failed = **40/40**（宿主通道） |
-| T6.5 | 冻结门四件套复跑；`git status --porcelain | wc -l`；`git log --oneline -1` | 全部同 T6.0；96；仍 `dc78d2f` |
-| T6.5 | 三文档引用回验（分域，不抽样） | 64 项自动 PASS + 1 项 token 换行经人工复核 PASS（合计 65 项）；signer↔transcript NodeID 身份闭环 = True |
-| T6.5 | 只读快照（NodeClient，无链写） | block 404；`deal-1` Refunded；alice 10000 / bob 0 / broker 0；evidence=3；`armed_deal=deal-1` |
-
-### 9.3 勾稽关系
-
-1. **sim 逐字**：`--flow all` 输出 23 行 = 冻结基线 23 行，`diff -u` 无输出 → 修复只落在
-   node-only `flow_committee`，sim 代码路径零触碰。
-2. **40 计数**：33(lib) + 5(escrow_lifecycle) + 2(modelcheck_refund) = 40；三条
-   `test result: ok … 0 failed` 原文入 #7 T6.2。
-3. **冻结 md5**：`types/core/committee/assessor` 4×OK；三文件 `git diff --stat` 空；
-   assessor 对 HEAD `5 0`；`committee_certified.rs` md5 与 `E2_AVG_NUM=4` 不变（GT3-f 口径）。
-4. **提交覆盖表**：`_commit-plan.md` §6.1 = 96 表行 vs `git status --porcelain` = 96 行，
-   未归属 0（分组计数见 §6.1）。
-5. **文档引用**：操作手册 35 处"修复后"`demo.py` 引用逐条核对（另 3 处显式标「修复前」）；
-   通过判据的 console 行全量回验 + signer 映射与 transcript NodeID 逐字一致；
-   反馈表四维齐备、无示例反馈。
-
-### 9.4 偏离登记（本轮新增 2 条 + D-T3-1 修复登记）
-
-- **D-T5-1（文档面）**：全案 §5 的「演示脚本.md」不在本任务三件之列（任务陈述三件 =
-  操作手册 / 通过判据 / 反馈收集表），按任务陈述交付；演示脚本的 console 画面讲解要点
-  并入操作手册 §4.4「怎么向用户讲这一屏」。无功能缺失。
-- **D-T6-1（通道选择）**：壳 40/40 走**宿主通道**实跑通过（`rustc/cargo 1.99.1`），
-  按方案 §5-R2 **未启用容器 fallback**；规划期「宿主工具链损坏」的前提在当前机器状态不成立，
-  以实跑为准。壳本轮零修改（`_commit-plan.md` §3 末句已补记）。
-- **D-T3-1 修复登记（行为修复，非重构）**：
-  - 修复位置 `scripts/demo.py:622-634`：`pre_tap`（发交易前读）→ `faucet` →
-    `wait_for(faucet_landed, 15s)` 轮询读回 → 打印 `faucet read-back OK` → `before = snapshot()`；
-  - 余额断言本体 `scripts/demo.py:703-707` **零改动**；其语义从「与 faucet 前旧值相等」
-    修正为「与 faucet **落账后**基线相等」——这正是缺陷本义（stale baseline）；
-  - 验证口径：`py_compile` + `--selftest` + `--sim --flow all` 逐字 diff + `--sim --flow committee`
-    门控（四项全过，#7 T6.1）；
-  - **诚实边界**：`flow_committee` 的端到端重验需新实例（部署 + 链写），**不在本轮授权面**，
-    未执行；修复后新增的 `[committee] faucet read-back OK: …`、`[committee] refund check OK: …`
-    与 console 取证段均**无已档实录**（操作手册逐处标注）。
-
-### 9.5 G5 + G6 门禁状态
-
-| 门 | 状态 | 依据 |
-|---|---|---|
-| G5-a | ✅ 满足：三文档在 `docs/b3-user-test/`；手册 35 处修复后 `demo.py` 引用 + rpc.py/impl 引用全量核对；无虚构输出；修复后未跑的行标「无已档实录」 | 操作手册 §0/§3.3/附录 C；#7 T6.5-③① |
-| G5-b | ✅ 满足：L2/L1/L0 与 `_plan-prev-r3-backup.md` §3.4（:116-:121）一致；L2 清单每条引 console 原文行 | 通过判据 §1/§2 |
-| G5-c | ✅ 满足：四维齐备（任务理解/操作顺畅度/结果可信度/开放意见），无示例反馈 | 反馈收集表；#7 T6.5-③③ |
-| G6-a | ✅ 满足：selftest OK；`--sim --flow all` IDENTICAL；`--sim --flow committee` rc=1 | #7 T6.1 |
-| G6-b | ✅ 满足：33+5+2 = 40/40（宿主通道，三条 test result 入档） | #7 T6.2 |
-| G6-c | ✅ 满足：三文件 diff 空 + md5 4×OK + assessor +5 + `committee_certified.rs`/`E2_AVG_NUM` 不变 | #7 T6.5-1 |
-| G6-d | ✅ 满足：`_commit-plan.md` §6.1 覆盖表 96 = 96，零未归属；含 R3-C1..C6 + 不入库组；D-T3-1 修复 = R3-C3 | `_commit-plan.md` §6 |
-| G6-e | ✅ 满足：§5.13 共 23 条可 grep；§3 G5/G6 状态格、§6 #2-#6 状态列、§7.5 注记已核销；§9 在档；§0-§8 原文段落零删除（只改状态格/列并保留「原状态」字样）；对账见 9.6 | 本节 |
-| G6-f | ✅ 满足：`git log --oneline -1` = `dc78d2f`；未 commit/add/push；devnet 零链写零重启；新增文件仅方案 §0 清单登记件（#4/#5/#6/#7） | #7 T6.5-2/5/6 |
-
-### 9.6 不丢条目自检（合并前后对账）
-
-方法：`grep -c` 偏离编号 + `awk` 数表行 + `wc -l`（命令见 #7 T6.5 与 9.2）。
-「合并前」= T6.0 时点；「合并后」= §5.13 与本轮各状态格写入完成、§9 写入前时点
-（§9 自身的编号提及不计入对账，避免自计数）。
-
-| 项 | 合并前 | 合并后 | 判定 |
+| 门 | 判据 | 状态 | 依据（verify-raw） |
 |---|---|---|---|
-| §5 编号条目（1-12） | 12 | 12 | 保留，零删 |
-| D-T3-1 出现次数 | 6 | 8 | +2（§5.13 行 + §7.5 注记） |
-| D-T3-2 出现次数 | 4 | 6 | +2（§5.13 行 + §5.13 引导句） |
-| D-T4-1 出现次数 | 2 | 4 | +2（§5.13 行 + 原有） |
-| D-T4-2 出现次数 | 2 | 3 | +1 |
-| D-T4-3 / -4 / -5 / -6 / -7 各 | 1 | 2 | 各 +1 |
-| D-T5-1 / D-T6-1（本轮新增） | 0 / 0 | 2 / 2 | 新增登记 |
-| §5.13 表行 | — | 23 | = 12（T2）+ 2（T3）+ 7（T4）+ 2（本轮） |
-| §6 表行 | 11 | 11 | 未删行（仅状态列改写） |
-| §7.5 表行 | 4 | 4 | 未删行（仅去向列注记） |
-| 本文件总行数 | 555 | 587 | +32（§5.13 块），无删除 |
+| GT-a | `.pptx` 存在、≥10 页（方案值 12）、每页 notes 非空 | **满足** | T4 `PAGES=12`、`NOTES_OK=True`；T4.1 独立复核 `PAGES 12 / NOTES_ALL True` |
+| GT-b | KEY_HITS 字面值抽查 ≥15 项命中 pptx 全文本（含 notes） | **满足** | T4 `KEY_HITS=23/23 (MIN=15)`、`MISSING=[]` |
+| GT-b′ | 三数口径：三数同现页 ⊆ {P8}；P5 含 `10000 → 9000 → 10000`；全片无「R2 且三数」表述 | **满足** | T4 `TRIPLE_PAGES=[8]`、`P5_CHAIN=True`；T7-b′ token 扫描 + 人工复核 (a)–(d) |
+| GT-c | 分镜表时长合计 240–360s | **满足**（设计值 305s） | `demo-script.md` §7 合计行；**未经实拍计时**（D6） |
+| GT-d | 每条命令带「文件:行」且 `grep -nF` 逐字命中；S4/S5/S3 预期输出行逐一命中 | **满足**（S1 出处为限定形，见脚注 †） | T7 `CHECKS_TOTAL=65 FAILS=0`（13 命令 + 5 关键输出 + 6 代码块逐行 + 禁引反向 + 三方对表）；† 见 verify-raw §T9-①② |
+| GT-e | 收尾 HEAD 仍 `8d093b5`；`git status` 新增仅 §0 清单件 | **基本满足（1 项登记）** | T8/T8.2：HEAD 不变、代码目录 diff 空、新增仅 slides/ + demo-script.md（+ verify-raw、+ implementation.md=M，见 D1）；T9 修订只涉及 workflow-out/ 内文件，未新增 status 条目 |
+| GT-f | 差异登记段：与 KEY_HITS 不一致处、降级如实列表 | **满足** | `slides/README.md` §4（4 条，含 D7 指针限定 + D4 措辞）；`demo-script.md` §8（7 条）；本文件 §5（7 条 D1–D7）；降级路径**未触发** |
 
-**收尾声明**：本轮未执行任何 `git commit` / `git add` / `git push`（`git log --oneline -1`
-仍为 `dc78d2f`）；未对 devnet 发任何交易、未重启容器；`lyquid/` 源码零改动（冻结四件
-md5 4×OK，`committee_certified.rs` md5 与 `E2_AVG_NUM` 不变）。
+† **GT-d 脚注（S1 出处）**：S1 的 `docker ps --format "{{.Names}} {{.Status}}"` 出处指向 R3 版
+`implementation.md:443`（同节 `:617`）。T7 段执行时该行在交付树中可直接命中（当时 implementation.md
+尚为 R3 版）；T8.2 重写（D1）后交付树 grep 已 rc=1，故 T9 段按修订要求复跑：交付树 `grep -nF` →
+**rc=1**（无输出，预期），限定形 `git show 8d093b5:workflow-out/implementation.md | grep -nF '…'` →
+命中 `:443`/`:617`、`rc=0`（PASS）。详见 verify-raw §T9-①②。
+
+---
+
+## 7. 未尽清单（如实）
+
+1. **未实拍**：本脚本的 8 镜时长为设计值；实拍计时、口播磨合、字幕排版均未做（D6）。
+2. **3 分钟版未剪**：仅给剪辑点，未产出第二版分镜。
+3. **S3 的当轮实录未产生**：S3 预期输出只能静态命中 R1 档（`_r1-demo-normal-raw.txt:5/:6/:9`）；
+   录制当轮须再以新实例实录为准（方案 GT-d 明示）。
+4. **未跑 devnet / demo / keeper / deploy**：本轮无链写授权，不产生新证据（§4 末行）。
+5. **字体只在构建机实测**：`FONT_COVERAGE` 只证明本机 msyh 覆盖 630 字符；目标机缺
+   Microsoft YaHei 时的替代表现已登记（`slides/README.md` §6），未在多机验证。
+6. **`implementation.md` 重写**：见 D1，若不接受可用 `git show 8d093b5:workflow-out/implementation.md`
+   恢复 R3 版（与重写前逐字一致）。
+

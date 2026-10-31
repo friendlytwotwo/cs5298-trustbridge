@@ -1060,7 +1060,7 @@ async function runLiveDemo(kind){
       liveNewStep();
       var info=await liveWaitState(b,deal,"Settled");
       bals=await liveReadBals(b);
-      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].s="Settled";
       LIVE.steps[LIVE.steps.length-1].acts.push([0,3,"read","终读回 + 守恒校验"]);
       var tot=bals[0]+bals[1]+bals[2];
       liveLog("终态 "+deal+"="+info.state+" · alice "+fmt(bals[0])+" / broker "+fmt(bals[1])+" / bob "+fmt(bals[2]));
@@ -1096,7 +1096,7 @@ async function runLiveDemo(kind){
       liveNewStep();
       info=await liveWaitState(b,deal,"Refunded");
       bals=await liveReadBals(b);
-      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].s="Refunded";
       LIVE.steps[LIVE.steps.length-1].acts.push([0,2,"read","终读回 + 守恒校验"]);
       var tot=bals[0]+bals[1]+bals[2];
       liveLog("终态 "+deal+"="+info.state+"（全额退款）· 守恒：流动 "+fmt(tot)+" = 基线 "+fmt(LIVE.base)+(tot===LIVE.base?" ✓":" ✗"),tot===LIVE.base?"ok":"err");
@@ -1144,7 +1144,7 @@ async function runLiveDemo(kind){
       liveNewStep();
       var info=await liveWaitState(b,deal,"Refunded");
       bals=await liveReadBals(b);
-      LIVE.steps[LIVE.steps.length-1].bal=bals;
+      LIVE.steps[LIVE.steps.length-1].s="Refunded";
       LIVE.steps[LIVE.steps.length-1].acts.push([0,3,"read","终读回：退款 + 不端记录检查"]);
       liveLog("终态 "+deal+"="+info.state+" · alice "+fmt(fundedBals[0])+" → "+fmt(bals[0])+"（退款 "+fmt(bals[0]-fundedBals[0])+"）· broker/bob 不变 ✓");
       liveLog("misconduct 计数无 getter（方法面冻结）——证据为 shaker console 的 apply_verdict 累计行（_r2-adversarial-console-raw.txt 同型）");

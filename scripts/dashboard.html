@@ -127,6 +127,18 @@
   .oprow .opwho{margin-left:auto; font-size:11px; color:var(--dim); font-family:ui-monospace,Consolas,monospace}
   .oprow .cbtn{padding:3px 10px; font-size:11.5px}
   .oprow.dis .cbtn{opacity:.45; pointer-events:none}
+  .igrid{display:grid; grid-template-columns:1fr 1fr; gap:10px}
+  .icard{border:1px solid var(--line); border-radius:10px; padding:11px 13px; display:flex; flex-direction:column; gap:6px}
+  .icard .in{font-weight:500; font-size:13.5px}
+  .icard .ivs{font-size:11.5px; color:var(--dim)}
+  .icard .ie{font-size:11.5px; line-height:1.55}
+  .icard .cbtn{align-self:flex-start; margin-top:2px}
+  .ipanel{border:1px solid var(--line); border-radius:10px; padding:11px 13px; font-size:12.5px; line-height:1.65}
+  .ilist{padding-left:18px; display:flex; flex-direction:column; gap:4px}
+  .itable{width:100%; border-collapse:collapse; font-size:11.5px}
+  .itable th,.itable td{border-top:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top}
+  .itable th{color:var(--dim); font-weight:500; border-top:none; font-size:11px}
+  @media (max-width:920px){ .igrid{grid-template-columns:1fr} }
   @media (max-width:920px){ .grid{grid-template-columns:1fr} .cfg{grid-template-columns:1fr 1fr} .dcard{grid-template-columns:repeat(2,1fr)} }
 </style>
 </head>
@@ -139,6 +151,7 @@
       <button type="button" class="tb-tab on" id="tabbtn-replay">回放演示</button>
       <button type="button" class="tb-tab" id="tabbtn-live">实时链上</button>
       <button type="button" class="tb-tab" id="tabbtn-ops">操作台</button>
+      <button type="button" class="tb-tab" id="tabbtn-innov">创新与工程</button>
     </div>
   </div>
 
@@ -268,6 +281,70 @@
     </div>
   </div>
 
+  <!-- ═══════════════ Tab 4: 创新与工程 ═══════════════ -->
+  <div id="tab-innov" hidden>
+    <div class="notice">本页汇总四点创新与全部工程实证。<b>每个数字可溯源</b>：对照实验 = workflow-out/r3-t4-contrast-report.md（run-3 canonical），修复台账 = 各轮提交与实录，判级 = _r3-t7 全绿实录。</div>
+    <div class="main">
+      <h3 style="font-size:14px;font-weight:500">四点创新（计划书 §0 收敛版）</h3>
+      <div class="igrid">
+        <div class="icard">
+          <div class="in">① 委员会背书的履约裁决</div>
+          <div class="ivs">对照 ERC-8183（标准化托管但明确无仲裁）与 Virtuals ACP v2（评估者 = 收费 Agent，利益绑定）</div>
+          <div class="ie">实测：E2 四节点 oracle 认证回调，判级 <b>L2（inputs=4 + signers=4）</b>，四条 signer→NodeID 映射互异闭环；certified call 仅一次、apply_verdict 仅一次、无重复结算（T7 全绿实录）</div>
+          <button type="button" class="cbtn" data-go="committee">▶ 看委员会流回放</button>
+        </div>
+        <div class="icard">
+          <div class="in">② A2A 通信轨迹哈希公证</div>
+          <div class="ivs">对照 x402 #2833（提案：链下 attestation 锚定）——本实现为链上原生 + 守卫强制，摘要格式兼容</div>
+          <div class="ie">实测：notarize 自署名守卫（from 强制等于 caller，伪造 acceptance 被挡在共识入口）；evidence_root = FNV-1a-64 顺序敏感折叠，空日志根 cbf29ce484222325（钉死向量）</div>
+          <button type="button" class="cbtn" data-go="normal">▶ 看证据日志面板</button>
+        </div>
+        <div class="icard">
+          <div class="in">③ LLM 估时驱动的强制超时</div>
+          <div class="ivs">现有系统（ERC-8183 / Olas Mech）的 deadline 均为人工常量</div>
+          <div class="ie">实测：assess_brief 链上调用（replay 估时 60s → timeout_slots 上链）→ watcher 扫描 + 链上守卫复核 claim_timeout 全额退款；退款仅允许从 Funded 态（模型检查驱动的设计）</div>
+          <button type="button" class="cbtn" data-go="timeout">▶ 看超时流回放</button>
+        </div>
+        <div class="icard">
+          <div class="in">④ 单链集成：UPC 让中介=委员会=账本合一</div>
+          <div class="ivs">对照多合约 + 外置 oracle 的组合方案——托管、存证、裁决在同一可编程单元内</div>
+          <div class="ie">实测：同一 Lyquid 实例承载托管账本 + 证据日志 + 委员会裁决 + LLM 估时（instance 域）；E2 演示在四节点 devnet 一次跑通三流加认证</div>
+          <button type="button" class="cbtn" data-go="committee">▶ 看链上过程时序图</button>
+        </div>
+      </div>
+
+      <h3 style="font-size:14px;font-weight:500">工程实证一 · 退款规则的模型检查</h3>
+      <div class="ipanel">朴素「取消即释放全款」规则在 <b>10,080 种事件排序中 1,017 种违例</b>（评估 PDF 方法移植）。重设计后的状态机（退款仅从 Funded 态、Submitted 资金只能经 complete 或委员会裁决离开、终态无出边）经 <b>720+ 事件排序穷举 0 违例</b>，两条不变量：单一终态支出、资金守恒。壳测试 40/40（core 32 + escrow 5 + modelcheck 2）。</div>
+
+      <h3 style="font-size:14px;font-weight:500">工程实证二 · 真实缺陷修复台账（审查轮驱动）</h3>
+      <div class="ipanel"><ul class="ilist">
+        <li>未注资 cancel 铸币漏洞 —— 资金守恒模型检查发现并修复（W1-A 审查轮）</li>
+        <li>fee 溢出/下溢、裁决→终态误标、Qualified-取消语义 —— W1-A 四类缺陷加固</li>
+        <li>未签名裁决证书可伪造 —— 封装层委员会门禁拒绝（W1-A）</li>
+        <li>D-T3-1：faucet 后立刻快照（读路径滞后一块）致余额断言误报 → 读回确认修复，T7 exit 0 端到端重验（<code>d1e6f5f</code>）</li>
+        <li>R5 加固：committee_config threshold=0 fail-closed（签名门禁会空真通过）；credit() checked_add 溢出防御（wasm release 无溢出检查）（<code>c2b5cab</code>）</li>
+        <li>门控面：ACCESS_MATRIX 权限矩阵、notarize 自署名、--instance 空串 fail-closed、TARGET≠合约断言、threshold&gt;0</li>
+      </ul></div>
+
+      <h3 style="font-size:14px;font-weight:500">工程实证三 · 纯 EVM 对照实验（Why-Lyquor，run-3 canonical）</h3>
+      <div class="ipanel">
+        <table class="itable">
+          <tr><th>维度</th><th>纯 EVM Escrow.sol</th><th>Lyquid（同链同签名者实测）</th></tr>
+          <tr><td>部署 gas</td><td>1,936,008</td><td>3,843,041（R3 实例）/ 3,707,457（R2）</td></tr>
+          <tr><td>代码量（wc 三列口径）</td><td>407 行（单合约）</td><td>合约本体 2083（无注释 1323）/ 顶层合计 2933（2173）</td></tr>
+          <tr><td>委员会来源</td><td>deployer 可指定的地址表（本轮含买卖双方本人），自建 ECRECOVER，3-of-4</td><td>平台注册 NodeID ×4，4-of-4，平台证书校验后落地</td></tr>
+          <tr><td>裁决重放负对照</td><td>deal-3 签名重放到 deal-4 → <b>rc=1 "non-member signer"</b>（独立复跑确认，deal-4 保持 Disputed）</td><td>跨单重放未实验（数据缺口，如实列出）</td></tr>
+          <tr><td>认证回合开销</td><td>单笔交易传 3 签名，无链下多轮</td><td>链上回调 1 笔 52,489 gas + e2_aggregate 10 行（两轮 4 输入 + agreed）</td></tr>
+          <tr><td>超时域</td><td>block.timestamp（evm_increaseTime 推进）</td><td>slot（timeout_slots / deadline_slot）</td></tr>
+        </table>
+        <div class="root">诚实呈现：Lyquid 部署 gas 为 EVM 的 1.99× —— 代价换来平台级委员会与证据设施；完整四维数据 = workflow-out/r3-t4-contrast-report.md</div>
+      </div>
+
+      <h3 style="font-size:14px;font-weight:500">工程实证四 · 可复现性</h3>
+      <div class="ipanel">MockLLM 确定性回放（B1）· sim 三流与冻结基线逐字 diff（md5 a7cd1bdc）· demo 幂等重建 · 页内 sha256 与 protocol.py 逐字节对齐（FIPS 向量自检）· 本页所有数字可溯源到 workflow-out 实录文件。</div>
+    </div>
+  </div>
+
   <div class="foot">
     <span>展示层 · 非共识组件 —— 链上语义以读回为准</span>
     <span>单次纪律：e2_arm / e2_run_verdict_round 每实例仅一次</span>
@@ -286,14 +363,17 @@ function fmt(n){return n.toLocaleString("en-US")}
   $("tab-replay").hidden = t!=="replay";
   $("tab-live").hidden = t!=="live";
   $("tab-ops").hidden = t!=="ops";
+  $("tab-innov").hidden = t!=="innov";
   $("tabbtn-replay").className = "tb-tab"+(t==="replay"?" on":"");
   $("tabbtn-live").className = "tb-tab"+(t==="live"?" on":"");
   $("tabbtn-ops").className = "tb-tab"+(t==="ops"?" on":"");
+  $("tabbtn-innov").className = "tb-tab"+(t==="innov"?" on":"");
   if(t==="replay") drawSeq(); // svg was sized while hidden; redraw now visible
 }
 $("tabbtn-replay").addEventListener("click",function(){showTab("replay")});
 $("tabbtn-live").addEventListener("click",function(){showTab("live")});
 $("tabbtn-ops").addEventListener("click",function(){showTab("ops")});
+$("tabbtn-innov").addEventListener("click",function(){showTab("innov")});
 
 /* ═══════════════ TAB 1 · REPLAY ═══════════════ */
 var STATES = ["Qualified","Funded","Submitted","Settled"];
@@ -465,8 +545,18 @@ $("tb-play").addEventListener("click",function(){
   timer=setInterval(function(){if(step<SC[cur].steps.length-1){step++;renderReplay()}else{stopPlay()}},1600);
   $("tb-playtxt").textContent="‖ 暂停";
 });
-document.querySelectorAll(".tb-scen").forEach(function(b){b.addEventListener("click",function(){cur=b.getAttribute("data-sc");step=0;stopPlay();
-  document.querySelectorAll(".tb-scen").forEach(function(x){x.classList.toggle("on",x===b)});renderReplay();})});
+function loadScenario(sc){cur=sc;step=0;stopPlay();
+  document.querySelectorAll(".tb-scen").forEach(function(x){x.classList.toggle("on",x.getAttribute("data-sc")===sc)});
+  renderReplay();}
+document.querySelectorAll(".tb-scen").forEach(function(b){b.addEventListener("click",function(){loadScenario(b.getAttribute("data-sc"))})});
+/* 创新卡片 → 跳到对应回放场景 */
+document.addEventListener("click",function(ev){
+  var node = ev.target;
+  while(node && node !== document){
+    if(node.getAttribute && node.getAttribute("data-go")){showTab("replay");loadScenario(node.getAttribute("data-go"));return}
+    node = node.parentNode;
+  }
+});
 if(window.ResizeObserver){new ResizeObserver(function(){drawSeq()}).observe($("tb-seq"))}
 
 /* ═══════════════ TAB 2 · LIVE（只读直连） ═══════════════

@@ -119,6 +119,14 @@
   .v-badge.disputed{background:var(--warn-soft); color:var(--warn)}
   .scen2{display:flex; gap:8px; flex-wrap:wrap}
   .tb-scen.on{background:var(--accent); border-color:var(--accent); color:#fff}
+  .opgrp{border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:10px}
+  .opgrp h4{font-size:11px; font-weight:500; letter-spacing:.06em; color:var(--dim); text-transform:uppercase; margin-bottom:7px}
+  .opgrp h4 .opnote{font-weight:400; text-transform:none; letter-spacing:0; margin-left:8px}
+  .oprow{display:flex; align-items:center; gap:9px; padding:4px 0; flex-wrap:wrap}
+  .oprow .opn{font-size:12.5px; font-family:ui-monospace,Consolas,monospace}
+  .oprow .opwho{margin-left:auto; font-size:11px; color:var(--dim); font-family:ui-monospace,Consolas,monospace}
+  .oprow .cbtn{padding:3px 10px; font-size:11.5px}
+  .oprow.dis .cbtn{opacity:.45; pointer-events:none}
   @media (max-width:920px){ .grid{grid-template-columns:1fr} .cfg{grid-template-columns:1fr 1fr} .dcard{grid-template-columns:repeat(2,1fr)} }
 </style>
 </head>
@@ -130,6 +138,7 @@
     <div class="tabs">
       <button type="button" class="tb-tab on" id="tabbtn-replay">回放演示</button>
       <button type="button" class="tb-tab" id="tabbtn-live">实时链上</button>
+      <button type="button" class="tb-tab" id="tabbtn-ops">操作台</button>
     </div>
   </div>
 
@@ -233,6 +242,32 @@
     </div>
   </div>
 
+  <!-- ═══════════════ Tab 3: OPS（手动操作台） ═══════════════ -->
+  <div id="tab-ops" hidden>
+    <div class="notice" style="background:var(--bad-soft)">⚠ <b>操作台发送真实交易</b>（仅限 devnet 测试实例）。发送机制与 agents/common/rpc.py 完全一致：节点的 dev signer 后端按 <b>from 字段</b>签名，浏览器不持有任何私钥。回执 status=0x1 仅表示已排序（≠方法 Ok），<b>每笔交易后自动读回 deal_info/余额为证</b>。委员会组受单次纪律约束：e2_arm 每实例只发一次。</div>
+    <div class="main">
+      <div class="cfg">
+        <div><label for="ops-rpc">RPC 端点</label><input id="ops-rpc" value="http://127.0.0.1:10087/api"></div>
+        <div><label for="ops-con">合约地址</label><input id="ops-con" value="0x942ED2fa862887Dc698682cc6a86355324F0f01e"></div>
+        <div><label for="ops-deal">deal id（各操作的目标）</label><input id="ops-deal" value="deal-1"></div>
+        <div><label for="ops-amt">交易金额</label><input id="ops-amt" value="1000"></div>
+        <div><label for="ops-faucet">faucet 金额</label><input id="ops-faucet" value="10000"></div>
+      </div>
+      <div class="cfg">
+        <div><label for="ops-doc">交付物 doc digest（sha256，可改）</label><input id="ops-doc"></div>
+        <div><label for="ops-reason">争议 reason（DISPUTE 存证与 open_dispute 共用）</label><input id="ops-reason" value="seller accepted escrow and never delivered"></div>
+        <div><label for="ops-members">committee 成员 NodeID（逗号分隔，留空禁用）</label><input id="ops-members" placeholder="Node-…,Node-…"></div>
+        <div><label for="ops-thr">threshold</label><input id="ops-thr" value="4"></div>
+      </div>
+      <div class="lstat">
+        <span class="chip">签名者 <b>#0 broker 0xf39F…9266 / #1 alice 0x7099…79C8 / #2 bob 0x3C44…93BC</b></span>
+        <span class="chip">当前读回 <b id="ops-mini">—</b></span>
+      </div>
+      <div id="ops-list"></div>
+      <div class="term" id="ops-term" aria-label="操作日志"></div>
+    </div>
+  </div>
+
   <div class="foot">
     <span>展示层 · 非共识组件 —— 链上语义以读回为准</span>
     <span>单次纪律：e2_arm / e2_run_verdict_round 每实例仅一次</span>
@@ -247,15 +282,18 @@ var $ = function(id){return document.getElementById(id)};
 function fmt(n){return n.toLocaleString("en-US")}
 
 /* tab switching */
-function showTab(t){
+  function showTab(t){
   $("tab-replay").hidden = t!=="replay";
   $("tab-live").hidden = t!=="live";
+  $("tab-ops").hidden = t!=="ops";
   $("tabbtn-replay").className = "tb-tab"+(t==="replay"?" on":"");
   $("tabbtn-live").className = "tb-tab"+(t==="live"?" on":"");
+  $("tabbtn-ops").className = "tb-tab"+(t==="ops"?" on":"");
   if(t==="replay") drawSeq(); // svg was sized while hidden; redraw now visible
 }
 $("tabbtn-replay").addEventListener("click",function(){showTab("replay")});
 $("tabbtn-live").addEventListener("click",function(){showTab("live")});
+$("tabbtn-ops").addEventListener("click",function(){showTab("ops")});
 
 /* ═══════════════ TAB 1 · REPLAY ═══════════════ */
 var STATES = ["Qualified","Funded","Submitted","Settled"];
@@ -453,6 +491,7 @@ function encCall(sel,types,vals){
   var head="",tail="",headSize=32*types.length;
   for(var i=0;i<types.length;i++){
     if(types[i]==="string"){head+=word(headSize+tail.length/2);tail+=strEnc(String(vals[i]))}
+    else if(types[i]==="string[]"){head+=word(headSize+tail.length/2);tail+=encStrArr(vals[i])}
     else{head+=word(vals[i])}
   }
   return "0x"+sel+head+tail;
@@ -561,6 +600,203 @@ function stopLive(quiet){
 }
 $("lv-start").addEventListener("click",startLive);
 $("lv-stop").addEventListener("click",function(){stopLive(false)});
+
+/* ═══════════════ TAB 3 · OPS（手动操作台） ═══════════════
+   发送面 = agents/common/rpc.py 同型：eth_sendTransaction + 回执轮询 + 读回证明。
+   digest 计算逐字复刻 protocol.py：sha256(canonical_json)，canonical = sorted keys
+   + separators (",",":")。choices 冻结自 _ABI（cast sig 实取）。                */
+function sha256Bytes(msg){
+  var K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2];
+  var H=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  function rotr(x,n){return (x>>>n)|(x<<(32-n))}
+  var m=Array.prototype.slice.call(msg), l=msg.length;
+  m.push(0x80); while(m.length%64!==56)m.push(0);
+  var hi=Math.floor(l/0x20000000), lo=(l*8)>>>0;
+  [hi>>>24&255,hi>>>16&255,hi>>>8&255,hi&255, lo>>>24&255,lo>>>16&255,lo>>>8&255,lo&255].forEach(function(b){m.push(b)});
+  for(var i=0;i<m.length;i+=64){
+    var w=new Array(64);
+    for(var t=0;t<16;t++)w[t]=((m[i+4*t]<<24)|(m[i+4*t+1]<<16)|(m[i+4*t+2]<<8)|m[i+4*t+3])|0;
+    for(var t2=16;t2<64;t2++){
+      var s0=rotr(w[t2-15],7)^rotr(w[t2-15],18)^(w[t2-15]>>>3);
+      var s1=rotr(w[t2-2],17)^rotr(w[t2-2],19)^(w[t2-2]>>>10);
+      w[t2]=(w[t2-16]+s0+w[t2-7]+s1)|0;
+    }
+    var a=H[0],b=H[1],c=H[2],d=H[3],e=H[4],f=H[5],g=H[6],h=H[7];
+    for(var t3=0;t3<64;t3++){
+      var S1=rotr(e,6)^rotr(e,11)^rotr(e,25), ch=(e&f)^(~e&g);
+      var t1=(h+S1+ch+K[t3]+w[t3])|0;
+      var S0=rotr(a,2)^rotr(a,13)^rotr(a,22), mj=(a&b)^(a&c)^(b&c);
+      var t2v=(S0+mj)|0;
+      h=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2v)|0;
+    }
+    H[0]=(H[0]+a)|0;H[1]=(H[1]+b)|0;H[2]=(H[2]+c)|0;H[3]=(H[3]+d)|0;
+    H[4]=(H[4]+e)|0;H[5]=(H[5]+f)|0;H[6]=(H[6]+g)|0;H[7]=(H[7]+h)|0;
+  }
+  var out=[];
+  H.forEach(function(x){out.push((x>>>24)&255,(x>>>16)&255,(x>>>8)&255,x&255)});
+  return out;
+}
+function sha256HexStr(s){return bytesToHex(sha256Bytes(new TextEncoder().encode(s)))}
+/* canonical_json 复刻（sort_keys + (",",":")，紧凑；payload 均为 ASCII 可打平） */
+function canon(o){
+  if(o===null||typeof o==="number"||typeof o==="boolean")return JSON.stringify(o);
+  if(typeof o==="string")return JSON.stringify(o);
+  var keys=Object.keys(o).sort(),parts=[];
+  keys.forEach(function(k){parts.push(JSON.stringify(k)+":"+canon(o[k]))});
+  return "{"+parts.join(",")+"}";
+}
+function envDigest(kind,payload,frm,to,deal){return sha256HexStr(canon({kind:kind,payload:payload,from:frm,to:to,deal_id:deal}))}
+function termsDigests(amount){
+  var td=sha256HexStr('{"amount":'+amount+',"terms":"license:song:midnight-motors:online-video,12mo,EU"}');
+  return [td, sha256HexStr('{"check":"deliverable matches license terms","of":"'+td+'"}')];
+}
+/* string[] 编码（R2 语义：元素偏移相对长度字之后） */
+function encStrArr(arr){
+  var out=word(arr.length),tails="",off=32*arr.length;
+  arr.forEach(function(s){out+=word(off);var tb=strEnc(s);tails+=tb;off+=tb.length/2});
+  return out+tails;
+}
+
+var R0="0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266", R1="0x70997970C51812dc3A010C7d01b50e0d17dc79C8", R2="0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC";
+function shortA(a){return a.slice(0,6)+"…"+a.slice(-4)}
+var opsBusy=false, pollHandleOps=null;
+function opsLog(msg,cls){var t=$("ops-term");var d=document.createElement("div");d.className="ln"+(cls?" "+cls:"");d.textContent=msg;t.appendChild(d);t.scrollTop=t.scrollHeight}
+function opsBase(){return {base:$("ops-rpc").value.trim().replace(/\/$/,""), C:$("ops-con").value.trim(), deal:$("ops-deal").value.trim()||"deal-1",
+  amt:parseInt($("ops-amt").value,10)||1000, faucetAmt:parseInt($("ops-faucet").value,10)||10000}}
+function sendTx(base,from,C,data,sig){
+  return liveRpc(base,"eth_sendTransaction",[{from:from,to:C,data:data}]).then(function(txh){
+    opsLog("$ eth_sendTransaction "+sig+" → tx "+txh,"cmd");
+    var t0=Date.now();
+    function poll(){
+      return liveRpc(base,"eth_getTransactionReceipt",[txh]).then(function(rc){
+        if(rc)return rc;
+        if(Date.now()-t0>60000)throw new Error("60s 内无回执（tx "+txh+"）");
+        return new Promise(function(res){setTimeout(function(){res(poll())},500)});
+      });
+    }
+    return poll();
+  }).then(function(rc){
+    var ok=rc.status==="0x1";
+    opsLog("回执 status="+rc.status+" block="+parseInt(rc.blockNumber,16)+" — status≠方法Ok，读回为证", ok?"":"err");
+    return rc;
+  });
+}
+function opsReadback(){
+  var b=opsBase();
+  return liveView(b.base,b.C,"deal_info",SEL.dealInfo,["string"],[b.deal],"string").then(function(r){
+    var info=JSON.parse(r.v);
+    $("ops-mini").textContent=b.deal+"="+info.state;
+    return liveView(b.base,b.C,"balance",SEL.balance,["string"],[R1],"uint128").then(function(r1){
+      return liveView(b.base,b.C,"balance",SEL.balance,["string"],[R0],"uint128").then(function(r0){
+        return liveView(b.base,b.C,"balance",SEL.balance,["string"],[R2],"uint128").then(function(r2){
+          $("ops-mini").textContent=b.deal+"="+info.state+" · alice "+fmt(r1.v)+" / broker "+fmt(r0.v)+" / bob "+fmt(r2.v);
+        });
+      });
+    });
+  }).catch(function(e){$("ops-mini").textContent="读回失败："+e.message});
+}
+function probeNewDeal(base,C){
+  // 与 discover_deals 同型：deal-1 向上顺序探测，首个不存在的前一格 = 新 deal
+  var n=1;
+  function step(){
+    if(n>50)return Promise.resolve(null);
+    return liveView(base,C,"deal_info",SEL.dealInfo,["string"],["deal-"+n],"string").then(function(){n++;return step()})
+      .catch(function(){return n>1?("deal-"+(n-1)):null});
+  }
+  return step();
+}
+var OPS=[
+ {grp:"准备（faucet / 建单 — broker #0）",items:[
+  {id:"op-faucet",label:"faucet(alice, +faucetAmt)",who:"from #0",sel:"b540def8",types:["string","uint128"],
+   build:function(b){return{vals:[R1,b.faucetAmt],from:R0,desc:"faucet(\"0x7099…\", "+b.faucetAmt+")"}},
+   after:function(){opsLog("faucet 完成——读回见下方 alice 余额")}},
+  {id:"op-create",label:"create_deal(buyer R1, seller R2, amount, fee 200, terms/acceptance digest 自动, est 60000ms/40 回放值)",who:"from #0",sel:"bd827024",types:["string","string","uint128","uint16","string","string","uint64","uint8"],
+   build:function(b){var td=termsDigests(b.amt);return{vals:[R1,R2,b.amt,200,td[0],td[1],60000,40],from:R0,desc:"create_deal(amount="+b.amt+", terms_digest="+td[0].slice(0,10)+"…)"}},
+   after:function(base,C){return probeNewDeal(base,C).then(function(id){
+     if(id){$("ops-deal").value=id;opsLog("新 deal 探测发现："+id+"（顺序探测，与 discover_deals 同型）","ok")}
+     else{opsLog("未探测到新 deal——检查合约地址","err")}
+   })}}
+ ]},
+ {grp:"存证（notarize — from 必须等于署名者，自署名守卫）",items:[
+  {id:"op-offer",label:"notarize OFFER {budget} (alice→broker)",who:"from #1=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){return{vals:[b.deal,R1,R0,envDigest("offer",{budget:b.amt},R1,R0,b.deal)],from:R1,desc:"notarize OFFER (alice→broker)"}}},
+  {id:"op-request",label:"notarize REQUEST {amount, terms} (broker→bob)",who:"from #0=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){var td=termsDigests(b.amt);return{vals:[b.deal,R0,R2,envDigest("request-to-seller",{amount:b.amt,terms:td[0]},R0,R2,b.deal)],from:R0,desc:"notarize REQUEST (broker→bob)"}}},
+  {id:"op-acc",label:"notarize ACCEPTANCE {terms, accepted} (bob→broker)",who:"from #2=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){var td=termsDigests(b.amt);return{vals:[b.deal,R2,R0,envDigest("acceptance",{terms:td[0],accepted:true},R2,R0,b.deal)],from:R2,desc:"notarize ACCEPTANCE (bob→broker)"}}},
+  {id:"op-deliv",label:"notarize DELIVERABLE {license_doc_sha256} (bob→alice)",who:"from #2=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){var doc=$("ops-doc").value.trim();return{vals:[b.deal,R2,R1,envDigest("deliverable",{license_doc_sha256:doc},R2,R1,b.deal)],from:R2,desc:"notarize DELIVERABLE (bob→alice, doc "+doc.slice(0,10)+"…)"}}},
+  {id:"op-receipt",label:"notarize RECEIPT {ok} (alice→bob)",who:"from #1=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){return{vals:[b.deal,R1,R2,envDigest("receipt",{ok:true},R1,R2,b.deal)],from:R1,desc:"notarize RECEIPT (alice→bob)"}}},
+  {id:"op-disnote",label:"notarize DISPUTE {reason} (alice→bob)",who:"from #1=from",sel:"b1fecd5a",types:["string","string","string","string"],
+   build:function(b){var rn=$("ops-reason").value;return{vals:[b.deal,R1,R2,envDigest("dispute",{reason:rn},R1,R2,b.deal)],from:R1,desc:"notarize DISPUTE (alice→bob)"}}}
+ ]},
+ {grp:"交易流（fund=Buyer / submit=Seller / complete=Buyer / dispute=任一方 / claim=permissionless）",items:[
+  {id:"op-fund",label:"fund(deal) — 托管入金",who:"from #1 buyer",sel:"73451f65",types:["string"],
+   build:function(b){return{vals:[b.deal],from:R1,desc:"fund(\""+b.deal+"\")"}}},
+  {id:"op-submit",label:"submit_deliverable(deal, doc digest)",who:"from #2 seller",sel:"7ecc9d46",types:["string","string"],
+   build:function(b){return{vals:[b.deal,$("ops-doc").value.trim()],from:R2,desc:"submit_deliverable(\""+b.deal+"\", doc…)"}}},
+  {id:"op-complete",label:"complete(deal) — 买方同意结算（bob +98% / fee 2%）",who:"from #1 buyer",sel:"ad932b5c",types:["string"],
+   build:function(b){return{vals:[b.deal],from:R1,desc:"complete(\""+b.deal+"\")"}}},
+  {id:"op-dispute",label:"open_dispute(deal, reason digest)",who:"from #1 buyer",sel:"a48ab911",types:["string","string"],
+   build:function(b){var rd=sha256HexStr(canon({reason:$("ops-reason").value}));return{vals:[b.deal,rd],from:R1,desc:"open_dispute(\""+b.deal+"\", reason_digest="+rd.slice(0,10)+"…)"}}},
+  {id:"op-claim",label:"claim_timeout(deal) — 链上守卫复核后全额退款",who:"from #0 (permissionless)",sel:"786cfc8f",types:["string"],
+   build:function(b){return{vals:[b.deal],from:R0,desc:"claim_timeout(\""+b.deal+"\")"}}}
+ ]},
+ {grp:"委员会（⚠ 单次纪律：e2_arm 每实例只发一次；configure/run_round 走 cast 通道，请用 demo.py --flow committee）",items:[
+  {id:"op-ccfg",label:"committee_config(members[], threshold)",who:"from #0",sel:"15df3c73",types:["string[]","uint32"],needMembers:true,
+   build:function(b){var ms=$("ops-members").value.split(/[，,\s]+/).map(function(s){return s.trim()}).filter(Boolean);
+     return{vals:[ms,parseInt($("ops-thr").value,10)||4],from:R0,desc:"committee_config("+ms.length+" members, thr)"}}},
+  {id:"op-arm",label:"e2_arm(deal) — ⚠ 单次！armed_deal 读回断言后再考虑回合",who:"from #0",sel:"8b7acf91",types:["string"],
+   build:function(b){return{vals:[b.deal],from:R0,desc:"e2_arm(\""+b.deal+"\")"}}}
+ ]}
+];
+
+(function buildOps(){
+  var list=$("ops-list");
+  OPS.forEach(function(g){
+    var d=document.createElement("div");d.className="opgrp";
+    var h=document.createElement("h4");h.textContent=g.grp;d.appendChild(h);
+    g.items.forEach(function(op){
+      var r=document.createElement("div");r.className="oprow";
+      r.innerHTML='<span class="opn">'+op.label+'</span><span class="opwho">'+op.who+'</span><button type="button" class="cbtn acc" id="'+op.id+'">执行</button>';
+      d.appendChild(r);
+      r.querySelector("button").addEventListener("click",function(){runOp(op)});
+    });
+    list.appendChild(d);
+  });
+})();
+function runOp(op){
+  if(opsBusy){opsLog("上一笔交易仍在途，请稍候","err");return}
+  var b=opsBase();
+  if(op.needMembers && !$("ops-members").value.trim()){opsLog("committee members 为空——填入 NodeID 后再执行","err");return}
+  opsBusy=true;
+  var built=op.build(b);
+  opsLog("$ "+built.desc+"  (from "+shortA(built.from)+")","cmd");
+  sendTx(b.base,built.from,b.C,encCall(op.sel,op.types,built.vals),op.sel)
+    .then(function(rc){ if(op.after)return op.after(b.base,b.C); })
+    .then(function(){return opsReadback()})
+    .catch(function(e){opsLog("失败："+e.message,"err")})
+    .then(function(){opsBusy=false});
+}
+/* sha256 自检（FIPS 向量）+ doc digest 预填 */
+(function opsInit(){
+  var v=sha256HexStr("abc");
+  if(v==="ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"){
+    opsLog("sha256 自检 ✓（FIPS \"abc\" 向量）——digest 与 protocol.py 同源","ok");
+  } else {
+    opsLog("sha256 自检失败！digest 不可信，勿用存证操作（得到 "+v+"）","err");
+    document.querySelectorAll("#op-offer,#op-request,#op-acc,#op-deliv,#op-receipt,#op-disnote").forEach(function(b){b.disabled=true;b.parentNode.classList.add("dis")});
+  }
+  $("ops-doc").value=sha256HexStr("license-doc:midnight-motors:online-video:12mo");
+})();
 
 /* initial render */
 renderReplay();

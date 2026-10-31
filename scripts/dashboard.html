@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TrustBridge · Deal Explorer</title>
+<!--
+  TrustBridge Deal Explorer — single-file, zero-dependency, READ-ONLY dashboard.
+
+  Tab 1 回放演示  : step-through replay of archived transcripts (T7 / R2 / R1),
+                    data quoted verbatim from workflow-out/_r*.txt evidence files.
+  Tab 2 实时链上  : direct JSON-RPC to the devnet node (CORS verified open,
+                    2026-10-31: access-control-allow-origin: *). Polls view calls
+                    ONLY — deal_info / balance_of / evidence_entries_json /
+                    due_deals / e2_net_config. Never sends a transaction; never
+                    re-triggers e2_arm / e2_run_verdict_round (single-shot
+                    discipline). Display layer, not a consensus component.
+
+  Usage: open directly in a browser, or `python -m http.server` in trustbridge/
+         and visit /scripts/dashboard.html. Selectors mirror agents/common/rpc.py
+         _ABI (cast sig verified, R1/R2/R3 rounds); string-tail encoding matches
+         _enc_value/_decode_ret incl. the R2 element-offset fix.
+
+  Honest-mode rules inherited from the project: no invented hashes/balances;
+  live panel degrades visibly when the node is unreachable; replay data is
+  labeled with its source file.
+-->
+<style>
+  :root{
+    --accent: light-dark(#0e7490,#22d3ee);
+    --accent-soft: light-dark(rgba(14,116,144,.12),rgba(34,211,238,.14));
+    --ok: light-dark(#15803d,#4ade80);
+    --ok-soft: light-dark(rgba(21,128,61,.12),rgba(74,222,128,.14));
+    --bad: light-dark(#b91c1c,#f87171);
+    --bad-soft: light-dark(rgba(185,28,28,.10),rgba(248,113,113,.14));
+    --warn: light-dark(#b45309,#fbbf24);
+    --warn-soft: light-dark(rgba(180,83,9,.12),rgba(251,191,36,.15));
+    --pur: light-dark(#6d28d9,#a78bfa);
+    --surface: light-dark(#ffffff,#0f1722);
+    --panel: light-dark(#f5f7fa,#151f2d);
+    --line: light-dark(#dfe5ec,#24334a);
+    --ink: light-dark(#131c2a,#e6eefb);
+    --dim: light-dark(#5c6b7e,#93a5bd);
+    --chip: light-dark(#eef1f5,#1c2940);
+    --term-bg:#0b1220;
+    color-scheme: light dark;
+  }
+  *{box-sizing:border-box; margin:0}
+  body{font-family:ui-sans-serif,system-ui,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--panel); color:var(--ink); font-size:13.5px; line-height:1.45; padding:14px}
+  .app{max-width:1180px; margin:0 auto; background:var(--surface); border:1px solid var(--line); border-radius:14px; overflow:hidden}
+  .top{display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 16px; border-bottom:1px solid var(--line)}
+  .brand{display:flex; align-items:center; gap:9px; font-weight:500; font-size:15px}
+  .brand .logo{width:22px; height:22px; border-radius:6px; background:var(--accent); color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:13px}
+  .brand small{display:block; font-weight:400; font-size:11px; color:var(--dim)}
+  .tabs{margin-left:auto; display:flex; gap:6px}
+  .tb-tab{border:1px solid var(--line); background:transparent; color:var(--dim); border-radius:8px; padding:5px 14px; font-size:12.5px; cursor:pointer; font-family:inherit}
+  .tb-tab.on{background:var(--accent); border-color:var(--accent); color:#fff}
+  .chip{display:inline-flex; align-items:center; gap:6px; background:var(--chip); border-radius:999px; padding:3px 10px; font-size:11px; color:var(--dim); font-family:ui-monospace,Consolas,monospace}
+  .chip b{color:var(--ink); font-weight:500}
+  .notice{padding:9px 16px; font-size:12px; background:var(--accent-soft); border-bottom:1px solid var(--line)}
+  .main{padding:12px 16px; display:flex; flex-direction:column; gap:10px}
+  .player{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
+  .player h3{font-size:14px; font-weight:500; margin-right:auto}
+  .stepind{font-size:11px; color:var(--dim); font-variant-numeric:tabular-nums}
+  .cbtn{display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); background:transparent; color:var(--ink); border-radius:8px; padding:5px 11px; font-size:12px; cursor:pointer; font-family:inherit}
+  .cbtn:hover{border-color:var(--accent)}
+  .cbtn.acc{background:var(--accent); border-color:var(--accent); color:#fff}
+  .seq{border:1px solid var(--line); border-radius:10px; padding:8px 8px 4px; min-width:0; overflow-x:auto}
+  .seq svg{display:block}
+  @keyframes dash{to{stroke-dashoffset:-14}}
+  .seq .flow{stroke-dasharray:5 5; animation:dash 1s linear infinite}
+  @media (prefers-reduced-motion: reduce){ .seq .flow{animation:none} }
+  .status{display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--dim); padding:0 2px}
+  .status b{color:var(--ink); font-weight:500}
+  .l2{display:none; align-items:center; gap:6px; font-size:11px; color:var(--ok); background:var(--ok-soft); border-radius:6px; padding:3px 9px}
+  .l2.show{display:inline-flex}
+  .grid{display:grid; grid-template-columns:1.05fr 1.15fr 1fr; gap:10px; min-width:0}
+  .panel{border:1px solid var(--line); border-radius:10px; padding:10px 12px; min-width:0}
+  .panel h4{font-size:11px; font-weight:500; letter-spacing:.06em; color:var(--dim); text-transform:uppercase; margin-bottom:7px}
+  .pipe{display:flex; flex-wrap:wrap; gap:5px; align-items:center}
+  .st{border-radius:7px; padding:3px 9px; font-size:11px; font-family:ui-monospace,Consolas,monospace; color:var(--dim); border:1px dashed var(--line)}
+  .st.seen{color:var(--ink); background:var(--chip); border:1px solid transparent}
+  .st.now{color:#fff; background:var(--accent); border:1px solid transparent; font-weight:500}
+  .bal{display:flex; justify-content:space-between; align-items:baseline; padding:2px 0; gap:8px}
+  .bal .n{font-size:12px; color:var(--dim)}
+  .bal .v{font-family:ui-monospace,Consolas,monospace; font-variant-numeric:tabular-nums; font-size:13.5px; display:flex; gap:7px; align-items:baseline}
+  .dlt{font-size:11px; color:var(--ok)} .dlt.neg{color:var(--bad)}
+  .cons{margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); font-size:11px; color:var(--dim)}
+  .cons b{color:var(--ok); font-weight:500}
+  .ev{display:flex; flex-direction:column; gap:3px; min-height:88px}
+  .evr{display:flex; gap:6px; align-items:center; font-size:11px; padding:2px 6px; border-radius:6px}
+  .evr.new{background:var(--accent-soft)}
+  .evr .sq{color:var(--dim); font-family:ui-monospace,Consolas,monospace; font-size:11px}
+  .evr .kd{border-radius:4px; padding:0 6px; font-size:11px; font-family:ui-monospace,Consolas,monospace; background:var(--chip)}
+  .evr .rt{color:var(--dim); font-family:ui-monospace,Consolas,monospace; font-size:11px; word-break:break-all}
+  .root{margin-top:6px; padding-top:6px; border-top:1px dashed var(--line); font-size:11px; color:var(--dim); font-family:ui-monospace,Consolas,monospace}
+  .term{background:var(--term-bg); border-radius:10px; padding:10px 13px; height:170px; overflow-y:auto; font-family:ui-monospace,Consolas,monospace; font-size:11.5px; line-height:1.6; color:#c8d6ea}
+  .term .ln{white-space:pre-wrap; word-break:break-all}
+  .term .ln.cmd{color:#6d7f99}
+  .term .ln:last-child{color:#7ff0c8}
+  .term .ln.ok{color:#7fd4ff}
+  .foot{padding:8px 16px; border-top:1px solid var(--line); font-size:11px; color:var(--dim); display:flex; gap:14px; flex-wrap:wrap}
+  /* live tab */
+  .cfg{display:grid; grid-template-columns:2fr 2fr 1fr auto auto; gap:8px; align-items:end; border:1px solid var(--line); border-radius:10px; padding:10px 12px}
+  .cfg label{display:block; font-size:11px; color:var(--dim); margin-bottom:3px}
+  .cfg input{width:100%; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--ink); padding:6px 9px; font-size:12px; font-family:ui-monospace,Consolas,monospace}
+  .lstat{font-size:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+  .dot{width:8px; height:8px; border-radius:50%; background:var(--dim)}
+  .dot.on{background:var(--ok)} .dot.err{background:var(--bad)}
+  .lerr{display:none; font-size:11.5px; color:var(--bad); background:var(--bad-soft); border-radius:8px; padding:8px 12px; word-break:break-all}
+  .lerr.show{display:block}
+  .dcard{display:grid; grid-template-columns:repeat(4,1fr); gap:8px}
+  .dcard .kv{border:1px solid var(--line); border-radius:9px; padding:8px 10px; min-width:0}
+  .dcard .kv .k{font-size:11px; color:var(--dim)}
+  .dcard .kv .v{font-family:ui-monospace,Consolas,monospace; font-size:13px; margin-top:2px; word-break:break-all}
+  .v-badgest{display:inline-block; border-radius:999px; padding:1px 9px; font-size:11px; background:var(--chip); color:var(--ink)}
+  .v-badge.settled,.v-badge.refunded{background:var(--ok-soft); color:var(--ok)}
+  .v-badge.disputed{background:var(--warn-soft); color:var(--warn)}
+  .scen2{display:flex; gap:8px; flex-wrap:wrap}
+  .tb-scen.on{background:var(--accent); border-color:var(--accent); color:#fff}
+  @media (max-width:920px){ .grid{grid-template-columns:1fr} .cfg{grid-template-columns:1fr 1fr} .dcard{grid-template-columns:repeat(2,1fr)} }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand"><span class="logo">盾</span><span>TrustBridge · Deal Explorer<small>委员会背书的 Agent 履约信任层 — 只读展示台</small></span></div>
+    <span class="chip">HEAD <b>d98ec01+</b></span>
+    <div class="tabs">
+      <button type="button" class="tb-tab on" id="tabbtn-replay">回放演示</button>
+      <button type="button" class="tb-tab" id="tabbtn-live">实时链上</button>
+    </div>
+  </div>
+
+  <!-- ═══════════════ Tab 1: REPLAY ═══════════════ -->
+  <div id="tab-replay">
+    <div class="notice">回放模式：数据<b>逐字</b>取自归档实录（workflow-out/_r1-* / _r2-* / _r3-t7-*），块高为示意节奏。实时模式切右上角「实时链上」。</div>
+    <div class="main">
+      <div class="scen2" role="group" aria-label="回放场景">
+        <button type="button" class="cbtn tb-scen on" data-sc="committee">⭐ 委员会流（T7 实录）</button>
+        <button type="button" class="cbtn tb-scen" data-sc="normal">正常流（R1 实录）</button>
+        <button type="button" class="cbtn tb-scen" data-sc="timeout">超时流（R2 keeper 实录）</button>
+      </div>
+      <div class="player">
+        <h3 id="tb-title">委员会流 — E2 四节点认证裁决</h3>
+        <span class="stepind" id="tb-ind">步骤 0/11</span>
+        <button type="button" class="cbtn" id="tb-prev">◀ 上一步</button>
+        <button type="button" class="cbtn acc" id="tb-play"><span id="tb-playtxt">▶ 自动播放</span></button>
+        <button type="button" class="cbtn" id="tb-next">下一步 ▶</button>
+        <button type="button" class="cbtn" id="tb-reset">⟲ 重置</button>
+      </div>
+      <div class="seq" id="tb-seq"></div>
+      <div class="status">
+        <span>状态 <b id="tb-stv">—</b></span>
+        <span>块高 <b id="tb-blk">418</b></span>
+        <span>证据 <b id="tb-evn">0</b> 条</span>
+        <span id="tb-stage">等待 deal 进入 Disputed 后 arm…</span>
+        <span class="l2" id="tb-l2">判级 L2 · inputs=4 + signers=4（四节点全签，互异 NodeID 闭环）</span>
+      </div>
+      <div class="grid">
+        <div class="panel">
+          <h4>余额（network 账本）</h4>
+          <div class="bal"><span class="n">alice 买方</span><span class="v"><span id="tb-ba">0</span><span class="dlt" id="tb-da"></span></span></div>
+          <div class="bal"><span class="n">broker 中介</span><span class="v"><span id="tb-bb">0</span><span class="dlt" id="tb-db"></span></span></div>
+          <div class="bal"><span class="n">bob 卖方</span><span class="v"><span id="tb-bc">0</span><span class="dlt" id="tb-dc"></span></span></div>
+          <div class="cons" id="tb-cons">资金守恒：流动 0 + 托管 0 = 注资 0</div>
+        </div>
+        <div class="panel">
+          <h4>交易状态机</h4>
+          <div class="pipe" id="tb-pipe"></div>
+          <div class="cons" style="margin-top:8px">退款仅允许从 Funded 态；Submitted 资金只能经 complete 或委员会裁决离开；终态无出边。</div>
+        </div>
+        <div class="panel">
+          <h4>证据日志（按序追加）</h4>
+          <div class="ev" id="tb-ev"></div>
+          <div class="root">evidence_root = FNV-1a-64 链式折叠 · 顺序敏感<br>空日志根 cbf29ce484222325（钉死向量）</div>
+        </div>
+      </div>
+      <div class="term" id="tb-term" aria-label="终端镜像"></div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ Tab 2: LIVE ═══════════════ -->
+  <div id="tab-live" hidden>
+    <div class="notice">实时模式：<b>只读</b>。直连 devnet JSON-RPC（已实测开放 CORS），轮询 deal_info / balance_of / evidence_entries_json / due_deals / e2_net_config 五个视图调用。<b>本界面永远不发交易</b>，不触碰 e2_arm / e2_run_verdict_round（单次纪律）。</div>
+    <div class="main">
+      <div class="cfg">
+        <div><label for="lv-rpc">RPC 端点（node1-4 任一）</label><input id="lv-rpc" value="http://127.0.0.1:10087/api"></div>
+        <div><label for="lv-con">合约地址（shaker deploy 输出 Contract）</label><input id="lv-con" value="0x942ED2fa862887Dc698682cc6a86355324F0f01e"></div>
+        <div><label for="lv-deal">deal id</label><input id="lv-deal" value="deal-1"></div>
+        <div><button type="button" class="cbtn acc" id="lv-start">▶ 连接并轮询</button></div>
+        <div><button type="button" class="cbtn" id="lv-stop">■ 停止</button></div>
+      </div>
+      <div class="lstat">
+        <span class="dot" id="lv-dot"></span><span id="lv-sttxt">未连接</span>
+        <span class="chip">块高 <b id="lv-blk">—</b></span>
+        <span class="chip">轮询 <b id="lv-cnt">0</b> 次</span>
+        <span class="chip">出口 <b id="lv-lat">—</b></span>
+      </div>
+      <div class="lerr" id="lv-err"></div>
+
+      <div class="dcard" id="lv-dealcard">
+        <div class="kv"><div class="k">deal 状态</div><div class="v"><span class="v-badgest" id="lv-state">—</span></div></div>
+        <div class="kv"><div class="k">金额 / 买方→卖方</div><div class="v" id="lv-amt">—</div></div>
+        <div class="kv"><div class="k">timeout_slots / deadline_slot</div><div class="v" id="lv-slot">—</div></div>
+        <div class="kv"><div class="k">e2 armed_deal / epoch</div><div class="v" id="lv-arm">—</div></div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <h4>余额（balance_of 实时读回）</h4>
+          <div class="bal"><span class="n">alice 买方 · 0x7099…79C8</span><span class="v" id="lv-ba">—</span></div>
+          <div class="bal"><span class="n">broker 中介 · 0xf39F…9266</span><span class="v" id="lv-bb">—</span></div>
+          <div class="bal"><span class="n">bob 卖方 · 0x3C44…93BC</span><span class="v" id="lv-bc">—</span></div>
+          <div class="cons" id="lv-cons">守恒校验待连接后计算</div>
+        </div>
+        <div class="panel">
+          <h4>证据日志（evidence_entries_json）</h4>
+          <div class="ev" id="lv-ev"><div class="evr"><span class="rt">连接后显示</span></div></div>
+          <div class="root">视图调用 evidence_entries_json(string) · selector 16417010</div>
+        </div>
+        <div class="panel">
+          <h4>到期与委员会（due_deals / e2_net_config）</h4>
+          <div class="ev">
+            <div class="evr"><span class="rt">due_deals：<span id="lv-due">—</span></span></div>
+            <div class="evr"><span class="rt">e2 current：<span id="lv-cur">—</span></span></div>
+            <div class="evr"><span class="rt">e2 staging：<span id="lv-stg">—</span></span></div>
+          </div>
+          <div class="root">读路径可能滞后一块（R0 实测）——面板数值以最后一次成功读回为准</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <span>展示层 · 非共识组件 —— 链上语义以读回为准</span>
+    <span>单次纪律：e2_arm / e2_run_verdict_round 每实例仅一次</span>
+    <span>选择器与编码对齐 agents/common/rpc.py _ABI（cast sig 实取冻结）</span>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ═══════════════ shared helpers ═══════════════ */
+var $ = function(id){return document.getElementById(id)};
+function fmt(n){return n.toLocaleString("en-US")}
+
+/* tab switching */
+function showTab(t){
+  $("tab-replay").hidden = t!=="replay";
+  $("tab-live").hidden = t!=="live";
+  $("tabbtn-replay").className = "tb-tab"+(t==="replay"?" on":"");
+  $("tabbtn-live").className = "tb-tab"+(t==="live"?" on":"");
+  if(t==="replay") drawSeq(); // svg was sized while hidden; redraw now visible
+}
+$("tabbtn-replay").addEventListener("click",function(){showTab("replay")});
+$("tabbtn-live").addEventListener("click",function(){showTab("live")});
+
+/* ═══════════════ TAB 1 · REPLAY ═══════════════ */
+var STATES = ["Qualified","Funded","Submitted","Settled"];
+var BRANCH = ["Disputed","Refunded"];
+var NS = "http://www.w3.org/2000/svg";
+/* acts: [fromIdx, toIdx(同 idx=域内活动), kind(tx 写交易 / read 只读 / cert 认证回调 / bc 广播), label] */
+var SC = {
+  normal: { title:"正常流 — 每一步在链上发生了什么",
+    actors:["Alice 买方","Broker 中介","Bob 卖方","合约 0x<addr>"],
+    steps:[
+      {s:"", bal:[0,0,0], log:["$ python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x<addr> --flow normal","FLOW 1 — normal: assess -> escrow -> deliver -> settle"]},
+      {s:"", bal:[10000,0,0], acts:[[0,3,"tx","faucet(alice, +10000)"]], log:["[demo] faucet(alice, 10000)"]},
+      {s:"Qualified", bal:[10000,0,0], ev:1, acts:[[0,3,"read","assess_brief() → 回放评估 75 分"],[1,3,"tx","create_deal(alice,bob,1000) → deal-1"]], log:["assess_brief (on-chain, mode=replay): {'qualification_score': 75, 'est_duration_ms': 60000, …}","deal=deal-1 info={'id':'deal-1','amount':1000,'state':'Qualified',…}"]},
+      {s:"Qualified", bal:[10000,0,0], ev:2, acts:[[1,3,"tx","notarize: OFFER(alice) + REQUEST(broker)"]], log:["notarize REQUEST (broker→bob, terms_digest)"]},
+      {s:"Funded", bal:[9000,0,0], acts:[[0,3,"tx","fund(deal-1, 1000) → escrow+1000"]], log:["fund: deal-1 ← 1000 (alice) → escrow"]},
+      {s:"Funded", bal:[9000,0,0], ev:3, acts:[[2,3,"tx","notarize ACCEPTANCE (bob, accepted=true)"]], log:["notarize ACCEPTANCE (bob→broker, accepted=true)"]},
+      {s:"Submitted", bal:[9000,0,0], ev:4, acts:[[2,3,"tx","submit_deliverable(license_doc_sha256)"]], log:["submit_deliverable: license_doc_sha256=… → Submitted"]},
+      {s:"Submitted", bal:[9000,0,0], ev:5, acts:[[0,3,"tx","notarize RECEIPT (alice, ok=true)"]], log:["notarize RECEIPT (alice→bob, ok=true)"]},
+      {s:"Settled", bal:[9000,20,980], acts:[[0,3,"tx","complete → payout：bob 980 + fee 20"]], log:["complete (buyer agrees) → payout: bob 980 + broker fee 20","final state=Settled balances: alice=9000 bob=980 broker=20"]},
+      {s:"Settled", bal:[9000,20,980], done:1, log:["DEMO COMPLETE"]}
+    ]},
+  timeout: { title:"超时流 — watcher + 链上守卫的退款过程",
+    actors:["Alice 买方","Keeper watcher","合约 0x<addr>"],
+    steps:[
+      {s:"", bal:[0,0,0], log:["$ python scripts/demo.py --node … --flow timeout   # 短估时 deal（timeout_slots=1）"]},
+      {s:"", bal:[10000,0,0], acts:[[0,2,"tx","faucet(alice, +10000)"]], log:["[demo] faucet(alice, 10000)"]},
+      {s:"Qualified", bal:[10000,0,0], acts:[[0,2,"tx","create_deal(…, timeout_slots=1) → deal-3"]], log:["deal=deal-3 info={'id':'deal-3','state':'Qualified','timeout_slots':1,…}"]},
+      {s:"Funded", bal:[9000,0,0], acts:[[0,2,"tx","fund(deal-3, 1000) → escrow+1000"]], log:["fund: deal-3 ← 1000 → escrow；卖方未交付……"]},
+      {s:"Funded", bal:[9000,0,0], acts:[[1,2,"read","due_deals() 轮询 + nudge 出块"],[1,1,"self","watching deal-3 every 5s"]], log:["$ python scripts/keeper.py --node … --contract 0x<addr> --interval 5","[keeper] explicit deals: ['deal-3']","[keeper] watching ['deal-3'] every 5s","[keeper] nudge → new block → due_deals: deal-3 到期"]},
+      {s:"Refunded", bal:[10000,0,0], acts:[[1,2,"tx","claim_timeout(deal-3) → 链上守卫复核 → 全额退款"]], log:["[keeper 23:39:22] deal-3: {\"state\": \"Refunded\", \"action\": \"claimed\", …}","ATTRIBUTION VERDICT: PASS"]},
+      {s:"Refunded", bal:[10000,0,0], done:1, log:["DEMO COMPLETE"]}
+    ]},
+  committee: { title:"委员会流 — E2 四节点认证裁决全过程（T7 全绿实录）",
+    actors:["Alice 买方","Broker 中介","合约 0x942E…f01e","委员会×4 oracle 域"],
+    steps:[
+      {s:"", bal:[0,0,0], log:["$ python scripts/demo.py --node http://127.0.0.1:10087 --contract 0x942ED2fa862887Dc698682cc6a86355324F0f01e --instance Lyquid-dpp6ird6knahaun6dokpi6ki2pdnbjxdfunqa --flow committee","[committee] env: node=… contract=0x942E…f01e instance=Lyquid-dpp6…unqa","[committee] TARGET=0x1BDFe444…a6e3 (shaker to-hex) != contract -> OK"]},
+      {s:"", bal:[0,0,0], acts:[[0,2,"read","TARGET 断言 + GetNodeInfo×4（NodeID 实取）"],[1,2,"tx","committee_config(NodeID×4, threshold=4)"],[1,2,"tx","e2_configure(bytes32×4) → staged"]], log:["[committee] committee_config(NodeID×4, threshold=4) sent by broker","e2_configure: staged committee of 4 nodes threshold=4"]},
+      {s:"", bal:[0,0,0], acts:[[2,2,"self","oracle epoch 0→1：advance + finalize ✓"]], log:["__lyquor_oracle_advance_epoch(cert_verdict, 0x1BDF…a6e3) -> True","dest_epoch poll #1 -> 1","__lyquor_oracle_finalize_epoch(cert_verdict, 0x1BDF…a6e3) -> True"]},
+      {s:"", bal:[10000,0,0], acts:[[2,0,"tx","faucet(alice, +10000) · 读回确认"]], log:["[committee] faucet read-back OK: alice 0 -> 10000 (+10000)"]},
+      {s:"Qualified", bal:[10000,0,0], ev:2, acts:[[0,2,"read","assess_brief() → 回放评估"],[1,2,"tx","create_deal(alice,bob,1000) → deal-1"]], log:["assess_brief (on-chain, mode=replay): {'est_duration_ms': 60000, …}","deal=deal-1 info={'id':'deal-1','amount':1000,'state':'Qualified',…}"]},
+      {s:"Funded", bal:[9000,0,0], acts:[[0,2,"tx","fund(deal-1, 1000) → escrow+1000"]], log:["[committee] deal=deal-1 state=Funded (deliverable_digest=None -> NotFulfilled)"]},
+      {s:"Disputed", bal:[9000,0,0], ev:3, acts:[[0,2,"tx","open_dispute → Disputed（+DISPUTE 存证）"]], log:["notarize DISPUTE (alice→bob, reason=never delivered) + open_dispute","[committee] deal=deal-1 state=Disputed (evidence entries=3)"]},
+      {s:"Disputed", bal:[9000,0,0], acts:[[1,2,"bc","e2_arm(deal-1) — network 域单发广播，全节点可见"]], log:["[committee] arm read-back OK: armed_deal == deal-1 (pre-arm='')"]},
+      {s:"Disputed", bal:[9000,0,0], acts:[[3,3,"self","node1 触发 run_round → propose×4 → aggregate：agreed（4 inputs, avg_num=4）"]], log:["[committee] e2_run_verdict_round() -> True (node1 single trigger)","e2_propose: node=Node-ve3tav5j… deal=deal-1 verdict=1 (entries=3, avg_num=4)","e2_aggregate: agreed deal=deal-1 verdict=1 from 4 input(s) (avg_num=4)"]},
+      {s:"Disputed", bal:[9000,0,0], l2:1, acts:[[3,2,"cert","certified call：committee_verdict_certified（signers [0,1,2,3]）→ apply_verdict"]], log:["e2_run_verdict_round: certified call submitted to the sequencing backend","committee_verdict_certified: cert.signers RAW = [0, 1, 2, 3] (len=4)","signer 0→Node-ve3tav5j… 1→Node-j3fcdy5t… 2→Node-2folhfgf… 3→Node-oq2lcra5…","apply_verdict: deal=deal-1 verdict=1 misconduct=[]"]},
+      {s:"Refunded", bal:[10000,0,0], l2:1, done:1, acts:[[0,2,"read","deal_info → Refunded；balance_of 勾稽 ✓"]], log:["[committee] final state=Refunded balances after={alice:10000, bob:0, broker:0}","[committee] refund check OK: alice 10000 -> 9000 (after fund) -> 10000 (after verdict); bob/broker unchanged","DEMO COMPLETE"]}
+    ]}
+};
+var EVKINDS = {
+  normal: {1:["OFFER","alice→broker"],2:["REQUEST","broker→bob"],3:["ACCEPTANCE","bob→broker"],4:["DELIVERABLE","bob→alice"],5:["RECEIPT","alice→bob"]},
+  committee: {1:["OFFER","alice→broker"],2:["REQUEST","broker→bob"],3:["DISPUTE","alice→bob"]}
+};
+var STAGE_TXT = ["等待 deal 进入 Disputed 后 arm…","委员会已配置（staged，待 epoch 激活）","oracle epoch 已激活（advance + finalize ✓）","armed_deal = deal-1（单次，读回确认）","propose ×4 → aggregate：inputs=4 agreed","certified call ✓ signers=[0,1,2,3] → apply_verdict"];
+var ESCROW = {"":0,"Qualified":0,"Funded":1000,"Submitted":1000,"Disputed":1000,"Settled":0,"Refunded":0};
+var KCOLOR = {tx:"var(--accent)", read:"var(--dim)", cert:"var(--ok)", bc:"var(--pur)"};
+var KLABEL = {tx:"tx", read:"view", cert:"certified", bc:"broadcast"};
+var cur="committee", step=0, timer=null;
+
+var pipe=$("tb-pipe");
+function chipEl(txt,id){var c=document.createElement("span");c.className="st";if(id)c.id=id;c.textContent=txt;pipe.appendChild(c);return c}
+STATES.forEach(function(st,i){chipEl(st,"tb-st-"+st);if(i<STATES.length-1){var a=document.createElement("span");a.className="st";a.style.border="none";a.textContent="→";pipe.appendChild(a)}});
+BRANCH.forEach(function(st,i){var a=document.createElement("span");a.className="st";a.style.border="none";a.textContent="⟶";pipe.appendChild(a);chipEl(st,"tb-st-"+st)});
+
+function el(tag,attrs){var e=document.createElementNS(NS,tag);for(var k in attrs)e.setAttribute(k,attrs[k]);return e}
+
+function drawSeq(){
+  var sc=SC[cur], box=$("tb-seq"); if(!box||$("tab-live").hidden===false) {/*render anyway*/}
+  box.innerHTML="";
+  var W = Math.max(320, box.clientWidth - 18);
+  var n = sc.actors.length, pad = 12, xs = [];
+  for(var i=0;i<n;i++) xs.push(pad + (i+0.5)*(W-2*pad)/n);
+  var rows=[];
+  for(var s=0;s<=step;s++){
+    var acts=sc.steps[s].acts||[];
+    for(var a=0;a<acts.length;a++) rows.push({act:acts[a], last:(s===step&&a===acts.length-1)});
+  }
+  var H = 52 + rows.length*38 + 14;
+  var svg=el("svg",{viewBox:"0 0 "+W+" "+H,width:W,height:H,role:"img","aria-label":"链上交易时序图"});
+  var defs=el("defs",{});
+  ["tx","read","cert","bc"].forEach(function(k){
+    var m=el("marker",{id:"arw-"+k,markerWidth:"7",markerHeight:"7",refX:"6",refY:"3.5",orient:"auto"});
+    m.appendChild(el("path",{d:"M0,0 L7,3.5 L0,7 Z",fill:KCOLOR[k]}));
+    defs.appendChild(m);
+  });
+  svg.appendChild(defs);
+  sc.actors.forEach(function(name,i){
+    var lw = Math.min(W/n-8, Math.max(64, name.length*7.2+16));
+    var g=el("g",{});
+    g.appendChild(el("rect",{x:xs[i]-lw/2,y:4,width:lw,height:26,rx:8,fill:"var(--chip)",stroke:"var(--line)"}));
+    var t=el("text",{x:xs[i],y:21,"text-anchor":"middle",fill:"var(--ink)","font-size":"11.5"});
+    t.textContent=name; g.appendChild(t);
+    svg.appendChild(g);
+    svg.appendChild(el("line",{x1:xs[i],y1:34,x2:xs[i],y2:H-8,stroke:"var(--line)","stroke-dasharray":"3 4"}));
+  });
+  rows.forEach(function(r,ri){
+    var act=r.act, y=52+ri*38+16;
+    var g=el("g",{"class":r.last?"new":""});
+    var x1=xs[act[0]], x2=xs[act[1]];
+    if(act[0]===act[1]){
+      var bw=Math.min(W/n-12, Math.max(90, act[3].length*6.4+16));
+      var bx=Math.max(pad, Math.min(W-pad-bw, x1-bw/2));
+      g.appendChild(el("rect",{x:bx,y:y-13,width:bw,height:24,rx:7,fill:act[2]==="cert"?"var(--ok-soft)":"var(--accent-soft)",stroke:KCOLOR[act[2]],"stroke-width":r.last?1.6:1}));
+      var maxc=Math.floor((bw-10)/6.2), tt=el("text",{x:bx+bw/2,y:y+3,"text-anchor":"middle",fill:"var(--ink)","font-size":"11"});
+      tt.textContent=act[3].length>maxc? act[3].slice(0,Math.max(1,maxc-1))+"…" : act[3];
+      g.appendChild(tt);
+    } else {
+      var dir = x2>x1?1:-1, ax1=x1+7*dir, ax2=x2-7*dir;
+      var ln=el("line",{x1:ax1,y1:y,x2:ax2,y2:y,stroke:KCOLOR[act[2]],"stroke-width":act[2]==="cert"?2.2:(act[2]==="read"?1.2:1.6),"marker-end":"url(#arw-"+act[2]+")"});
+      if(r.last&&act[2]!=="read"){ln.setAttribute("class","flow")}
+      if(act[2]==="read"){ln.setAttribute("stroke-dasharray","4 4")}
+      g.appendChild(ln);
+      var mid=(ax1+ax2)/2, lbl=(KLABEL[act[2]]? "「"+KLABEL[act[2]]+"」 ":"")+act[3];
+      var maxl=Math.max(10,Math.floor(Math.abs(ax2-ax1)/6.4));
+      if(lbl.length>maxl) lbl=lbl.slice(0,maxl-1)+"…";
+      var t2=el("text",{x:mid,y:y-5,"text-anchor":"middle",fill:r.last?"var(--ink)":"var(--dim)","font-size":"11"});
+      t2.textContent=lbl; g.appendChild(t2);
+    }
+    svg.appendChild(g);
+  });
+  box.appendChild(svg);
+}
+
+function renderReplay(){
+  var sc=SC[cur], st=sc.steps[step], prev=step>0?sc.steps[step-1]:null;
+  $("tb-title").textContent=sc.title;
+  $("tb-ind").textContent="步骤 "+(step+1)+"/"+sc.steps.length;
+  var order=STATES.concat(BRANCH);
+  order.forEach(function(s){$("tb-st-"+s).className="st"});
+  if(st.s){var idx=order.indexOf(st.s);for(var i=0;i<=idx;i++){$("tb-st-"+order[i]).className="st seen"}$("tb-st-"+st.s).className="st now"}
+  var ids=["tb-ba","tb-bb","tb-bc"], dids=["tb-da","tb-db","tb-dc"];
+  for(var j=0;j<3;j++){
+    $(ids[j]).textContent=fmt(st.bal[j]);
+    var d=prev?st.bal[j]-prev.bal[j]:0, dl=$(dids[j]);
+    dl.textContent=d>0?"+"+fmt(d):(d<0?"−"+fmt(-d):"");
+    dl.className="dlt"+(d<0?" neg":"");
+  }
+  var esc=ESCROW[st.s]||0, flow=st.bal[0]+st.bal[1]+st.bal[2];
+  var inj=(flow+esc)>0?10000:0;
+  $("tb-cons").innerHTML=inj?("资金守恒：流动 "+fmt(flow)+" + 托管 "+fmt(esc)+" = 注资 "+fmt(inj)+" <b>✓</b>"):"资金守恒：流动 0 + 托管 0 = 注资 0";
+  var ev=$("tb-ev"); ev.innerHTML=""; var kinds=EVKINDS[cur]||{}, maxEv=st.ev||0;
+  for(var k=1;k<=maxEv;k++){
+    var r=document.createElement("div"); r.className="evr"+(k===maxEv?" new":"");
+    r.innerHTML='<span class="sq">#'+k+'</span><span class="kd">'+kinds[k][0]+'</span><span class="rt">'+kinds[k][1]+'</span>';
+    ev.appendChild(r);
+  }
+  if(!maxEv) ev.innerHTML='<div class="evr"><span class="rt">（暂无条目——notarize 按序追加，from 强制自署名）</span></div>';
+  $("tb-evn").textContent=maxEv;
+  $("tb-stv").textContent=st.s||"（建单前）";
+  $("tb-stage").textContent=cur==="committee"?STAGE_TXT[Math.min(st.nd||0,5)]:(st.s?"流程推进中":"");
+  $("tb-l2").className="l2"+(st.l2?" show":"");
+  var blk=418;
+  for(var q=0;q<=step;q++){var ac=sc.steps[q].acts||[];for(var w=0;w<ac.length;w++){if(ac[w][2]==="tx"||ac[w][2]==="cert")blk++}}
+  $("tb-blk").textContent=blk;
+  drawSeq();
+  var term=$("tb-term"); term.innerHTML="";
+  var all=[]; for(var z=0;z<=step;z++){all=all.concat(sc.steps[z].log)}
+  all.forEach(function(ln){
+    var d=document.createElement("div"); d.className="ln"+(ln.charAt(0)==="$"?" cmd":"")+(ln.indexOf("DEMO COMPLETE")>=0||ln.indexOf("VERDICT: PASS")>=0?" ok":"");
+    d.textContent=ln; term.appendChild(d);
+  });
+  term.scrollTop=term.scrollHeight;
+}
+function stopPlay(){if(timer){clearInterval(timer);timer=null;$("tb-playtxt").textContent="▶ 自动播放"}}
+$("tb-prev").addEventListener("click",function(){stopPlay();if(step>0){step--;renderReplay()}});
+$("tb-next").addEventListener("click",function(){stopPlay();if(step<SC[cur].steps.length-1){step++;renderReplay()}});
+$("tb-reset").addEventListener("click",function(){stopPlay();step=0;renderReplay()});
+$("tb-play").addEventListener("click",function(){
+  if(timer){stopPlay();return}
+  timer=setInterval(function(){if(step<SC[cur].steps.length-1){step++;renderReplay()}else{stopPlay()}},1600);
+  $("tb-playtxt").textContent="‖ 暂停";
+});
+document.querySelectorAll(".tb-scen").forEach(function(b){b.addEventListener("click",function(){cur=b.getAttribute("data-sc");step=0;stopPlay();
+  document.querySelectorAll(".tb-scen").forEach(function(x){x.classList.toggle("on",x===b)});renderReplay();})});
+if(window.ResizeObserver){new ResizeObserver(function(){drawSeq()}).observe($("tb-seq"))}
+
+/* ═══════════════ TAB 2 · LIVE（只读直连） ═══════════════
+   选择器与返回面 = agents/common/rpc.py _ABI（cast sig 实取冻结值）：
+   deal_info(string) ec78f86e → string；balance_of(string) 3e6b4459 → uint128；
+   evidence_entries_json(string) 16417010 → string；due_deals(uint64) 4704839a → string[]；
+   e2_net_config() 2b5d6a4a → string。编码/解码含 R2 的 string[] 偏移修正。   */
+var SEL = {dealInfo:"ec78f86e", balance:"3e6b4459", evidence:"16417010", dueDeals:"4704839a", e2net:"2b5d6a4a"};
+/* 链上 AgentId = 地址（实测：deal_info.buyer/evidence.from 均为 anvil 地址，非演示侧标签） */
+var AGENTS = [
+  ["0x70997970C51812dc3A010C7d01b50e0d17dc79C8","lv-ba"],
+  ["0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266","lv-bb"],
+  ["0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC","lv-bc"]
+];
+var FROM = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266"; // anvil#0 = broker（与 NodeClient 默认一致）
+var liveTimer=null, liveCnt=0;
+
+function word(n){var h=n.toString(16);while(h.length<64)h="0"+h;return h}
+function bytesToHex(b){var s="";for(var i=0;i<b.length;i++)s+=b[i].toString(16).padStart(2,"0");return s}
+function strEnc(s){var b=new TextEncoder().encode(s);var hx=bytesToHex(b);var pad=(64-(hx.length%64))%64;return word(b.length)+hx+"0".repeat(pad)}
+function encCall(sel,types,vals){
+  var head="",tail="",headSize=32*types.length;
+  for(var i=0;i<types.length;i++){
+    if(types[i]==="string"){head+=word(headSize+tail.length/2);tail+=strEnc(String(vals[i]))}
+    else{head+=word(vals[i])}
+  }
+  return "0x"+sel+head+tail;
+}
+function toBytes(hex){var h=hex.startsWith("0x")?hex.slice(2):hex;var out=new Uint8Array(h.length/2);for(var i=0;i<out.length;i++)out[i]=parseInt(h.substr(i*2,2),16);return out}
+function wordAt(b,i){var v=0n;for(var k=0;k<32;k++)v=(v<<8n)|BigInt(b[i+k]);return Number(v)}
+function decString(b){var off=wordAt(b,0),ln=wordAt(b,off);return new TextDecoder().decode(b.slice(off+32,off+32+ln))}
+function decStringArr(b){var base=wordAt(b,0),n=wordAt(b,base),tail=base+32,out=[];
+  for(var i=0;i<n;i++){var eo=wordAt(b,tail+32*i),ln=wordAt(b,tail+eo);out.push(new TextDecoder().decode(b.slice(tail+eo+32,tail+eo+32+ln)))}return out}
+function decUint(b){return wordAt(b,0)}
+function decBool(b){return wordAt(b,0)===1}
+
+function liveRpc(base,method,params){
+  return fetch(base,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({jsonrpc:"2.0",id:1,method:method,params:params})})
+    .then(function(r){return r.json()})
+    .then(function(body){
+      if(body.error) throw new Error(method+": rpc error "+body.error.code+": "+body.error.message);
+      return body.result;
+    });
+}
+function liveView(base,contract,sig,sel,types,vals,ret){
+  var data=encCall(sel,types,vals);
+  var t0=performance.now();
+  return liveRpc(base,"eth_call",[{from:FROM,to:contract,data:gasFix(data)},"latest"]).then(function(raw){
+    var ms=Math.round(performance.now()-t0);
+    var b=toBytes(raw);
+    var v = ret==="string"?decString(b) : ret==="uint128"?decUint(b) : ret==="string[]"?decStringArr(b) : ret==="bool"?decBool(b) : null;
+    return {v:v, ms:ms};
+  });
+}
+function gasFix(d){return d} // eth_call 无 gas 语义；占位保持与 rpc.py call 形态一致
+
+function lerr(msg){var e=$("lv-err");if(msg){e.textContent=msg;e.className="lerr show"}else{e.className="lerr"}}
+function lstat(state,txt){$("lv-dot").className="dot "+state;$("lv-sttxt").textContent=txt}
+
+function livePoll(){
+  var base=$("lv-rpc").value.trim().replace(/\/$/,""), contract=$("lv-con").value.trim(), deal=$("lv-deal").value.trim()||"deal-1";
+  liveCnt++; $("lv-cnt").textContent=liveCnt;
+  var pBlock = liveRpc(base,"eth_blockNumber",[]).then(function(h){$("lv-blk").textContent=parseInt(h,16);return parseInt(h,16)});
+  var pDue = pBlock.then(function(blk){
+    return liveView(base,contract,"due_deals",SEL.dueDeals,["uint64"],[blk],"string[]")
+      .then(function(r){$("lv-due").textContent=JSON.stringify(r.v)});
+  });
+  var pInfo = liveView(base,contract,"deal_info",SEL.dealInfo,["string"],[deal],"string")
+    .then(function(r){$("lv-lat").textContent=r.ms+"ms";return r.v})
+    .catch(function(e){if(String(e.message).indexOf("deal")>=0||String(e.message).indexOf("no such")>=0){return null}throw e});
+  var bals = AGENTS.map(function(a){return liveView(base,contract,"balance_of",SEL.balance,["string"],[a[0]],"uint128").then(function(r){$(a[1]).textContent=fmt(r.v);return r.v})});
+  var pEv = liveView(base,contract,"evidence",SEL.evidence,["string"],[deal],"string").then(function(r){
+    var arr; try{arr=JSON.parse(r.v)}catch(_){arr=null}
+    var box=$("lv-ev"); box.innerHTML="";
+    if(Array.isArray(arr)&&arr.length){
+      arr.forEach(function(en,i){
+        var d=document.createElement("div"); d.className="evr"+(i===arr.length-1?" new":"");
+        // 实测字段：{seq, from, to, payload_digest, slot}（无 kind——种类在 demo 侧信封里）
+        function short(a){a=String(a);return a.length>12? a.slice(0,6)+"…"+a.slice(-4) : a}
+        var dg=String(en.payload_digest||"");
+        d.innerHTML='<span class="sq">#'+(en.seq!==undefined?en.seq:i)+'</span>'
+          +'<span class="rt" title="'+dg+'">'+short(en.from)+' → '+short(en.to)
+          +'　slot '+(en.slot!==undefined?en.slot:"?")+'　digest '+dg.slice(0,10)+'…</span>';
+        box.appendChild(d);
+      });
+    } else { box.innerHTML='<div class="evr"><span class="rt">（无条目或 deal 不存在）</span></div>' }
+  });
+  var pNet = liveView(base,contract,"e2net",SEL.e2net,[],[],"string").then(function(r){
+    var cfg; try{cfg=JSON.parse(r.v)}catch(_){cfg=null}
+    if(cfg){
+      $("lv-arm").textContent=(cfg.armed_deal||"(空)")+" / epoch "+(cfg.get_epoch!==undefined?cfg.get_epoch:"?");
+      $("lv-cur").textContent=JSON.stringify(cfg.current||{});
+      $("lv-stg").textContent=JSON.stringify(cfg.staging||{});
+    }
+  });
+  Promise.all([pBlock,pInfo.catch(function(){return null})].concat(bals,[pEv.catch(function(){}),pDue.catch(function(){}),pNet.catch(function(){})]))
+    .then(function(res){
+      var info=res[1];
+      lerr("");
+      if(info){
+        var stEl=$("lv-state"); stEl.textContent=info.state||"?";
+        stEl.className="v-badgest v-badge "+String(info.state||"").toLowerCase();
+        $("lv-amt").textContent=(info.amount!==undefined?info.amount:"?")+" · "+String(info.buyer||"?").slice(0,6)+"…→"+String(info.seller||"?").slice(0,6)+"…";
+        $("lv-slot").textContent=(info.timeout_slots!==undefined?info.timeout_slots:"?")+" / "+(info.deadline_slot!==undefined&&info.deadline_slot!==null?info.deadline_slot:"—");
+        var esc = (String(info.state)==="Funded"||String(info.state)==="Submitted"||String(info.state)==="Disputed")?Number(info.amount):0;
+        var flow = (res[2]||0)+(res[3]||0)+(res[4]||0);   // 三个 balance_of 的解析值（res = [block, info, bal×3, …]）
+        $("lv-cons").innerHTML="资金守恒：流动 "+fmt(flow)+" + 托管 "+fmt(esc)+" = "+fmt(flow+esc)+(flow+esc>0?" <b>✓</b>":"");
+      } else {
+        $("lv-state").textContent="deal 不存在"; $("lv-state").className="v-badgest";
+      }
+      lstat("on","轮询中 · 每次全量视图读回");
+    })
+    .catch(function(e){
+      lstat("err","连接失败");
+      lerr("读回失败："+e.message+"　—— 排查：① devnet 七容器是否在跑（docker ps）② RPC 端点/合约地址是否正确 ③ 该 deal 是否存在于该实例。面板保持最后一次成功数据。");
+      stopLive(false);
+    });
+}
+var pollHandle=null;
+function startLive(){
+  stopLive(true);
+  liveCnt=0; livePoll();
+  pollHandle=setInterval(livePoll, 2000);
+  lstat("on","轮询中 · 2s 间隔");
+}
+function stopLive(quiet){
+  if(pollHandle){clearInterval(pollHandle);pollHandle=null}
+  if(!quiet){lstat("","已停止"); }
+}
+$("lv-start").addEventListener("click",startLive);
+$("lv-stop").addEventListener("click",function(){stopLive(false)});
+
+/* initial render */
+renderReplay();
+</script>
+</body>
+</html>

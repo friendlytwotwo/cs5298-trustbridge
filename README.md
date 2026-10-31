@@ -108,6 +108,7 @@ agents/                 Python agent side (scripted behavior, pluggable LLM)
   common/llm.py         ScriptedLLM (deterministic replay) / OpenAICompatLLM (TB_LLM=openai)
   alice.py broker.py bob.py    per-agent CLIs
 scripts/                devnet-up / deploy / demo orchestration (+ --selftest vector pins)
+  dashboard.html        Deal Explorer (single-file, zero-dep; replay + live read-only RPC; open in a browser)
 ```
 
 **中文：**
@@ -129,6 +130,7 @@ agents/                 Python Agent 端(脚本化行为、可插拔 LLM)
   common/llm.py         ScriptedLLM(确定性回放)/ OpenAICompatLLM(TB_LLM=openai)
   alice.py broker.py bob.py    各 Agent 的 CLI
 scripts/                devnet-up / deploy / demo 编排(--selftest 向量自测)
+  dashboard.html        Deal Explorer(单文件零依赖;回放+实时只读;浏览器直接打开)
 ```
 
 ---

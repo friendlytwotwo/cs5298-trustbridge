@@ -1,172 +1,307 @@
-# R6 实现说明（编码员，2026-11-01）
+# R6-R2 独立重审轮 实现说明（编码员，2026-11-01）
 
-方案：`workflow-out/plan.md`（R6 后端全面审查——安全与正确性深审轮，2026-11-01）。
-仓库定格 `HEAD=d4600474515ef2973899cc9754f854628288a878`（编码期实跑 `git rev-parse HEAD` 复核一致）。
-改写注记：本文件为 R6 覆盖写（方案 §0-#15）；上一版 R5 实现说明已于编码期覆写前
-备份至 `_implementation-prev-r5-backup.md`（两侧 md5 `a92ac14061798943f5f3be9d066c8af2`
-逐字一致，编码期实跑复核）。下文「§x」指该方案文件。
+方案：`workflow-out/plan.md`（R6-R2 独立重审，HEAD 定格
+`f40ce773021640c9ea7e2b87b163a39843067a74`，编码期 `git rev-parse HEAD` 实跑一致）。
+改写注记：本文件为 R6-R2 覆盖写（方案 §0 #15）；上一版（上一轮 R6）实现说明已于
+编码期覆写前备份至 `_implementation-prev-r6-backup.md`（#A2，覆写前再复核 md5
+`782299b5120ea355d0655c33e19e8457` 逐字一致，编码期实跑）。下文「§x」指 R6-R2
+方案文件；本表行号均为**当前代码**实读行号（零改动轮 = 开工前行号）。
 
 ## 0. 总结论
 
-**本轮为审计轮，审计结论 = P0=0、达准入条件的 P1=0、P2 新增 6 项 + R5 残量实查登记 2 组——零代码改动。**
+**本轮为独立重审轮：21 项先验台账逐条按当前代码重新取证，六焦点全部重开，
+门禁 G1–G5 全部重跑。结论 = P0=0、达准入 P1=0、零代码改动；台账 21 项全部
+「维持登记」+ 本轮新登记 P2×1（R2-N1）；G1/G2/G3/G5 通过，G4 容器不可用如实
+登记未跑。**
 
-- 13 个候选文件（§0 清单 #1–#13）与本轮开工前逐字节一致：`git diff --stat -- lyquid/src scripts agents` 为空；开工前快照 `workflow-out/_pre-task-snapshot-r6.patch` 为 **0 字节**（开工前工作树本就干净），13 份原件已 cp 留档 `workflow-out/_r6-orig-*`（回退通道，未动用）。
-- 零改动是**方案预期内的合法产出**：§4「P2 只登记（不改代码）」+ §0「改动面为候选面：findings 落在哪，修复落哪」+ 风险 R5「P2 只登记 + P1 择优天然限面」。六焦点审计未发现资金语义/守恒破坏、越权可达、误报漏报或 fail-closed 失效；R5 残留 3 项 P1 经安全视角重评后维持登记理由仍然成立（§3/§6）。
-- 门禁 G1–G5 全部实跑通过（§5）；sim 冻结基线逐字一致（零改动下逐字保持的强验证）。
+- 13 个候选文件与本轮开工前逐字节一致：开工前快照
+  `workflow-out/_pre-task-snapshot-r6r2.patch` 为 **0 字节**（工作树本就干净），
+  13 份原件 cp 留档 `workflow-out/_r6r2-orig-*`（回退通道，未动用）；收尾
+  `cmp -s` 13/13 逐字节一致（§5）。
+- 零改动是**方案预期内的合法产出**：§0「上一轮同面审计结论为零改动，本轮预期
+  亦为零至极少改动」+ §4「P2 只登记」+「P1 择优」三条件。六焦点新眼扫描未发现
+  资金语义/守恒破坏、越权可达、误报漏报或 fail-closed 失效；三项 P1 候选逐一
+  给出不取准入的本轮理由（§2 处置列），未照抄上一轮措辞（红线⑦）。
+- sim 冻结基线逐字一致（md5 同 `a7cd1bdcd09fb44bff2002cb49e8694c`）是零改动
+  轮的强行为验证；verify_core 40/40 本轮重跑为 types/core 当前态的新鲜基线。
 
-## 1. T0 定格实录（§1 九项预置事实复核）
+## 1. 备份与快照（T0）与 §1 预置事实复跑实录（全部实跑）
 
-| # | 预置事实 | 编码期实跑命令 | 结果 |
-|---|---|---|---|
-| 1 | HEAD=d460047…、工作树无代码改动 | `git rev-parse HEAD`；`git status --short` 过滤 workflow-out | 一致；仅 workflow-out 下 plan.md（规划师覆写）与 _probe_gate_a0.md 有改动 |
-| 2 | selftest rc=0 | `python scripts/demo.py --selftest` | `SELFTEST OK`，rc=0；尾 3 项 PASS（deterministic/order-divergent、官方 FNV 向量 ×2）实见 |
-| 3 | sim 基线零差异 | `python scripts/demo.py --sim --flow all` → `diff -u workflow-out/_r2-t0-sim-baseline-raw.txt <out>` | rc=0，`BASELINE-DIFF-IDENTICAL`；输出存 `workflow-out/_r6-baseline-sim-out.txt`（#A4） |
-| 4 | py_compile 8 文件 | `python -m py_compile rpc.py protocol.py llm.py alice.py broker.py bob.py demo.py keeper.py` | `PY_COMPILE-ALL-OK` |
-| 5 | 容器 cargo check 可用 | `MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown` | rc=0，`Finished dev profile … 0.17s`，**33 条 warning**（与规划期记录同量级）；零源码改动故未 touch |
-| 6 | 容器副本=改动前源 | `docker exec multi-tools md5sum /tmp/tb-lyquid/src/lib.rs` vs 仓库 md5sum | 两侧均 `03e3d08b9b41e00d4eb782d58b4de4ac` |
-| 7 | 行数实测 | `wc -l` | Rust 7 文件 2945 行（types 197/core 909/lib 862/committee 185/committee_certified 433/assessor 273/timeout 86）+ 测试 2 文件 365 行 + Python 9 文件 2434 行，与 §1-7 一致 |
-| 8 | verify_core 40 测试 | `grep -c '#\[test\]'` 5 个挂载文件 | core 23 + committee 4 + assessor 6 + escrow_lifecycle 5 + modelcheck_refund 2 = **40**（壳 crate `#[path]` 绝对路径挂载仓库内文件，测的即当前仓库态） |
-| 9 | R5 方案备份在案 | `md5sum workflow-out/_plan-prev-r6-backup.md` | `d8381a05788422c01a4496a205ce9fd7`，与 §0 #A1 一致 |
+**T0 件**：
 
-## 2. 六焦点审计判定（T1–T6）
+| 件 | 实跑结果 |
+|---|---|
+| #A1 `_plan-prev-r6-run2-backup.md` | 规划期已落盘；本轮复核 md5 `4e8053581971daf5ede1e6a22c1840f0` = 方案 §0 #A1 值 |
+| #A2 `_implementation-prev-r6-backup.md` | 规划期已落盘；**覆写本文件前**复核 md5 `782299b5120ea355d0655c33e19e8457` = 方案 §0 #A2 值 |
+| 原点名两件 `_plan-prev-r6-backup.md` / `_implementation-prev-r5-backup.md` | 保持原样零改动；实跑 md5 `d8381a05788422c01a4496a205ce9fd7` / `a92ac14061798943f5f3be9d066c8af2` = 方案 §1-8 值 |
+| #A3 `_pre-task-snapshot-r6r2.patch` + `_r6r2-orig-*` | **编码期开工前落盘**：`git diff -- lyquid/src scripts agents` → patch 0 字节；逐文件 cp 原件 13 份（lib/core/types/committee/committee_certified/timeout/assessor + rpc/protocol/llm/broker/demo/keeper），`ls | wc -l` = 13 |
+| #A4 `_r6-run2-sim-out.txt` | 规划期已落盘，md5 `a7cd1bdcd09fb44bff2002cb49e8694c` = 冻结基线同值（本轮复核） |
 
-### 2.1 焦点① 访问控制与攻击面
+**§1 十一项预置事实复跑**：
 
-**矩阵核对表（声明=执行，逐行实读 lib.rs）**：
-
-| 方法（lib.rs 行） | 矩阵声明 | require 执行点 | 判定 |
-|---|---|---|---|
-| faucet :281 | Anyone（:213，TODO(W2) DEMO flag） | 无 require（Anyone 等价） | ✓ |
-| create_deal :296 | Broker（:214） | :308 `require(Access::Broker,…)` | ✓ |
-| fund :357 | Buyer（:215） | :361 `require(Access::Buyer,…,Some(deal))` | ✓ |
-| notarize :398 | Anyone+自署名（:216） | :406–409 `from != caller → Err`（caller 取自 `ctx.caller`） | ✓ |
-| submit_deliverable :419 | Seller（:217） | :423 | ✓ |
-| complete :433 | Buyer（:218） | :437 | ✓ |
-| claim_timeout :454 | Anyone permissionless（:219） | 无 require；守卫在 core::claim_timeout 重推导（core.rs:170–178） | ✓ |
-| cancel :468 | Buyer（:220） | :472 | ✓ |
-| open_dispute :487 | BuyerOrSeller（:221） | :493 | ✓ |
-| apply_committee_verdict :520 | Committee+caller∈signers（:222） | :530 `require(Access::Committee)` + :531–533 `caller ∈ cert.signers` | ✓ |
-| committee_config :545 | Broker（:223） | :547 + R5 threshold>0 门 ：554 | ✓ |
-| getters :566/:583/:594/:605 | Anyone 只读（:224） | 无资金效应（due_deals(now) 调用方时钟已文档化为 advisory，:599–604） | ✓ |
-
-require 单点（:230–246）：caller 经 `ctx.caller: Address` 字符串化（EIP-55，T4.5 探针钉死）；Committee 臂查 `state.committee_members` **空集即拒=fail-closed**（:243）。certified 回调面不入矩阵的口径与 committee_certified.rs 模块头 E2 门禁台账一致（origin=ZERO 使地址门必 fail-closed，台账承担审计面）——两处互相印证，无漂移。
-
-**攻击者视角滥用路径 5 类判定**：
-
-1. **签名/证书重放与跨单复用 —— 不可达**。路线① wire 证书无 evidence_root 参数，`into_domain`（committee.rs:44–56）从**当前全量证据日志**折叠根 → 无「旧根」可供重放；跨单复用面 = apply_verdict 仅 Disputed（core.rs:199）+ 终态封死；`validate_cert`（core.rs:235–253）四查（成员/去重/阈值/根匹配）。路线② signers 来自平台证书 `ctx.cert.signers`（committee_certified.rs:356–380），映射失败即剔除（:373–379 不猜测身份）。**诚实边界照录**：路线① 无签名为已文档化 demo 占位（lib.rs:511–513，TODO(W4)），非新缺陷。
-2. **阈值绕过 —— 不可达**。成员域阈值唯一写点 committee_config=Broker 门（:547）；e2 域阈值唯一写点 e2_configure=`eth_guard = creator`（committee_certified.rs:112 + 阈值 0 已拒 ：119–123）。两域阈值源均不可被非授权方改写。demo 路线① broker 位居成员集首位即单方可出证——README/report 信任表的已文档化 demo 信任模型（demo.py:68–72 自述），路线② 已给出真实替代。
-3. **重复结算 —— 不可达**。终态封死（types.rs:51–53 + core.rs require_states :29–37）；complete×2 / complete 后 verdict / verdict 后 claim 全被 Terminal/WrongState 拒；verify_core 实跑 modelcheck_refund 2/2（all_orderings 两测试）本轮复核仍覆盖当前代码（G5 全过）。
-4. **伪造署名 —— 不可达（自署名内）**。notarize from==caller 强制在共识入口（lib.rs:407）；`check_evidence_shape`（committee.rs:66–74）只认卖家→买家方向条目 + deliverable 匹配。payload 冒充仍属「digest 即身份、无签名」的已文档化信任洞（committee.rs:53 注记 + 报告信任表），判定在洞范围内，不判新缺陷。
-5. **未注资取款 —— 不可达**。claim_timeout 仅 Funded 且过 deadline（core.rs:170–178，未到→DeadlineNotReached）；cancel 无证据才可（core.rs:82–92；Qualified 取消=全零 payout，F2 测试 core.rs:524–544 钉死）；apply_payout 全零 no-op（lib.rs:726–737 三个 `>0` 门实读复核）；faucet 无上限 + BROKER=anvil#0 硬编码（lib.rs:208）作为已文档化 demo 信任洞（:277–279 TODO(W2)）重申。
-
-### 2.2 焦点② 经济不变量
-
-可达转移 × 守恒核对（每转移后 `Payout::total() == deal.amount`，或 Qualified 取消=0）：
-
-| 转移 | Payout | 守恒证据 |
+| # | 项 | 本轮实录 |
 |---|---|---|
-| fund（lib.rs:357–397） | —（入账） | 预检（:371–374）→ core::fund → debit 顺序契约实读在案（:366–372 注记）；重复 fund 被 require_states 拒 |
-| complete BuyerConsent（:433–449） | settle | fee=saturating_mul/10_000 min-clamp（types.rs:165–172），to_seller=amount−fee 恒不 underflow；core 测试 fee_rounding_edges_conservation:476 / split_never_underflows:499 钉死 |
-| complete Committee（core.rs:138–161） | settle 或 full_refund | F1/F4 终态映射测试 :549–590/:593–615 |
-| claim_timeout（core.rs:170–178） | full_refund | 仅 Funded+过 deadline |
-| cancel（core.rs:82–92） | full_refund 或全零 | Qualified=全零（F2）、Funded=全额；core.rs:432 测试 |
-| apply_verdict（core.rs:191–218） | 三裁决映射 | Fulfilled→settle / NotFulfilled→full_refund / Malicious→full_refund+misconduct+1（:205–208）；Malicious 不罚没（slash 分支=登记死代码，P2-3） |
+| 1 | HEAD / 提交前移 / 工作树 | `git rev-parse HEAD` = `f40ce77…`；`git diff --stat d460047..HEAD -- lyquid/src agents scripts` **空**；`git status --short lyquid scripts agents` **空** |
+| 2 | 自检 | `python scripts/demo.py --selftest` → rc=0，尾 3 项 PASS 实见（deterministic/order-divergent、官方 FNV 向量 ×2），`SELFTEST OK` |
+| 3 | 语法 | `python -m py_compile` 8 件（rpc/protocol/llm/alice/broker/bob/demo/keeper）→ `PY_COMPILE-ALL-OK` |
+| 4 | sim 基线 | `python scripts/demo.py --sim --flow all` → rc=0；输出另存 `_r6r2-sim-out.txt`；`diff -u _r2-t0-sim-baseline-raw.txt _r6r2-sim-out.txt` **零差异**（diff_rc=0），两侧 md5 同 `a7cd1bdcd09fb44bff2002cb49e8694c` |
+| 5 | 容器 | **编码期重试仍不可用**：`MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown` → `failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine … daemon 不在运行`。按方案 R3 如实登记 G4 未跑+原因；零改动前提下缺席不掩盖行为面（上一轮 7514c71 曾实证容器 md5 `03e3d08b…` = 仓库 lib.rs） |
+| 6 | verify_core 挂载 | 壳 `src/lib.rs`/`tests/*.rs` 以 `#[path]` **绝对路径**挂载仓库内 types/core/committee/assessor + lyquid/tests 两文件（grep 实见 5 处 `#[path = …trustbridge\lyquid\...]`）；挂载面 `grep -c '#\[test\]'`：core 23 / committee 4 / assessor 6 / escrow_lifecycle 5 / modelcheck_refund 2 = **40** |
+| 7 | 模型检查 | 父级 `workflow-out/verify_core`：`cargo test --lib --tests` → **33+5+2 = 40 passed, 0 failed**，rc=0（编码期复跑，基线新鲜） |
+| 8 | 上一轮备份件 | 见 T0 表（md5 双侧一致） |
+| 9 | 范围实测 | `wc -l` 实跑：Rust 7 文件 = 273+185+433+909+862+86+197 = **2945**；Rust 测试 2 文件 = 181+184 = **365**；Python 9 文件 = 962+810+179+161+98+93+68+56+7 = **2434**；dashboard.html = **1170**。与方案 §1-9 逐项同值（审计面逐字节一致的再次实证） |
+| 10 | 负载锚点 | 全部实读命中（行号表见 §3 各焦点引用） |
+| 11 | #A1/#A2 | 见 T0 表 |
 
-- **记账单点复核**：`credit`（lib.rs:693–703，A2 checked_add 实读在案；5 个调用点 ：288/:727/:730/:733/:736 全部带 `?`）；`debit` 预检（:684–690）。credit 失败路径 = checked_add 失败在**余额写回之前**返回 Err → 无半写副作用（A2 复核通过）。
-- **fee/溢出边界**：fee_bps 上限 core::create（core.rs:54–56，lib.rs:317–319 注记不重复检查的分工在案）；fee_bps=10_000 → Fulfilled 仍 Settled（F4 测试在案）。
-- **P2-11 重评**：`Payout::total()`（types.rs:174–176）裸加。实查构造面：Payout 仅由 settle（to_seller+fee=amount，余 0）/full_refund（refund=amount）/全零三形构造，total() ≤ amount 恒成立、不依赖入账侧；且 total() 消费点仅 debug_assert（lib.rs:725）与测试，**不在任何资金决策路径**。回绕不可达 → **维持登记**（types.rs 冻结约束不变）。
-- **新边界发现 N3**（§3）：apply_cert_and_payout 的 misconduct 写回（lib.rs:788–791）先于 apply_payout（:792）——仅在「平台 Err 无原子回滚」+ credit 溢出（需 faucet 级荒谬余额）同时成立时产生「deal 已终态、payout 未落地」的资金滞留（fail-stuck 非 fail-open），faucet 信任洞边界内，P2。
+## 2. 分级 findings 清单（本轮全表）
 
-### 2.3 焦点③ R5 修复正确性复核（结论：四项全部「未引入新问题」）
+分级规则沿方案 §4：P0 必修 / P1 择优（准入三条件：不触红线、改动面小、有钉死
+测试或门禁护航）/ P2 只登记。
 
-| 修复 | 复核证据 | 结论 |
-|---|---|---|
-| A1（committee_config threshold==0 拒，lib.rs:554） | 门的位置在 require（:547）之后、状态清写（:555–559）**之前**——顺序正确；误伤面 grep 实跑：全部调用点非 0（demo.py:610 E2_THRESHOLD=4、demo.py:792 THRESHOLD=3、broker.py:59 默认 3） | ✓ 无误伤 |
-| A2（credit checked_add，lib.rs:700） | 失败在写回前返回 Err（无半写）；5 调用点带 `?` 实读在案；wasm release 无溢出检查的前提由 checked_add 覆盖 | ✓ 无回归 |
-| B1a/B1b（demo.py:369–373 timeout 断言、:322–325 normal 断言） | 断言均只落在 `if node_mode(node):` 分支内；sim 分支零改动——G3 实跑 `BASELINE-DIFF-IDENTICAL` 为行为证据 | ✓ sim 逐字保持 |
-| C1/C2（keeper.py:151–152 interval 门、:156–158 deals 门） | fail-closed 退出（p.error）而非静默空转；discover 默认路径（:161）不受影响（实读） | ✓ 无回归 |
-
-### 2.4 焦点⑤ Python 编码层深审
-
-- **_ABI × lib.rs 签名逐行对齐**（实读两侧）：faucet(string,uint128)=lib.rs:281 U128 边界转换 :286；create_deal 8 参（string×2,uint128,uint16,string×2,uint64,uint8）=lib.rs:296–306；fund/notarize/submit_deliverable/complete/cancel/open_dispute 参数面一致；apply_committee_verdict(string,uint8,string[])=lib.rs:520 扁平 wire；committee_config(string[],uint32)=lib.rs:545；claim_timeout→bool=lib.rs:454 返回 bool；balance_of→uint128=lib.rs:594 U128；due_deals(uint64)→string[]=lib.rs:605；assess_brief(string×4)→string=lib.rs:640–646；e2_arm(string)→bool=lib.rs committee_certified.rs:161；e2_run_verdict_round()→bool=:401；e2_net_config()→string=:192。**未发现漂移**。notarize 链上返回 u64 而 NodeClient 回执无返回值——已文档化不对称（rpc.py:566–569）。
-- **编码器支持集**：_enc_value（string/string[]/uint*/bool，集外 ValueError :227）+ _is_dynamic（string/string[]）；R2 修正（偏移相对 tail 起点）实读在案（:207–222 编码、:254–267 解码）；**仍无 bytes32/bytes32[]** = 终裁冻结条款 1（e2_configure 走 cast send，:158–162 注记 + :685–697 实现）——零扩展合规。
-- **错误路径**：NodeError 携带原始错误不折叠（:165–178）；TxError status≠0x1（:181–182 + :483–485）；_rpc 对非 JSON 响应 `r.json()` 裸抛、HTTP 错误 raise_for_status、连接异常裸抛（:441–450）= **P1-R1 维持登记**（重评见 §6）；NodeClient 写路径无 assert 依赖（全 raise），`python -O` 消失面仅限 FakeNode（P2-6 既有）。
-- **protocol.py × core.rs 逐字节同规复核**：canonical 串 `"{seq}|{from}|{to}|{payload_digest}|{slot}\n"` 字段序/分隔符/UTF-8/空表=`cbf29ce484222325`/顺序敏感不重排两侧一致（protocol.py:65–90 vs core.rs:287–298）；G2 selftest 七向量（含官方 FNV ×2）实跑通过为行为证据。
-- **P2-5 载荷域实查**：demo/broker/dashboard 全部 envelope/payload 字段域实读为 ASCII（terms/reason 字面串 + hex digest + 整数）；dashboard ops-reason 为用户输入可含非 ASCII，但其 digest 页内自算自用、与 demo/broker 规范化结果**无任何交叉比较点** → 分叉不可达，维持登记。
-- **调用方交叉**：keeper 直用 `_send`（:116）+ 读回纪律（:123–131）在案；demo B1a/B1b 断言在案；agents CLI 新发现 N5（alice/bob 无 sender 选择，§3）。
-
-### 2.5 焦点⑥ dashboard 只读交互面复核（三项纪律）
-
-1. **选择器冻结一致** ✓：页内 SEL 表（dashboard.html:601）与 OPS 表（:848–890）共 16 个 selector 与 rpc.py `_ABI` 逐一比对全一致（ec78f86e/3e6b4459/16417010/4704839a/2b5d6a4a/b540def8/bd827024/b1fecd5a/73451f65/7ecc9d46/ad932b5c/a48ab911/786cfc8f/15df3c73/8b7acf91/a32974e3）；e2_configure/e2_run_verdict_round 无页内调用（组标注指回 demo.py --flow committee，:884）——cast 通道纪律一致。
-2. **status 0x1 ≠ 方法 Ok 读回纪律** ✓：sendTx 回执行明示「已排序≠方法成功，读回见下」（:814–818）；手动操作台 runOp 每笔后强制 opsReadback()（:916–917）；LIVE 预设 liveStepTx 按期望终态 liveWaitState（:985–1001，超时抛错不静默）。与 keeper/demo 同口径。
-3. **e2_arm 单次纪律**：LIVE 三预设零调用 e2_arm（8b7acf91 仅存在于手动按钮 op-arm，:888–889，带 ⚠ 单次标注）；**纪律为文档级标注、无硬锁**（重复手动点击可重发，但 armed_deal 重写的影响被 propose 的 Disputed 门 + aggregate 拒证 fail-closed 兜底）。判定：与 demo.py「绝不重复 e2_arm」读回纪律相比属轻微漂移，登记不修（只读件；若构成 P0 修复也只能落 rpc.py/文档侧——本轮判定不构成，见 N6 同类竞态面）。
-- 附记：页内 LIVE 对抗预设的 committee_config([broker,node-1..3]) 会**覆盖**实例 NodeID 制配置——页面已自带 ⚠ 覆盖警示（:1134），知情面，登记不修。
-
-## 3. findings 清单（分级全表）
-
-判定口径 = §4：P0（资金语义/守恒、越权可达、误报漏报、fail-closed 失效）必修；P1 加固择优（三准入）；P2 只登记。**本轮 P0=0、P1 达准入=0。**
-
-| ID | 级别 | 位置 | 问题一句话 | 证据 | 处置 |
+| ID | 级别 | 位置 | 问题一句话 | 本轮证据 | 处置 |
 |---|---|---|---|---|---|
-| N1 | P2 | lyquid/src/lib.rs:412 | notarize 对不存在的 deal_id 也建条目（`evidence_log.entry(..).or_default()` 无 deals 存在性检查） | 实读；FakeNode 刻意收紧为「no such deal」（rpc.py:840–844 并自注「real node appends regardless」） | 登记（P2-6 同类非镜像面；零资金效应——裁决前有 deal 存在+Disputed 门） |
-| N2 | P2 | lyquid/src/lib.rs:398–416 | notarize 无状态守卫，终态后仍可追加证据条目 | 实读（无 require_states/deal 查询）；影响面 = 无（后续裁决被 Terminal/Disputed 门拒，committee_cert 存证为历史记录） | 登记 |
-| N3 | P2 | lyquid/src/lib.rs:788–792 | apply_cert_and_payout 中 misconduct 写回先于 apply_payout；若 apply_payout Err 且平台无原子回滚，则 deal 已终态而 payout 未落地（资金滞留托管） | 实读顺序（:784 deal 变更 → :788–791 misconduct → :792 payout）；触发需 credit 溢出 = 接收方余额近 u128::MAX，仅 faucet 级荒谬输入可达（lib.rs:698–699 同类登记）；fail-stuck 非 fail-open（不多发一分钱） | 登记（与 P2-11/A2 同信任洞类；W2 DEMO flag 处置时一并收敛） |
-| N4 | P2 | scripts/keeper.py:94–96/:116–121 | poll_once 只捕 (NodeError, TxError)；requests 层 ConnectionError/Timeout/非 JSON 响应裸抛将终止 keeper 主循环 | 实读 except 子句；rpc.py:441–450 裸抛路径在案 | 登记（= P1-R1 在 keeper 落点的重申；安全视角无资金风险：claim permissionless+幂等、买方可自行 claim、keeper 重启即恢复） |
-| N5 | P2 | agents/alice.py:33/:41、agents/bob.py:25/:33 | alice/bob CLI 无 sender 选择，node 模式写通道默认 anvil#0，与角色门（Buyer/Seller/自署名 from）不匹配 → 链上 Err 被吞（status 仍 0x1） | 实读（两文件无 sender= 参数；rpc.py:437 默认 DEFAULT_SENDER）；失败可见非隐蔽——后续 deal_info 读回打印显示真实状态（如 fund 后 state=Qualified） | 登记（独立 CLI 辅助面，编排主路径=demo.py 已显式传 sender；P2-7 同类 agent CLI 独立入口） |
-| N6 | P2 | scripts/keeper.py:115–126 | 重复 claim 竞态下 action 归因失真：deal 已被他人 claim 后，本 keeper 的 _send 仍 status 0x1、读回 Refunded → report 记 action="claimed" 附本次 tx | 实读；permissionless 幂等竞态的既文档化面（keeper docstring「rejections are free」）；状态本身正确，仅 tx 归因不精确 | 登记 |
-| P2-1残 | P2 | agents/common/rpc.py:56；agents/alice.py:16 | 死 import 残量：rpc.py `field`（dataclass 未用 field()）；alice.py `Acceptance`/`Deliverable`（未构造） | grep 实跑（rpc.py 全文 `field` 仅 import 行命中定义外用法；alice.py 两类型零使用） | 登记（P2 不修） |
-| P2-2残 | P2 | agents/common/rpc.py:426/:500/:648/:809/:895–897/:911–915；agents/common/protocol.py:19；scripts/demo.py:16 | 行号注释漂移残量（指向旧版行号）：lib.rs:624→require 现 :230–246；lib.rs:241→faucet 现 :281；lib.rs:625-635→assess_brief 现 :639–676；lib.rs:189→现 :320；lib.rs:365-368→现 :530–533；lib.rs:369-371→现 :768–770；rpc.py:49→notarize wrapper 现 :564–569；lib.rs:367-369→自署名检查现 :406–409 | `grep -n "lib.rs:[0-9]"` 实跑 + 逐处与当前行号对照 | 登记（惯例：不改写） |
+| P1-R1 | P1（择优未取） | rpc.py:441-450 | `_rpc` 对非 JSON 响应/连接异常/HTTP 错误裸抛（`r.raise_for_status()` :446、`r.json()` :447，无折叠） | 实读 rpc.py:441-450；调用方面实测：`_deal_exists`（:542-547）只捕 NodeError——若把传输异常折进 NodeError，`discover_deals` 会把瞬时网络错误**静默截断**为「无更多 deal」，属引入新危害 | **维持登记不修**：修复须区分错误类并波及 discovery 语义，不满足「改动面小」；无钉死测试 |
+| P1-R2 | P1（择优未取） | broker.py:29-31、llm.py:61-62 | live 模式畸形 LLM 响应裸 traceback（broker `json.loads(raw)` :30、`rep[k]` :31 KeyError；llm.py `r.json()["choices"][0]` :62 KeyError/IndexError） | 实读 broker.py:27-34、llm.py:47-62；live = `TB_LLM=openai` 显式 opt-in（llm.py:65-69），录制演示专用 | **维持登记不修**：不触红线但无门禁护航（live 面无测试），非本轮准入池优先项 |
+| P1-R3 | P1（择优未取） | timeout.rs:61 | `watcher_step` 单笔 claim 失败 `.ok?` 中断整轮 | 实读 timeout.rs:57-63；本轮再证：native trigger 已判 unusable（timeout.rs:67-86 三栏记录），**生产驱动方 = keeper.py**（:115-122 逐单捕 `(NodeError, TxError)` continue，无此面），watcher_step 现无驱动方 | **维持登记不修**：DoS 型延迟非资金错误、幂等自愈；lyquid 改动须容器 cargo check 护航而 G4 不可用（§1-5），收益近零风险实存 |
+| P2-1 | P2 | rpc.py:56、alice.py:16 | 死 import：rpc.py `field` 导入后零引用；alice.py `Acceptance`/`Deliverable` 导入后零引用 | `grep -n "field" agents/common/rpc.py`：仅 :56 为 import，余为 doc 文本；alice.py 全文实读无使用点 | 登记不修 |
+| P2-2 | P2 | rpc.py:426/:500/:648/:809/:895-897/:911-915、protocol.py:19、demo.py:15 | 行号注释漂移残量 8 处（实例：rpc.py:426 `lib.rs:624`→require 实为 :230-246；:500 `lib.rs:241`→faucet 实为 :281；:648 `lib.rs:625-635`→模式契约实为 :649-661；:809 `lib.rs:189`→输入校验实为 :320-326；:895-897 `lib.rs:365-368`→caller∈signers 实为 :530-533；:911-915 `lib.rs:369-371`→读算校同源实为 :768-770；protocol.py:19 `rpc.py:49`→notarize 包装实为 :564；demo.py:15 `lib.rs:367-369`→自署名实为 :406-409） | 逐点实读比对当前行号（左列即本轮证据） | 登记不修（惯例：行号漂移只登记） |
+| P2-3 | P2 | committee.rs:78-90、timeout.rs:86、lib.rs:735-737 | 死代码：`set_members`/`members` shim 零调用方；`SPIKE_1_TRIGGER_REGISTRATION` 仅声明无读取；`slash_to_treasury > 0` 分支 core 恒不产出 | `grep -rn "committee::members\|set_members\|SPIKE_1_TRIGGER" lyquid/src`（除自身/注释外零命中）；core.rs:87/:494/:533 三处 slash 字面量全零；apply_payout doc（lib.rs:713-717）自我声明 W4 扩展单点 | 登记不修 |
+| P2-4 | P2 | committee.rs:45-49、rpc.py:919 | 未知 verdict_code 判定面：链上 `_ => Malicious`（红线④内零变化）；sim 字典越界 KeyError（仅 FakeNode 面） | 实读 committee.rs:44-56、rpc.py:919 | 登记不修（红线④） |
+| P2-5 | P2 | protocol.py:30 vs broker.py:38-40 | 双规范化 ensure_ascii 差异 | 实读两处；本轮再证分叉不可达：terms 只经 broker 自产自用（broker.py:38→:41 同一 hash 面），alice/bob 不重算 terms_digest；dashboard `canon`（:775-781）用 `JSON.stringify`（不转义非 ASCII）= 与 protocol.py 同向；ops-reason 非 ASCII 的 reason_digest 页内**自算自用**（open_dispute :880/:1130 与 notarize DISPUTE :870/:1126 两 digest 各自独立上链，无交叉比较点） | 登记不修 |
+| P2-6 | P2 | rpc.py:809-813 等 | FakeNode 非镜像面（notarize 拒 pre-deal :839-844 刻意收紧）+ `python -O` 下 assert 消失 | 本轮重证：**NodeClient 写路径零 assert**（`sed -n '420,750p' rpc.py \| grep assert` 空）——`_send` :483-484、`create_deal` 读回 :537-539 全 if+raise；assert 仅 FakeNode（sim 冒烟面） | 登记不修 |
+| P2-7 | P2 | broker.py:57-59 | 默认成员硬编码 node-1..4 | 实读 broker.py:57-59；对照 rpc.py:392-412 `get_node_ids` 动态面（demo committee 流用之，demo.py:603-605 实读） | 登记不修 |
+| P2-8 | P2 | demo.py:358-361 | due 扫描每 deal 3× `deal_info`（node-only 效率） | 实读 demo.py:356-361 | 登记不修 |
+| P2-9 | P2 | demo.py:147 | `wait_for` 的 `node` 形参未用 | 实读 demo.py:147-176：函数体仅用 time/predicate/last，`node` 零引用 | 登记不修 |
+| P2-10 | P2 | core.rs:245-247 | `threshold > 成员数` 可配置（committee_config :545-561 只拒 0 不拒超员；e2_configure 同 :119-123）——fail-closed 方向恒拒（InsufficientCommittee），非安全洞 | 实读两处配置门 + core.rs:245-247 | 登记不修（W4 处置） |
+| P2-11 | P2 | types.rs:174-176 | `Payout::total` 裸加 | 本轮重证消费面：`grep -rn "\.total()"` = lib.rs:725 debug_assert + core.rs 测试断言（:350/:375/:484/:508/:536/:565/:588/:614/:814），**不在资金决策路径**（apply_payout 逐字段 `>0` 门 :726-736）；构造面三形 total≤amount 恒成立（types.rs:155-177 实读） | 登记不修 |
+| P2-12 | P2 | workflow-out/demo-script.md、docs/演示与运行指南.md | 文档行号漂移 | 惯例：只读件只登记不改写 | 登记不修 |
+| N1 | P2（维持） | lib.rs:412 | notarize 对不存在 deal_id 也建条目（`entry(..).or_default()` 无存在性检查） | 本轮重证**裁决门不可绕**：apply_cert_and_payout 读 entries（:769-770）后，deal 查找 :783 `ok_or_else("no such deal")` 在 core::apply_verdict 之前 `?` 早退——幻影 deal 的证据永远进不了裁决；影响 = 日志噪声/内存面 | 维持登记 |
+| N2 | P2（维持） | lib.rs:398-416 | notarize 无状态守卫，终态后仍可追加证据 | 本轮重证：终态后追加不可生效——apply_verdict 仅 Disputed（core.rs:199）+ 终态封死（core.rs:30-31 + `terminal_states_reject_everything` :756-788 实读）；Disputed 窗口内追加 = 设计内证据窗，append 后旧根必败 validate_cert（core.rs:249-251）fail-closed，活性可经重 arm + 重认证回合恢复 | 维持登记 |
+| N3 | P2（维持） | lib.rs:788-792 | misconduct 写回先于 apply_payout（fail-stuck 面） | 本轮重证双前提缺一不可：①credit 溢出需先经 faucet（Anyone，已文档化信任洞 lib.rs:277-279）铸至 u128::MAX 邻域；②平台 Err 无原子回滚语义（fund 注记 :366-370 同款口径）。影响 = 资金滞留（deal 已终态、贷记未落地）——**非盗取、非守恒破坏**（credit checked_add 只会少记不会多记） | 维持登记 |
+| N4 | P2（维持） | keeper.py:94-96/:116-121 | poll_once 只捕 `(NodeError, TxError)`，requests 层异常裸抛终止主循环 | 实读 keeper.py:92-132 + 主循环 :165-173（仅捕 KeyboardInterrupt） | 维持登记（单轮崩溃 = 人工重启，无资金风险） |
+| N5 | P2（维持） | alice.py:33/:40-41、bob.py:25/:32-33 | CLI 无 sender 选择，node 写通道默认 anvil#0（DEFAULT_SENDER rpc.py:70、:437）与角色门不匹配 | 本轮 grep 实证：`node.fund/notarize/complete/submit_deliverable` 六处调用零 `sender=`；链上 Buyer/Seller 门 fail-closed 拒（tx 落地但 Err 被吞；alice.py:34 读回仍见旧态可见） | 维持登记 |
+| N6 | P2（维持） | keeper.py:115-131 | 重复 claim 竞态下 action 归因失真 | 实读 keeper.py:115-131：读回 Refunded 即记 `action=claimed` + 本笔 tx hash；他方先落时本笔 Err 被吞仍 0x1 → 归因失真；终态守卫使双付款不可达（core.rs:30-31） | 维持登记 |
+| **R2-N1** | **P2（本轮新登记）** | keeper.py:19-20 | 文档措辞失准：docstring 称 `_send`「already asserts status=='0x1'」——实为 `if + raise TxError`（rpc.py:483-484），非 Python assert；行为描述正确（非 0x1 必报错）但术语失真，且 if-raise 在 `python -O` 下仍生效、比 assert 更强 | 本轮新眼扫描实读 keeper.py:17-20 × rpc.py:464-485 对照；P2-6 重证（NodeClient 段 grep assert = 空）佐证 | 登记不修（doc 文案面，沿 P2-2 同类惯例） |
 
-**P1 择优池结论**：P1-R1/R2/R3（R5 残留）经本轮安全视角重评**均不升级**（§6），亦无新增达三准入的 P1——零改动即择优结果（改动面最小=0）。
+**P0 = 0**：六焦点（§3）全部重开，未发现可达资金/越权/fail-closed 失效类缺陷。
 
-## 4. 修复 diff 摘要
+## 3. 六焦点核对表（本轮新证据）
 
-**无修复实施——零 diff。** 证据链：
+### 3.1 焦点① 访问控制与攻击面
 
-1. `git diff -- lyquid/src scripts agents` 在开工前即存为 0 字节 patch（`workflow-out/_pre-task-snapshot-r6.patch`，#A3），收尾时 `git diff --stat` 仍为空；
-2. 13 份开工前原件 cp 留档 `workflow-out/_r6-orig-*`（回退通道未动用）；
-3. G3 sim 输出与冻结基线 `diff -u` 零差异（逐字保持的强验证）；
-4. 只读件 md5 前后一致：`scripts/dashboard.html` = `a2206ffcca6cbe2fddb632071bf76709`（开工前实取 = 收尾实取）。
+**矩阵 12 行逐行实读**（声明 lib.rs:212-225 / 执行 require :230-246）：
 
-## 5. 门禁复跑实录（G1–G5）
-
-| # | 门禁 | 命令（实跑） | 结果 |
+| 方法 | 声明（实读行） | 执行点（实读行） | 判定 |
 |---|---|---|---|
-| G1 | 语法 | `python -m py_compile agents/common/rpc.py agents/common/protocol.py agents/common/llm.py agents/alice.py agents/broker.py agents/bob.py scripts/demo.py scripts/keeper.py` | `PY_COMPILE-ALL-OK`，rc=0（零改动 py，按方案对全部在范围文件复跑留记录） |
-| G2 | 自检 | `python scripts/demo.py --selftest` | rc=0，`SELFTEST OK`（尾 3 项 PASS：deterministic/order-divergent、官方 FNV 向量 ×2） |
-| G3 | sim 基线 | `python scripts/demo.py --sim --flow all` → `diff -u workflow-out/_r2-t0-sim-baseline-raw.txt <输出>` | rc=0，`BASELINE-DIFF-IDENTICAL`（零差异） |
-| G4 | Rust 编译（只读） | `MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown` | rc=0，`Finished dev profile … 0.17s`，**33 条 warning**（与规划期 §1-5 同量级；零源码改动故未 touch、未重编） |
-| G5 | 模型检查壳 | 仓库外 `workflow-out/verify_core`：`cargo test --lib --tests` | **40/40**：lib 33（core 23+committee 4+assessor 6）+ escrow_lifecycle 5 + modelcheck_refund 2，0 failed（types/core 零语义改动，按 §5-G5「未改也建议复跑一次留记录」执行） |
+| faucet | :213 Anyone | :281-291 无 require | ✓ |
+| create_deal | :214 Broker | :308 | ✓ |
+| fund | :215 Buyer | :361 | ✓ |
+| notarize | :216 Anyone+自署名 | :406-409 `from != caller → Err` | ✓ |
+| submit_deliverable | :217 Seller | :423 | ✓ |
+| complete | :218 Buyer | :437 | ✓ |
+| claim_timeout | :219 Anyone permissionless | 无 require；core 重推导（:459 → core.rs:170-178） | ✓ |
+| cancel | :220 Buyer | :472 | ✓（任务书未列 cancel，语义核对 = Buyer 与 fund/complete 同侧） |
+| open_dispute | :221 BuyerOrSeller | :493 | ✓ |
+| apply_committee_verdict | :222 Committee+caller∈signers | :530 + :531-533 | ✓ |
+| committee_config | :223 Broker | :547 + R5 阈值门 :554 | ✓ |
+| getters ×4 | :224 Anyone 只读 | :566/:583/:594/:605 无资金效应 | ✓ |
 
-## 6. 与 R5 台账的差异说明（15 项逐条）
+require 的 Committee 臂（:243）查 `state.committee_members`，未配置 = 空集即拒
+（fail-closed 实读确认）。
 
-R5 台账原文 = `workflow-out/_plan-prev-r6-backup.md` §2.2/§5。逐项按**当前代码**实查后的处置：
+**完备性反向扫描（本轮增量）**：`grep -n "pub fn" lyquid/src/lib.rs` = 16 个；
+其中 15 个 network 方法（faucet…due_deals，行号 :281/:296/:357/:398/:419/:433/
+:454/:468/:487/:520/:545/:566/:583/:594/:605）全部被矩阵 12 行覆盖（getters 4 个
+合一行）；`assess_brief`（:640）为 `#[method::instance]` 不属 network 矩阵口径
+（:611-613 分节注释 + 方法属性实读）。**无方法漏登记矩阵行**。
+certified 回调面不入矩阵口径：committee_certified.rs 模块头 E2 门禁台账（:28-48）
+明示 origin=ZERO（:331 `origin: Address::ZERO` 实读）使地址门必 fail-closed，
+与 lib.rs:193-194 注记互证一致。
 
-| ID | R6 处置 | 理由（本轮证据） |
+**滥用路径 5 类重判定**（本轮实读）：
+1. **签名/证书重放与跨单复用**：不可达。路线① into_domain（committee.rs:44-56）
+   从当前全量证据折叠根，validate_cert 四查（core.rs:235-253：成员 :237-240 /
+   去重 :241-243 / 阈值 :245-247 / 根匹配 :249-251）；路线② signers =
+   `ctx.cert.signers` 逐节点映射（committee_certified.rs:356-380，映射失败剔除
+   :373-379）。
+2. **阈值绕过**：不可达。成员域唯一写点 committee_config=Broker（:547）+ 阈值
+   0 拒（:554）；e2 域唯一写点 e2_configure=creator（committee_certified.rs:112）
+   + 阈值 0 拒（:119-123）。
+3. **重复结算**：不可达。终态封死（types.rs:51-53 + require_states core.rs:29-37）；
+   apply_verdict 仅 Disputed（core.rs:199）、claim_timeout 仅 Funded+过 deadline
+   （core.rs:170-178）、complete 仅 Submitted（core.rs:139）；720 排序模型检查
+   本轮 G5 重跑 40/40 为新鲜背书。
+4. **伪造署名**：不可达（洞内）。notarize 自署名（:406-409）使 check_evidence_shape
+   的 `e.from == deal.seller`（committee.rs:69-71）成为可信归属；「digest 即身份、
+   无签名」为已文档化 demo 信任洞（committee.rs:53 注记实读），洞内不判新缺陷。
+5. **未注资取款**：不可达。claim_timeout 仅 Funded（core.rs:171）；cancel 无证据
+   才可 + Qualified=全零 payout（core.rs:84-88，F2 钉死 :524-544）；apply_payout
+   全零 no-op（lib.rs:726-736 四个 `>0` 门实读）；faucet 无上限 + BROKER=anvil#0
+   （lib.rs:208）为已文档化信任洞（:277-279 TODO(W2) 实读）。
+
+**advisory 时钟增量检查**：`grep due_deals|dueDeals` 三面实跑——demo.py:381 仅
+sim 分支（node 路径 :357-361 用 discover_deals+deal_info）；keeper.py **零命中**
+（走 discover_deals :161）；dashboard.html 只读显示（:660/:1087）+ 文档注记
+（:209/:599）。timeout.rs:55 watcher_step 的 due 列表进 claim_timeout 由守卫重
+推导（core.rs:171-175）。**无新增把 advisory 当权威的调用方**。
+
+### 3.2 焦点② 经济不变量
+
+可达转移全集守恒重证（全部实读）：
+- `fund` lib.rs:357-392：余额预检 :371-374 → core::fund :375 → debit :378（顺序
+  契约注记 :366-370；重复 fund 被 require_states 拒 core.rs:62）。
+- `complete` lib.rs:433-448：BuyerConsent → `Payout::settle`（types.rs:165-172，
+  fee = saturating_mul/10_000 + min-clamp，to_seller = amount-fee 恒不 underflow）；
+  Committee 分支（core.rs:142-150）Fulfilled→settle、NotFulfilled/Malicious→
+  full_refund；fee_bps 上限 core::create :54-56（InvalidFeeBps）。
+- `claim_timeout` core.rs:170-178：仅 Funded + `now >= deadline`（:171-175）→
+  full_refund。
+- `cancel` core.rs:82-92：funded_slot 分流——Funded 全额退（:85）/ Qualified 全零
+  （:87）。
+- `apply_verdict` core.rs:191-218：三裁决映射 + Malicious misconduct+1（:205-208）
+  + Malicious 不罚没（full_refund :207）。
+- 记账单点：credit（lib.rs:693-703，checked_add :700；5 调用点 :288/:727/:730/
+  :733/:736 全带 `?`）+ debit 预检（:684-691）。
+- fee/溢出边界：`Deal::split`（types.rs:140-143）与 settle 同式；饱和角由
+  `fee_rounding_edges_conservation`（core.rs:476-496）/`split_never_underflows`
+  （:499-519，含 u128::MAX × u16::MAX 饱和角）/`verdict_fulfilled_full_fee_still_settled`
+  （:593-615）钉死——本轮 G5 重跑 40/40 全含。
+- N3 / P2-11 重验：见 §2 两行。
+
+### 3.3 焦点③ R5 修复正确性复核（逐项「未引入新问题」）
+
+| 项 | 本轮证据 | 结论 |
 |---|---|---|
-| P1-R1（rpc.py:441–450 裸抛） | **维持登记** | R5 理由（控制改动面）仍成立；R6 安全重评：无资金风险——claim permissionless+幂等、失败可见、keeper 重启即恢复（N4 已登记 keeper 落点）。无钉死测试护航，不达 P1 准入第三条 |
-| P1-R2（broker.py:31、llm.py:62 畸形 LLM 响应） | **维持登记** | 仅真实后端路径（默认 ScriptedLLM/HeuristicModel 回放）；R6 复核 assess_brief 链侧面有 parse_report 先行把错（assessor.rs:184–198），暴露面进一步收窄至 agent CLI 的 live 模式 |
-| P1-R3（timeout.rs:61 `.ok?` 整轮中断） | **维持登记** | §3.4 预判成立：DoS 型延迟非资金错误；watcher 无许可且幂等、keeper 每轮重试自愈；T1 复核守卫面不依赖 watcher 及时性（claim_timeout 任何方可提交）；修复须重编 wasm，收益近零（watcher_step 当前无驱动方，keeper 为已定稿主路径） |
-| P2-1（死 import） | **维持登记 + 残量实查** | R5 已顺带修 demo.py SLOT_MS（现 :59–65 实查无）；本轮残量 = rpc.py:56 `field` + alice.py:16 Acceptance/Deliverable（grep 实证） |
-| P2-2（行号注释漂移） | **维持登记 + 残量实查** | R5 已修 6 处；本轮实查残量 8 处（P2-2残 行，含方案 4 处之外新实查的 rpc.py:648/:809、demo.py:16） |
-| P2-3（shim/常量/slash 死代码） | **维持登记** | committee.rs:78–90 shim（apply_cert_and_payout :766 直读 network 状态，不调 members()——实读复核）；timeout.rs:86 已裁决常量；lib.rs slash 分支现 :735–737（core 无任何 slash>0 构造点——全库实读）；lyquid 面删除须重编 wasm |
-| P2-4（`_ => Malicious` + sim KeyError） | **维持登记（红线内）** | 判级行为红线④；W4 oracle 签名认证处置。rpc.py:919 sim KeyError 仅 demo 侧固定 0/1/2 可达 |
-| P2-5（双规范化） | **维持登记** | 载荷域全 ASCII 实查（§2.4）；dashboard 用户输入无交叉比较点，分叉不可达 |
-| P2-6（FakeNode 非镜像 + assert -O） | **维持登记** | sim=编排冒烟定位不变；N1 是本轮对该类的补充登记（notarize 不存在 deal 收紧面） |
-| P2-7（broker.py:57–59 硬编码成员） | **维持登记** | agent CLI 独立入口；与 rpc.py get_node_ids「禁硬编码」口径相悖仍在案（W4 一并） |
-| P2-8（due 扫描 3× deal_info） | **维持登记** | node-only 效率面，demo.py:358–361 实读确认仍在 |
-| P2-9（wait_for node 形参未用） | **维持登记** | demo.py:147 签名稳定性优先；predicate 闭包捕获 |
-| P2-10（threshold>成员数可配置） | **维持登记** | fail-closed 方向（恒 InsufficientCommittee，core.rs:245–247 实读）；非安全洞，建议 W4 与 EvidenceMismatch 一并 |
-| P2-11（Payout::total 裸加） | **维持登记** | T2 重评：构造面三形均使 total()≤amount 恒成立，且 total() 不在资金决策路径（仅 debug_assert+测试）；types.rs 冻结约束不变 |
-| P2-12（文档行号漂移） | **维持登记（只读件）** | demo-script.md、docs/演示与运行指南.md 未改写；本轮代码零改动故漂移面零新增 |
+| A1 阈值 0 拒 | lib.rs:554 门位实读：require（:547）后、状态清写（:555-559）前；误伤面 grep 实跑：broker.py:57 `threshold=3`、demo.py:73 `THRESHOLD=3`、demo.py:81 `E2_THRESHOLD=4`（传参点 :610/:613）——**无一传 0** | 未引入新问题 |
+| A2 credit checked_add | lib.rs:700 实读；失败 `ok_or_else?` 在写回 :701 前返回 Err 无半写；5 调用点全带 `?` | 未引入新问题 |
+| B1a/B1b 终态断言 | demo.py:322-325（Settled）/:369-373（Refunded）实读：均在 `if node_mode(node):` 分支内；sim 分支零改动——本轮 G3 基线 md5 同值（§1-4）为行为证据 | 未引入新问题 |
+| C1/C2 keeper 入参门 | keeper.py:151-152 `--interval<=0 → p.error`、:155-158 `--deals` 空表 → `p.error` 实读；discover 默认路径 :161 不受影响 | 未引入新问题 |
 
-**映射总结**：15 项 = 15 维持登记、0 升级必修、0 本轮顺带修。本轮新 findings N1–N6 全为 P2（N4 与 P1-R1 同根、N5 与 P2-7 同类、N1 与 P2-6 同类；无 R5 分级冲突）。
+### 3.4 焦点④ 台账 21 项重评
 
-## 7. 伴随产物与工作树终态
+§2 全表即产出：21 项逐条本轮证据 + 全部「维持登记」。升级候选专项重验：
+- N1/N2 升 P0 可达链：**不存在**（:783 早退链 + core.rs:199/:30-31 门，§2 两行）；
+- N3 fail-stuck：双前提缺一不可且影响为滞留非盗取（§2）；
+- P1-R3：生产驱动方 keeper 逐单捕获（keeper.py:115-122），watcher_step 无驱动方；
+- P2-4：红线④内；P2-5/P2-10/P2-11：§2 各行本轮证据。
 
-- #A2 备份：`workflow-out/_implementation-prev-r5-backup.md`（覆写前 cp，md5 双侧一致 `a92ac14061798943f5f3be9d066c8af2`）；
-- #A3 快照：`workflow-out/_pre-task-snapshot-r6.patch`（0 字节 = 开工前代码目录零改动）+ `workflow-out/_r6-orig-*` 13 件；
-- #A4 本轮基线 sim 输出：`workflow-out/_r6-baseline-sim-out.txt`；
-- 只读件核验：`scripts/dashboard.html`、`docs/b3-user-test/`、`workflow-out/report/`、`workflow-out/slides/`、`_submission-plan.md` 零改动（git status 未出现 + dashboard md5 前后一致）；
-- 零 git 写（未 commit/add/push/branch/tag/restore/stash）；devnet 零链写零部署零重启（全部验证只读：selftest/sim/py_compile/容器 cargo check/壳 crate cargo test）；
-- 本文件为 workflow-out/implementation.md 的 R6 覆写（本轮唯一实质写入件）。
+### 3.5 焦点⑤ Python 编码层深审
+
+**编码器支持集**（实读 rpc.py:202-278）：`_enc_value` string :203-205 / string[]
+:206-222（head_size=32×len、偏移相对长度字后，R2 修正注记在位）/ uint* :223-224 /
+bool :225-226 / 集外 ValueError :227；`_is_dynamic` :230-231 仅 string/string[]；
+`_encode_args` :234-244 动态偏移=head_size+len(tail)；`_decode_ret` :247-273
+（string[] tail=base+32 :262）；`_sig_types` :276-278。**无 bytes32/bytes32[]** =
+终裁冻结条款 1 合规（e2_configure 走 cast send：注记 :158-162 + `e2_configure_cast`
+:685-697 实读）。
+
+**_ABI × lib.rs 签名对齐全表**（16 wire 面，逐一比对，零漂移）：
+faucet(string,uint128)=lib.rs:281 U128 边界 :286 ✓；create_deal 8 参 =:296-306 ✓；
+fund(string) :357 ✓；notarize(string×4) :398 ✓；submit_deliverable(string,string)
+:419 ✓；complete(string) :433 ✓；claim_timeout(string)→bool :454 ✓；
+cancel(string) :468 ✓；open_dispute(string,string) :487 ✓；
+apply_committee_verdict(string,uint8,string[]) =:520 扁平 wire ✓；
+committee_config(string[],uint32) :545 ✓；deal_info(string)→string :566 ✓；
+evidence_entries_json(string)→string :583 ✓；balance_of(string)→uint128 :594
+U128 返回 ✓；due_deals(uint64)→string[] :605 ✓；assess_brief(string×4)→string
+:640-646 ✓；e2_arm(string)→bool = committee_certified.rs:161 ✓；
+e2_run_verdict_round()→bool（cast call 通道 rpc.py:699-710）✓；
+e2_net_config()→string :192 ✓。
+
+**错误路径全查**：NodeError :165-178（raw verbatim 不折叠）；TxError :181-182 +
+`_send` :483-484（if+raise，无 assert）；`_rpc` :441-450（P1-R1 面）；`_view`
+:455-462；`_send` 回执 60s 超时 :474-482。`python -O` 面：NodeClient 写路径全
+raise（§2 P2-6 grep 空）。已证对齐面复核不推翻：五视图 + 写面（faucet/notarize/
+create_deal/fund/claim_timeout）本轮同表全过。
+
+**protocol.py × core.rs 逐字节同规**：canonical 串
+`"{seq}|{from}|{to}|{payload_digest}|{slot}\n"`——protocol.py:88 vs core.rs:290
+字段序/分隔符一致；UTF-8（protocol.py:89 `.encode("utf-8")` vs core.rs:291
+`.bytes()`）；空表 = `cbf29ce484222325` 两侧同（protocol.py:45/:86、core.rs:272-274
+注记 + :288 fold）；顺序敏感不重排（两侧无 sort 实读）。G2 selftest 七向量 PASS
+（§1-2）为行为证据。
+
+**调用方交叉**：agents CLI（alice/bob 无 sender = N5；broker 双规范化 = P2-5、
+默认成员 = P2-7）+ keeper 直用 `_send`（keeper.py:116；读回纪律 :123-131；
+:19-20 文案 = 本轮新登记 R2-N1）。dashboard → 焦点⑥。
+
+### 3.6 焦点⑥ dashboard 只读交互面复核
+
+只读件零改动：md5 `a2206ffcca6cbe2fddb632071bf76709`（开工与收尾两次实测同值
+= 上一轮登记值）。
+
+1. **选择器冻结一致**：页内 SEL 表（:601）5 个 + OPS 表/LIVE 预设的
+   b540def8/bd827024/b1fecd5a/73451f65/7ecc9d46/ad932b5c/a48ab911/786cfc8f/
+   15df3c73/8b7acf91/a32974e3 = **合计 16 个 distinct selector** × rpc.py `_ABI`
+   （:104-151）逐一比对：selector 与参数/返回类型**全数一致**（含 R2 修正后的
+   string[] 偏移语义，页内 `encStrArr` :788-792 / `decStringArr` :626-627 与
+   rpc.py :206-222/:253-268 同规实读）。`e2_configure`/`e2_run_verdict_round`
+   **页内零调用**（全文实读 + 组标注 :884 明示 cast 通道指向 demo.py
+   --flow committee）。
+2. **status 0x1 ≠ 方法 Ok 读回纪律**两调用方成立：页内 sendTx 说明（:814-818
+   「已排序≠方法成功，读回见下」实读）+ runOp 每笔强制 opsReadback（:916-917）+
+   LIVE 预设 liveStepTx 按期望终态 liveWaitState（:985-1001；:964-975 超时抛错
+   不静默实读）；agents 侧 keeper `_read_back`（:123-131）+ demo B1a/B1b
+   （:322-325/:369-373）。
+3. **e2_arm 单次纪律**：LIVE 三预设零调用 e2_arm（仅手动按钮 op-arm :888-889
+   带「⚠ 单次」标注实读）；纪律为文档级无硬锁——本轮重证兜底链三层全部实读在位：
+   armed_deal 重写被 propose 的 Disputed 门挡（committee_certified.rs:249-253）+
+   aggregate 不一致拒证 None（:316-320）+ validate_cert 根匹配 fail-closed
+   （core.rs:249-251）；页内 LIVE 对抗预设 committee_config([broker,node-1..3])
+   覆盖实例 NodeID 制配置的 ⚠ 警示（:1134）实读在位。
+
+**结论**：三纪律全部一致，零漂移；无 P0，dashboard 保持只读零改动。
+
+## 4. 已实施修复
+
+**零**。本轮无 P0；P1 择优三项均不满足准入（§2 各行处置列给出本轮理由）；
+P2 全部登记不修。改动面 = workflow-out 产物（本文件 + `_pre-task-snapshot-r6r2.patch`
++ `_r6r2-orig-*` ×13 + `_r6r2-sim-out.txt`），**代码文件零字节改动**。
+
+## 5. 门禁复跑实录（G1–G5，本轮全部重跑留档）
+
+| # | 门禁 | 命令（照方案 §5 照抄执行） | 结果 |
+|---|---|---|---|
+| G1 | 语法 | `python -m py_compile agents/common/rpc.py agents/common/protocol.py agents/common/llm.py agents/alice.py agents/broker.py agents/bob.py scripts/demo.py scripts/keeper.py`（零改动 → 全 8 件复跑留记录） | **PASS**，`PY_COMPILE-ALL-OK`，rc=0 |
+| G2 | 自检 | `python scripts/demo.py --selftest` | **PASS**，rc=0，`SELFTEST OK`（尾 3 项 PASS 实见） |
+| G3 | sim 基线 | `python scripts/demo.py --sim --flow all`（输出另存 `workflow-out/_r6r2-sim-out.txt`）→ `diff -u workflow-out/_r2-t0-sim-baseline-raw.txt workflow-out/_r6r2-sim-out.txt` | **PASS**，diff_rc=0 零差异；两侧 md5 同 `a7cd1bdcd09fb44bff2002cb49e8694c` |
+| G4 | Rust 编译（只读） | `MSYS_NO_PATHCONV=1 docker exec -w /tmp/tb-lyquid multi-tools cargo check --target wasm32-unknown-unknown`（零源码改动故未 touch） | **未跑（如实登记）**：`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine … daemon 不在运行`（编码期重试实录）；零改动前提下缺席不掩盖行为面（7514c71 曾实证容器副本 md5 = 仓库 lib.rs） |
+| G5 | 模型检查壳 | 父级 `workflow-out/verify_core`：`cargo test --lib --tests` | **PASS**，40/40（33 lib + 5 escrow_lifecycle + 2 modelcheck_refund，0 failed，rc=0）；挂载面 = 仓库当前态（`#[path]` 绝对路径 grep 实证，测试数 23+4+6+5+2=40） |
+
+**快照比对（T7 收尾）**：13/13 `_r6r2-orig-*` 与工作区文件 `cmp -s` 逐字节一致
+（`SNAPSHOT-IDENTICAL`）；`git status --short lyquid scripts agents` 空；
+`git diff --stat -- lyquid/src scripts agents` 空；`scripts/dashboard.html`
+收尾 md5 `a2206ffcca6cbe2fddb632071bf76709` = 开工值；`docs/b3-user-test/` 三件
+与 `_submission-plan.md` 未触（只读）。
+
+## 6. 与上一轮 R6（N1–N6）/ R5 台账（15 项）差异说明
+
+| 来源 | 项 | 上一轮处置 | 本轮处置 | 差异 |
+|---|---|---|---|---|
+| R5 | P1-R1/R2/R3 | 登记不修 | 登记不修（逐项给出**本轮**不取准入理由，§2 处置列） | 无分级变化；P1-R3 增补「生产驱动方 = keeper 逐单捕获」新证据 |
+| R5 | P2-1..P2-11（11 项代码面） | 登记不修 | 全部维持登记；P2-2 本轮把 demo.py:16 精确到 :15 并补全 8 处实读对照；P2-11 补 grep 消费面全表；P2-3 补零调用 grep | 无升级无降级 |
+| R5 | P2-12 | 只读件只登记 | 同 | 无 |
+| R6 | N1 | P2 登记 | **维持 P2**（新增裁决门不可绕实证：lib.rs:783 早退链） | 无 |
+| R6 | N2 | P2 登记 | **维持 P2**（新增 Disputed 窗口 fail-closed + 活性可恢复论证） | 无 |
+| R6 | N3 | P2 登记 | **维持 P2**（双前提逐条重证） | 无 |
+| R6 | N4 | P2 登记 | 维持 P2 | 无 |
+| R6 | N5 | P2 登记 | 维持 P2（本轮 grep 六处调用点为新增证据） | 无 |
+| R6 | N6 | P2 登记 | 维持 P2 | 无 |
+| R6-R2 | **R2-N1** | — | **本轮新登记 P2**（keeper.py:19-20 文档措辞「asserts」vs 实为 if+raise） | 台账 21 → 22 项 |
+
+**台账总量**：R5 15 项 + 上一轮 R6 6 项 = 21 项全部维持；本轮新登记 1 项
+（R2-N1）；升级 0；顺带修 0；代码改动 0。
+
+## 7. 逐文件改动摘要
+
+| 路径 | 改动 |
+|---|---|
+| `workflow-out/implementation.md` | 覆写为本文件（R6-R2 实现说明；覆写前 #A2 md5 复核一致） |
+| `workflow-out/_pre-task-snapshot-r6r2.patch` | 新增（0 字节，开工时工作树实证） |
+| `workflow-out/_r6r2-orig-*` ×13 | 新增（原件拷贝，回退通道，未动用） |
+| `workflow-out/_r6r2-sim-out.txt` | 新增（本轮 G3 sim 输出，md5 = 冻结基线） |
+| 其余全部（lyquid/src ×7、agents ×7、scripts/{demo,keeper}.py、dashboard.html、docs、_submission-plan.md） | **零改动**（§5 快照比对实录） |
+
+零 git 写（未 commit/add/push/branch/tag/restore/stash）；devnet 零链写零部署
+零重启（全部验证 = selftest / sim / py_compile / verify_core 只读面 + 一次失败
+的 docker exec 探测，无任何链上效果）。
